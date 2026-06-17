@@ -30,7 +30,15 @@ class Settings(BaseSettings):
     telegram_fetch_limit: int = Field(50, alias="TELEGRAM_FETCH_LIMIT")
     # Telegram — bot you talk to (Bot API)
     telegram_bot_token: str = Field("", alias="TELEGRAM_BOT_TOKEN")
+    # Destination/owner chat. TELEGRAM_CHAT_ID is where the bot DMs you the digest;
+    # for a personal bot it equals your own user id. Kept as the canonical owner gate.
+    telegram_chat_id: int | None = Field(None, alias="TELEGRAM_CHAT_ID")
     telegram_owner_id: int | None = Field(None, alias="TELEGRAM_OWNER_ID")
+
+    @property
+    def telegram_destination(self) -> int | None:
+        """Where to send messages / whom to trust — chat_id wins, owner_id fallback."""
+        return self.telegram_chat_id or self.telegram_owner_id
 
     # ATS boards to watch — comma-separated company slugs per platform.
     # e.g. GREENHOUSE_SLUGS=stripe,airbnb  LEVER_SLUGS=netflix  ASHBY_SLUGS=ramp

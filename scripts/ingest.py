@@ -17,19 +17,31 @@ from jobagent.ingestion.adapters.remotive import RemotiveAdapter  # noqa: E402
 from jobagent.ingestion.adapters.telegram import TelegramAdapter  # noqa: E402
 from jobagent.ingestion.runner import run_ingestion  # noqa: E402
 from jobagent.ingestion.util import split_slugs  # noqa: E402
+from jobagent.preferences import load_preferences  # noqa: E402
 from jobagent.store import Store  # noqa: E402
 
 
+def _merge(*lists) -> list[str]:
+    """Union, order-preserving, de-duplicated."""
+    seen, out = set(), []
+    for lst in lists:
+        for s in lst:
+            if s and s not in seen:
+                seen.add(s)
+                out.append(s)
+    return out
+
+
 def build_adapters(settings):
-    # Free sources run always; ATS adapters stay dormant until slugs are configured
-    # (their `enabled` property gates them in the runner).
-    # Still to come this phase: telegram, aggregator, scrape fallback.
+    # Company watchlist comes from config/preferences.toml; env vars supplement it.
+    # Free sources run always; ATS adapters gate on having slugs via `enabled`.
+    wl = load_preferences().watchlist
     return [
         RemoteOKAdapter(),
         RemotiveAdapter(),
-        GreenhouseAdapter(split_slugs(settings.greenhouse_slugs)),
-        LeverAdapter(split_slugs(settings.lever_slugs)),
-        AshbyAdapter(split_slugs(settings.ashby_slugs)),
+        GreenhouseAdapter(_merge(wl.greenhouse, split_slugs(settings.greenhouse_slugs))),
+        LeverAdapter(_merge(wl.lever, split_slugs(settings.lever_slugs))),
+        AshbyAdapter(_merge(wl.ashby, split_slugs(settings.ashby_slugs))),
         TelegramAdapter(
             settings.telegram_api_id,
             settings.telegram_api_hash,

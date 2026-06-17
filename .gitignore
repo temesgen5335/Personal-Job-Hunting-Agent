@@ -25,6 +25,8 @@ data/
 
 # Generated application assets (CV variants, cover letters)
 artifacts/
+cv_master.md
+
 
 # OS / editor
 .DS_Store

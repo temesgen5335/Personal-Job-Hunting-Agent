@@ -80,6 +80,15 @@ class Store:
         ).fetchone()
         return row is None
 
+    def get_jobs(self, limit: int | None = None) -> list[dict]:
+        q = "SELECT * FROM jobs ORDER BY last_seen_at DESC"
+        if limit:
+            q += f" LIMIT {int(limit)}"
+        return [dict(r) for r in self.conn.execute(q).fetchall()]
+
+    def count_jobs(self) -> int:
+        return self.conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
+
     # --- matches ----------------------------------------------------------
     def upsert_match(self, match: Match) -> None:
         self.conn.execute(

@@ -1,0 +1,85 @@
+# Job-search profile + company watchlist.
+# Phase 2 matching reads [profile]; ingestion reads [watchlist].
+# Hand-edit freely — this is version-controlled reference data, not secrets.
+
+[profile]
+name = "Temesgen Gebreabzgi"
+headline = "AI Engineer & Full-Stack Developer (3+ yrs) — agentic systems, RAG, production AI"
+cv_path = "docs/Temesgen_Gebreabzgi_CV.pdf"
+
+# What to surface. Matching scores roles against these.
+target_roles = [
+    "Software Engineer",
+    "Frontend Engineer",
+    "Full-Stack Engineer",
+    "AI Engineer",
+    "AI / ML Engineer",
+    "Applied AI Engineer",
+    "Agent / Agentic Systems Engineer",
+    "Automation Engineer",
+    "Forward-Deployed Engineer",
+]
+seniority = "mid-to-senior"   # 3+ yrs; open to senior IC and founding-eng roles
+work_mode = "remote"          # remote-first; global/async preferred
+location = "Ethiopia (Addis Ababa)"
+timezone = "EAT / UTC+3"
+
+# Strengths the matcher should weight as positive signal.
+core_skills = [
+    "Python", "TypeScript", "JavaScript", "Go",
+    "FastAPI", "Django", "Flask", "Next.js", "React", "Svelte", "Astro",
+    "LangChain", "LangGraph", "LlamaIndex", "RAG", "LLM fine-tuning",
+    "agentic systems", "multi-agent orchestration", "MCP", "prompt engineering",
+    "OpenAI API", "Hugging Face", "PyTorch", "TensorFlow",
+    "PostgreSQL", "MongoDB", "Weaviate", "vector databases",
+    "Docker", "CI/CD", "Airflow", "Kafka", "AWS", "GCP", "Azure",
+    "shadcn/ui", "design systems",
+]
+
+# Domains that excite the candidate (boost in scoring).
+domains = [
+    "agentic AI", "developer tools", "AI infrastructure", "RAG / search",
+    "fintech", "NLP / voice AI", "automation", "data engineering",
+]
+
+# Hard filters / strong preferences.
+must_haves = ["remote"]
+nice_to_haves = [
+    "agentic / LLM product focus",
+    "async-friendly / global team",
+    "AI-native company",
+    "founding or early engineering role",
+]
+
+# Down-rank or drop postings matching these.
+exclude_keywords = [
+    "on-site only", "onsite required", "no remote",
+    "unpaid", "internship", "clearance required", "US citizens only",
+]
+
+# Free-text positive keywords for the embedding/keyword prefilter.
+keywords = [
+    "AI engineer", "agent", "agentic", "LLM", "RAG", "full-stack",
+    "frontend", "Next.js", "React", "Python", "FastAPI", "automation",
+    "machine learning", "applied AI", "forward deployed",
+]
+
+[profile.links]
+portfolio = "https://temesgendev.vercel.app"
+github = "https://github.com/temesgen5335"
+linkedin = "https://linkedin.com/in/temesgen-gebreabzgi"
+
+# Verified live (2026-06-18) — every slug below resolved to real open postings.
+# Adapters silently skip any slug that stops resolving, so pruning is safe.
+[watchlist]
+greenhouse = [
+    "anthropic", "stripe", "gitlab", "databricks", "mongodb", "elastic",
+    "coinbase", "cloudflare", "airbnb", "reddit", "figma", "scaleai",
+    "robinhood", "brex", "instacart", "dropbox", "twilio", "asana",
+    "samsara", "affirm", "lyft", "pinterest", "webflow", "discord",
+]
+lever = ["palantir", "spotify", "matchgroup"]
+ashby = [
+    "openai", "cursor", "linear", "notion", "ramp", "vanta", "modal",
+    "baseten", "replit", "posthog", "mintlify", "runway", "browserbase",
+]
