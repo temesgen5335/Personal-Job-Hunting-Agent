@@ -26,7 +26,9 @@ domain logic** Hermes drives — not a from-scratch agent loop.
 | Dashboard | ⏳ Phase 5 |
 
 See [docs/PLAN.md](docs/PLAN.md) for the full build plan and
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design.
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design. Deploying:
+[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) (VPS, primary) and
+[docs/DEPLOYMENT_ALTERNATIVES.md](docs/DEPLOYMENT_ALTERNATIVES.md) (free/PaaS options compared).
 
 ## Quickstart (local)
 

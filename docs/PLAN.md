@@ -34,12 +34,21 @@ Decisions locked in:
 - [ ] Wire fetch loop to Hermes cron
 - **Exit:** scheduled pulls populate the store from all live sources; deduped; idempotent.
 
-## Phase 2 — Matching + Telegram digest *(first payoff)*
-- [ ] Ingest CV + preferences into a structured profile (+ Hermes memory)
-- [ ] `match_score` MCP tool: embedding prefilter + LLM judge → score/rationale/gaps
-- [ ] Telegram bot (Bot API): `/start`, `/preferences`, `/jobs`, `/status`, owner-locked
-- [ ] Daily ranked digest + per-job match cards
-- **Exit:** every morning, a ranked filtered digest arrives in Telegram.
+## Phase 2 — Matching + Telegram digest *(first payoff)* ✅
+- [x] CV + preferences → structured profile (config/preferences.toml + cv_master.md)
+- [x] Matching: heuristic scorer (always) + optional OpenRouter LLM reranker;
+      verified live on 7,331 jobs (199 strong ≥70%)
+- [x] Telegram bot (Bot API): `/start` `/help` `/jobs [N]` `/status`, owner-locked
+- [x] Digest push script for Hermes cron (scripts/send_digest.py)
+- **Exit:** ranked digest available via /jobs and pushable to Telegram. ✅
+
+## Deployment — VPS (systemd) ✅ artifacts ready
+- [x] Unified pipeline (ingest→match→digest) + shared adapter registry
+- [x] systemd units: bot service, ingest timer (4h), pipeline/digest timer (daily)
+- [x] install_services.sh (path substitution) + vps_setup.sh bootstrap
+- [x] docs/DEPLOYMENT.md runbook; verified locally (pipeline run + unit render)
+- [ ] Run on an actual VPS (needs a provisioned box) — follow docs/DEPLOYMENT.md
+- Note: Hermes Agent installed separately as the Phase 3 agentic brain.
 
 ## Phase 3 — Application assets (Tier 1)
 - [ ] `cv_tailor` MCP tool (reframes real experience only — R1)

@@ -89,6 +89,28 @@ class Store:
     def count_jobs(self) -> int:
         return self.conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
 
+    def stats(self) -> dict:
+        by_source = {
+            r["source"]: r["n"]
+            for r in self.conn.execute(
+                "SELECT source, COUNT(*) AS n FROM jobs GROUP BY source ORDER BY n DESC"
+            )
+        }
+        matches = self.conn.execute("SELECT COUNT(*) AS n FROM matches").fetchone()["n"]
+        strong = self.conn.execute(
+            "SELECT COUNT(*) AS n FROM matches WHERE score >= 0.7"
+        ).fetchone()["n"]
+        last_ingest = self.conn.execute(
+            "SELECT created_at FROM events WHERE kind='ingest' ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        return {
+            "total_jobs": self.count_jobs(),
+            "by_source": by_source,
+            "matches": matches,
+            "strong_matches": strong,
+            "last_ingest": last_ingest["created_at"] if last_ingest else None,
+        }
+
     # --- matches ----------------------------------------------------------
     def upsert_match(self, match: Match) -> None:
         self.conn.execute(

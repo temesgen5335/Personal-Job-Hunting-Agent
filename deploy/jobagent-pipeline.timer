@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily job digest (runs jobagent-pipeline.service)
+
+[Timer]
+# 07:00 server-local time. Set the server TZ first so this means your timezone:
+#   sudo timedatectl set-timezone Africa/Addis_Ababa
+OnCalendar=*-*-* 07:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

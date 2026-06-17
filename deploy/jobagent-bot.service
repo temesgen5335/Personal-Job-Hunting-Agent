@@ -1,0 +1,15 @@
+[Unit]
+Description=Personal Job Agent — Telegram bot (long-running)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=__USER__
+WorkingDirectory=__REPO__
+ExecStart=__PYTHON__ scripts/run_bot.py
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

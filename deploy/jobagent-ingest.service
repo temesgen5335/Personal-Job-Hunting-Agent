@@ -1,0 +1,10 @@
+[Unit]
+Description=Personal Job Agent — ingest + match only (no digest push)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=__USER__
+WorkingDirectory=__REPO__
+ExecStart=__PYTHON__ scripts/pipeline.py --no-send

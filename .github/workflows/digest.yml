@@ -1,0 +1,48 @@
+# Free, zero-infra daily job digest on GitHub Actions.
+# Runs the API-source pipeline (RemoteOK, Remotive, Greenhouse, Lever, Ashby) +
+# matching, then pushes the digest to Telegram via the Bot API.
+#
+# Does NOT do Telegram CHANNEL scraping (Telethon needs a stable IP + persistent
+# session — not viable on ephemeral CI runners) and does NOT host the interactive
+# bot. For those, use the VPS deployment (docs/DEPLOYMENT.md).
+#
+# Setup: repo → Settings → Secrets and variables → Actions → add:
+#   OPENROUTER_API_KEY, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+# This workflow only runs on the default branch. Note GitHub disables scheduled
+# workflows after 60 days of repo inactivity, and cron is UTC.
+
+name: Job digest
+
+on:
+  schedule:
+    - cron: "0 4 * * *"      # 04:00 UTC = 07:00 EAT
+  workflow_dispatch: {}        # lets you trigger it manually from the Actions tab
+
+jobs:
+  digest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Persist the SQLite store between runs so "new since last run" works.
+      # Unique key always saves; restore-keys pulls the most recent prior cache.
+      - name: Restore job store
+        uses: actions/cache@v4
+        with:
+          path: data
+          key: jobagent-db-${{ github.run_id }}
+          restore-keys: jobagent-db-
+
+      - name: Install
+        run: pip install -e ".[llm]"
+
+      - name: Ingest + match + send digest
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python scripts/pipeline.py --top 10
