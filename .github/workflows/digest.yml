@@ -6,8 +6,9 @@
 # session — not viable on ephemeral CI runners) and does NOT host the interactive
 # bot. For those, use the VPS deployment (docs/DEPLOYMENT.md).
 #
-# Setup: repo → Settings → Secrets and variables → Actions → add:
-#   OPENROUTER_API_KEY, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+# Setup: repo → Settings → Secrets and variables → Actions → add at least one LLM key
+# plus the bot creds:
+#   GROQ_API_KEY and/or OPENROUTER_API_KEY / GEMINI_API_KEY, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
 # This workflow only runs on the default branch. Note GitHub disables scheduled
 # workflows after 60 days of repo inactivity, and cron is UTC.
 
@@ -42,7 +43,10 @@ jobs:
 
       - name: Ingest + match + send digest
         env:
+          LLM_PROVIDER: ${{ vars.LLM_PROVIDER || 'groq' }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python scripts/pipeline.py --top 10

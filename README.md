@@ -10,20 +10,18 @@ Orchestrated by [Hermes Agent](https://github.com/NousResearch/hermes-agent) (th
 brain: scheduler, memory, LLM routing, MCP tools). This repo is the **tools and
 domain logic** Hermes drives — not a from-scratch agent loop.
 
-## Status: Phase 0 (foundations)
+## Status: Phases 0–3 complete (50 tests passing)
 
 | Layer | State |
 |---|---|
-| Core schemas (`JobPosting`, `Match`, `Application`, `CVVariant`, `Event`) | ✅ |
-| SQLite store + schema | ✅ |
-| Config (pydantic-settings) | ✅ |
-| Ingestion base adapter | ✅ |
-| Smoke tests | ✅ |
-| Ingestion adapters | ⏳ Phase 1 |
-| Matching + Telegram digest | ⏳ Phase 2 |
-| Application assets (Tier 1) | ⏳ Phase 3 |
-| HITL form-fill (Tier 2) | ⏳ Phase 4 |
-| Dashboard | ⏳ Phase 5 |
+| Phase 0 — schemas · SQLite store · config | ✅ |
+| Phase 1 — 6 ingestion adapters (RemoteOK, Remotive, Greenhouse, Lever, Ashby, Telegram) + runner | ✅ |
+| Phase 2 — matching engine (heuristic + LLM rerank) + Telegram bot digest | ✅ |
+| Phase 3 — Tier-1 apply (CV tailor, cover letter, email) + `/apply` HITL button | ✅ |
+| Multi-provider LLM with failover (Groq/OpenRouter/Gemini/OpenAI/Anthropic) | ✅ |
+| Deployment — VPS systemd + GitHub Actions | ✅ artifacts ready |
+| Phase 4 — Tier-2 HITL ATS form-fill (Playwright) | ⏳ next |
+| Phase 5 — tracking dashboard | ⏳ |
 
 See [docs/PLAN.md](docs/PLAN.md) for the full build plan and
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design. Deploying:

@@ -53,7 +53,8 @@ anti-bot. We treat them as a single **aggregator adapter**, not four scrapers.
 
 ## Data flow
 1. Hermes cron fires ingestion adapters → normalized into `JobPosting` → deduped → store.
-2. `match_score` MCP tool scores new jobs vs. your profile (embeddings prefilter + LLM judge).
+2. Matching scores new jobs vs. your profile: a word-boundary **heuristic prefilter**
+   (always, no API) then an optional **LLM rerank** of the top candidates.
 3. High matches pushed to the Telegram bot as cards (score + rationale + gaps).
 4. You tap an action → `cv_tailor` / `cover_letter` / `email_draft` produce assets.
 5. **HITL gate**: you approve → `apply_executor` sends email (Tier 1) or fills the ATS
@@ -63,4 +64,5 @@ anti-bot. We treat them as a single **aggregator adapter**, not four scrapers.
 
 ## Tech stack
 Python 3.11+ · pydantic v2 · SQLite (→ Postgres) · Telethon + python-telegram-bot ·
-FastMCP · Playwright (Tier 2) · OpenRouter for LLM/embeddings · Hermes Agent on a VPS.
+FastMCP · Playwright (Tier 2) · multi-provider LLM with failover
+(Groq/OpenRouter/Gemini/OpenAI/Anthropic) · Hermes Agent on a VPS.

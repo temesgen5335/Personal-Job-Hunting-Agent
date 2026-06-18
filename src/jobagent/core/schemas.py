@@ -87,7 +87,7 @@ class JobPosting(BaseModel):
 
 
 class Match(BaseModel):
-    """LLM/embedding assessment of one job against the user's profile."""
+    """Heuristic/LLM assessment of one job against the user's profile."""
 
     model_config = ConfigDict(use_enum_values=True)
 
