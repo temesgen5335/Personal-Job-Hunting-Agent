@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -137,6 +138,53 @@ class Store:
             (min_score, limit),
         ).fetchall()
         return [dict(r) for r in rows]
+
+    def get_job(self, job_id: str) -> dict | None:
+        row = self.conn.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
+        return dict(row) if row else None
+
+    # --- applications + cv variants --------------------------------------
+    def insert_cv_variant(self, cv) -> str:
+        cv_id = cv.id or uuid.uuid4().hex[:16]
+        self.conn.execute(
+            "INSERT INTO cv_variants (id, job_id, base_cv_id, content_markdown, notes, created_at) "
+            "VALUES (?,?,?,?,?,?)",
+            (cv_id, cv.job_id, cv.base_cv_id, cv.content_markdown, cv.notes, _now()),
+        )
+        self.conn.commit()
+        return cv_id
+
+    def create_application(self, app) -> str:
+        app_id = app.id or uuid.uuid4().hex[:16]
+        now = _now()
+        self.conn.execute(
+            "INSERT INTO applications (id, job_id, status, cv_variant_id, cover_letter, "
+            "email_draft, apply_method, approved_at, submitted_at, created_at, updated_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                app_id, app.job_id, _ev(app.status), app.cv_variant_id, app.cover_letter,
+                app.email_draft, _ev(app.apply_method), None, None, now, now,
+            ),
+        )
+        self.conn.commit()
+        return app_id
+
+    def get_application(self, app_id: str) -> dict | None:
+        row = self.conn.execute("SELECT * FROM applications WHERE id=?", (app_id,)).fetchone()
+        return dict(row) if row else None
+
+    def update_application(self, app_id: str, **fields) -> None:
+        allowed = {"status", "cv_variant_id", "cover_letter", "email_draft",
+                   "apply_method", "approved_at", "submitted_at"}
+        sets = {k: v for k, v in fields.items() if k in allowed}
+        if not sets:
+            return
+        cols = ", ".join(f"{k}=?" for k in sets)
+        self.conn.execute(
+            f"UPDATE applications SET {cols}, updated_at=? WHERE id=?",
+            (*sets.values(), _now(), app_id),
+        )
+        self.conn.commit()
 
     # --- events -----------------------------------------------------------
     def log_event(self, event: Event) -> None:

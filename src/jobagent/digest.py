@@ -6,7 +6,7 @@ from __future__ import annotations
 import json
 
 
-def _diversify(matches: list[dict], limit: int, max_per_company: int) -> list[dict]:
+def diversify(matches: list[dict], limit: int, max_per_company: int = 2) -> list[dict]:
     """Cap how many roles from one company appear, so a single employer with many
     near-identical openings doesn't flood the shortlist."""
     seen: dict[str, int] = {}
@@ -22,10 +22,11 @@ def _diversify(matches: list[dict], limit: int, max_per_company: int) -> list[di
     return out
 
 
-def format_digest(matches: list[dict], limit: int = 10, max_per_company: int = 2) -> str:
+def format_matches(matches: list[dict]) -> str:
+    """Format an already-prepared (diversified, limited) list. Numbering here matches
+    /apply <rank>, so callers must pass the same list they show the user."""
     if not matches:
         return "No matches yet. Run ingestion + matching first."
-    matches = _diversify(matches, limit, max_per_company)
     lines = [f"🎯 Top {len(matches)} job matches\n"]
     for i, m in enumerate(matches, 1):
         pct = int(round(m["score"] * 100))
@@ -44,3 +45,8 @@ def format_digest(matches: list[dict], limit: int = 10, max_per_company: int = 2
         if link:
             lines.append(f"    {link}")
     return "\n".join(lines)
+
+
+def format_digest(matches: list[dict], limit: int = 10, max_per_company: int = 2) -> str:
+    """Convenience: diversify + limit + format in one call."""
+    return format_matches(diversify(matches, limit, max_per_company))
