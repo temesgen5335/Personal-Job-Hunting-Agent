@@ -56,10 +56,13 @@ def main() -> None:
     elif not (settings.telegram_bot_token and settings.telegram_destination):
         print("[digest] skipped (no TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID)")
     else:
-        sent = send_message(
-            settings.telegram_bot_token, settings.telegram_destination, jobs_text(store, args.top)
-        )
-        print(f"[digest] sent in {sent} message(s)")
+        try:
+            sent = send_message(
+                settings.telegram_bot_token, settings.telegram_destination, jobs_text(store, args.top)
+            )
+            print(f"[digest] sent in {sent} message(s)")
+        except Exception as exc:  # noqa: BLE001 — report, don't fail the whole run
+            print(f"[digest] send failed: {exc}")
 
     store.close()
 

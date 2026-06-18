@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -15,6 +15,17 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env", env_file_encoding="utf-8", extra="ignore"
     )
+
+    # CI/CD sets unset secrets to "" (empty string). Treat blank as "not provided"
+    # so optional int fields don't blow up parsing (e.g. TELEGRAM_CHAT_ID="").
+    @field_validator(
+        "telegram_api_id", "telegram_chat_id", "telegram_owner_id", mode="before"
+    )
+    @classmethod
+    def _blank_int_to_none(cls, v):
+        if isinstance(v, str) and v.strip() == "":
+            return None
+        return v
 
     # --- LLM: multi-provider with failover (see jobagent/llm_client.py) ---
     # Primary provider; the rest become automatic backups. Free providers stay as
