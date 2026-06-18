@@ -1,0 +1,31 @@
+---
+import Layout from "../layouts/Layout.astro";
+import { getApplications, storeExists } from "../lib/db";
+
+const apps = storeExists() ? getApplications(200) : [];
+const fmt = (s: string | null) => (s ? new Date(s).toLocaleString() : "—");
+---
+
+<Layout title="Applications">
+  <h1>Applications <span class="muted" style="font-size:14px">({apps.length})</span></h1>
+
+  <div class="panel">
+    <table>
+      <thead><tr><th>Role</th><th>Company</th><th>Method</th><th>Status</th><th>Created</th><th>Submitted</th><th></th></tr></thead>
+      <tbody>
+        {apps.map((a) => (
+          <tr>
+            <td>{a.title}</td>
+            <td>{a.company}</td>
+            <td class="muted">{a.apply_method}</td>
+            <td><span class={`badge ${a.status}`}>{a.status}</span></td>
+            <td class="muted">{fmt(a.created_at)}</td>
+            <td class="muted">{fmt(a.submitted_at)}</td>
+            <td>{(a.apply_url || a.url) && <a href={a.apply_url || a.url} target="_blank">link ↗</a>}</td>
+          </tr>
+        ))}
+        {apps.length === 0 && <tr><td colspan="7" class="muted">No applications yet — use /apply in the bot.</td></tr>}
+      </tbody>
+    </table>
+  </div>
+</Layout>

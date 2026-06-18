@@ -1,0 +1,74 @@
+---
+import Layout from "../layouts/Layout.astro";
+import { getStats, getMatches, storeExists, storePath } from "../lib/db";
+
+const ready = storeExists();
+const stats = ready ? getStats() : null;
+const top = ready ? getMatches({ limit: 10 }) : [];
+const maxSource = stats ? Math.max(1, ...stats.bySource.map((s) => s.n)) : 1;
+const fmt = (s: string | null) => (s ? new Date(s).toLocaleString() : "—");
+---
+
+<Layout title="Overview">
+  <h1>Overview</h1>
+
+  {!ready && (
+    <div class="panel">
+      No store found at <code>{storePath()}</code>. Run <code>python scripts/pipeline.py --no-send</code> first.
+    </div>
+  )}
+
+  {stats && (
+    <>
+      <div class="cards">
+        <div class="card"><div class="n">{stats.totalJobs.toLocaleString()}</div><div class="l">Jobs ingested</div></div>
+        <div class="card"><div class="n">{stats.matches.toLocaleString()}</div><div class="l">Scored matches</div></div>
+        <div class="card"><div class="n">{stats.strong.toLocaleString()}</div><div class="l">Strong (≥70%)</div></div>
+        <div class="card"><div class="n">{stats.totalApps.toLocaleString()}</div><div class="l">Applications</div></div>
+      </div>
+
+      <div class="panel">
+        <strong>Jobs by source</strong>
+        <table>
+          <tbody>
+            {stats.bySource.map((s) => (
+              <tr>
+                <td style="width:120px">{s.source}</td>
+                <td style="width:70px" class="muted">{s.n}</td>
+                <td><div class="bar" style={`width:${(s.n / maxSource) * 100}%`}></div></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <p class="muted" style="margin:12px 0 0">Last ingest: {fmt(stats.lastIngest)}</p>
+      </div>
+
+      <div class="panel">
+        <strong>Application funnel</strong>
+        {stats.apps.length === 0 ? (
+          <p class="muted">No applications yet. Use <code>/apply</code> in the bot.</p>
+        ) : (
+          <p>{stats.apps.map((a) => (<span class={`badge ${a.status}`} style="margin-right:8px">{a.status}: {a.n}</span>))}</p>
+        )}
+      </div>
+
+      <div class="panel">
+        <strong>Top matches</strong> · <a href="/jobs">see all →</a>
+        <table style="margin-top:10px">
+          <thead><tr><th>#</th><th>Score</th><th>Role</th><th>Company</th><th>Location</th></tr></thead>
+          <tbody>
+            {top.map((m, i) => (
+              <tr>
+                <td class="muted">{i + 1}</td>
+                <td class="score">{Math.round(m.score * 100)}%</td>
+                <td>{m.apply_url || m.url ? <a href={m.apply_url || m.url} target="_blank">{m.title}</a> : m.title}</td>
+                <td>{m.company}</td>
+                <td class="muted">{m.location || (m.is_remote ? "Remote" : "—")}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
+  )}
+</Layout>

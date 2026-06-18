@@ -1,0 +1,67 @@
+---
+const { title = "Job Agent" } = Astro.props;
+const path = Astro.url.pathname;
+const nav = [
+  ["/", "Overview"],
+  ["/jobs", "Jobs"],
+  ["/applications", "Applications"],
+];
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title} · Job Agent</title>
+  </head>
+  <body>
+    <header>
+      <strong>🤖 Personal Job Agent</strong>
+      <nav>
+        {nav.map(([href, label]) => (
+          <a href={href} class={path === href ? "active" : ""}>{label}</a>
+        ))}
+      </nav>
+    </header>
+    <main><slot /></main>
+
+    <style is:global>
+      :root {
+        --bg: #0f1115; --panel: #181b22; --border: #262b36; --text: #e6e8ee;
+        --muted: #8a93a6; --accent: #5b9dff; --good: #3fb950; --warn: #d29922;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0; background: var(--bg); color: var(--text);
+        font: 15px/1.5 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      }
+      header {
+        display: flex; align-items: center; gap: 24px; padding: 14px 24px;
+        border-bottom: 1px solid var(--border); background: var(--panel); position: sticky; top: 0;
+      }
+      nav { display: flex; gap: 18px; }
+      nav a { color: var(--muted); text-decoration: none; }
+      nav a.active, nav a:hover { color: var(--text); }
+      main { max-width: 1100px; margin: 0 auto; padding: 24px; }
+      h1 { font-size: 20px; margin: 0 0 16px; }
+      a { color: var(--accent); }
+      table { width: 100%; border-collapse: collapse; font-size: 14px; }
+      th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+      th { color: var(--muted); font-weight: 600; }
+      .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 24px; }
+      .card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; }
+      .card .n { font-size: 26px; font-weight: 700; }
+      .card .l { color: var(--muted); font-size: 13px; }
+      .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 16px; margin-bottom: 24px; }
+      .muted { color: var(--muted); }
+      .score { font-weight: 700; color: var(--accent); }
+      .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; background: #20262f; color: var(--muted); }
+      .badge.submitted { color: var(--good); } .badge.awaiting_approval { color: var(--warn); }
+      form.filters { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+      select, input, button { background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 7px; padding: 7px 10px; font: inherit; }
+      button { background: var(--accent); color: #06101f; border: none; cursor: pointer; font-weight: 600; }
+      .bar { height: 8px; background: var(--accent); border-radius: 4px; }
+    </style>
+  </body>
+</html>
