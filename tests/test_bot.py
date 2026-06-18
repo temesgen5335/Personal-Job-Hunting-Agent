@@ -4,7 +4,15 @@ import httpx
 import pytest
 
 from jobagent.bot.notify import chunk_text, send_message
-from jobagent.bot.service import is_owner, jobs_text, status_text
+from jobagent.bot.service import (
+    apply_callback_data,
+    apply_preview_text,
+    is_owner,
+    jobs_text,
+    parse_callback_data,
+    resolve_ranked_job,
+    status_text,
+)
 from jobagent.core.schemas import JobPosting, Match, Source
 from jobagent.store import Store
 
@@ -65,3 +73,49 @@ def test_send_message_requires_creds():
         send_message("", 123, "hi")
     with pytest.raises(ValueError):
         send_message("tok", None, "hi")
+
+
+def test_callback_data_roundtrip():
+    data = apply_callback_data("approve", "abc123")
+    assert data == "approve:abc123"
+    assert parse_callback_data(data) == ("approve", "abc123")
+    assert parse_callback_data("cancel:xyz") == ("cancel", "xyz")
+
+
+def test_resolve_ranked_job_maps_rank_to_job(tmp_path):
+    store = Store(str(tmp_path / "r.db"))
+    store.init_schema()
+    j1 = store.upsert_job(JobPosting(source=Source.remoteok, title="Top Role", company="A", is_remote=True))
+    j2 = store.upsert_job(JobPosting(source=Source.remoteok, title="Second", company="B", is_remote=True))
+    store.upsert_match(Match(job_id=j1, score=0.95))
+    store.upsert_match(Match(job_id=j2, score=0.80))
+    assert resolve_ranked_job(store, 1)["title"] == "Top Role"
+    assert resolve_ranked_job(store, 2)["title"] == "Second"
+    assert resolve_ranked_job(store, 99) is None      # out of range → None
+    assert resolve_ranked_job(store, 0) is None
+    store.close()
+
+
+def test_apply_preview_text_includes_key_fields():
+    class Bundle:
+        job = {"title": "AI Engineer", "company": "Acme"}
+        cv_markdown = "x" * 1200
+        cover_letter = "Dear team, I am a great fit."
+        email_subject = "Application: AI Engineer"
+        email_body = "Hello."
+        apply_method = "email"
+    text = apply_preview_text(Bundle())
+    assert "AI Engineer @ Acme" in text
+    assert "Application: AI Engineer" in text
+    assert "Approve to send?" in text
+
+
+def test_apply_preview_warns_for_non_email():
+    class Bundle:
+        job = {"title": "FE Eng", "company": "Globex"}
+        cv_markdown = "x"
+        cover_letter = "c"
+        email_subject = "s"
+        email_body = "b"
+        apply_method = "ats_form"
+    assert "Phase 4" in apply_preview_text(Bundle())

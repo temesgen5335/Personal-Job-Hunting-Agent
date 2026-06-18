@@ -50,16 +50,16 @@ Decisions locked in:
 - [ ] Run on an actual VPS (needs a provisioned box) — follow docs/DEPLOYMENT.md
 - Note: Hermes Agent installed separately as the Phase 3 agentic brain.
 
-## Phase 3 — Application assets (Tier 1) 🟡 engine done; bot wiring pending
+## Phase 3 — Application assets (Tier 1) ✅
 - [x] `tailor_cv` generator (reframes real experience only — R1, enforced in prompt)
 - [x] `write_cover_letter` + `draft_email` generators (shared LLMClient)
 - [x] Apply flow: prepare (no send) → approve_and_send (HITL gate, R2); email via SMTP
 - [x] Store: cv_variants + applications CRUD; stamp approved_at/submitted_at on send
 - [x] scripts/apply.py CLI (prepare/approve) — end-to-end from terminal
 - [x] 37 tests (R1 prompt, R2 no-send-without-approval, ATS-deferred, email send)
-- [ ] Bot: /apply <rank> with inline Approve/Cancel buttons → calls approve_and_send
-- **Exit:** apply to email-based postings end-to-end with one approval.
-      (CLI path works now; one-tap bot approval is the remaining piece.)
+- [x] Bot: /apply <rank> → drafts assets, sends tailored CV as a file, shows
+      inline Approve/Cancel; Approve calls approve_and_send (blocking work off-thread)
+- **Exit:** apply to email-based postings end-to-end with one approval. ✅
 
 ## Phase 4 — HITL form-fill (Tier 2)
 - [ ] `apply_executor`: Playwright fill for Greenhouse/Lever/Ashby layouts
