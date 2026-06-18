@@ -16,10 +16,23 @@ class Settings(BaseSettings):
         env_file=".env", env_file_encoding="utf-8", extra="ignore"
     )
 
-    # LLM (OpenRouter)
+    # --- LLM: multi-provider with failover (see jobagent/llm_client.py) ---
+    # Primary provider; the rest become automatic backups. Free providers stay as
+    # backups even after you add a paid one and point LLM_PROVIDER at it.
+    llm_provider: str = Field("groq", alias="LLM_PROVIDER")
+
+    groq_api_key: str = Field("", alias="GROQ_API_KEY")
     openrouter_api_key: str = Field("", alias="OPENROUTER_API_KEY")
-    llm_model: str = Field("anthropic/claude-opus-4-8", alias="JOBAGENT_LLM_MODEL")
-    embed_model: str = Field("openai/text-embedding-3-small", alias="JOBAGENT_EMBED_MODEL")
+    openai_api_key: str = Field("", alias="OPENAI_API_KEY")
+    gemini_api_key: str = Field("", alias="GEMINI_API_KEY")
+    anthropic_api_key: str = Field("", alias="ANTHROPIC_API_KEY")
+
+    # Per-provider model (sensible free defaults).
+    groq_model: str = Field("llama-3.1-8b-instant", alias="GROQ_MODEL")
+    openrouter_model: str = Field("meta-llama/llama-3.3-70b-instruct:free", alias="OPENROUTER_MODEL")
+    openai_model: str = Field("gpt-4o-mini", alias="OPENAI_MODEL")
+    gemini_model: str = Field("gemini-2.0-flash", alias="GEMINI_MODEL")
+    anthropic_model: str = Field("claude-sonnet-4-6", alias="ANTHROPIC_MODEL")
 
     # Telegram — channel reader (Telethon)
     telegram_api_id: int | None = Field(None, alias="TELEGRAM_API_ID")

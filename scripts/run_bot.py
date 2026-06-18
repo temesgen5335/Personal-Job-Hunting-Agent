@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from jobagent.bot.app import build_application  # noqa: E402
 from jobagent.config import get_settings  # noqa: E402
-from jobagent.llm_client import from_settings as llm_from_settings  # noqa: E402
+from jobagent.llm_client import build_llm  # noqa: E402
 from jobagent.preferences import load_preferences  # noqa: E402
 
 
@@ -24,7 +24,7 @@ def main() -> None:
         sys.exit("Set TELEGRAM_CHAT_ID in .env (your numeric user id).")
 
     profile = load_preferences().profile
-    llm = llm_from_settings(s)  # None if no OPENROUTER_API_KEY → /apply reports it
+    llm = build_llm(s)  # None if no provider key → /apply reports it
     cv_master = ""
     cv_path = Path("config/cv_master.md")
     if cv_path.exists():

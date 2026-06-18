@@ -18,7 +18,7 @@ dependencies = [
 telegram = ["telethon>=1.36", "python-telegram-bot>=21.0"]
 mcp = ["fastmcp>=2.0"]
 apply = ["playwright>=1.44"]
-llm = ["openai>=1.30"]          # OpenRouter speaks the OpenAI API
+llm = ["openai>=1.30", "anthropic>=0.40"]  # openai SDK covers Groq/OpenRouter/OpenAI/Gemini
 dev = ["pytest>=8.0", "ruff>=0.5", "pytest-asyncio>=0.23"]
 
 [build-system]

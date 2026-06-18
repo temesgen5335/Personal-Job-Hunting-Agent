@@ -20,6 +20,7 @@ from jobagent.bot.service import jobs_text  # noqa: E402
 from jobagent.config import get_settings  # noqa: E402
 from jobagent.ingestion.registry import build_adapters  # noqa: E402
 from jobagent.ingestion.runner import run_ingestion  # noqa: E402
+from jobagent.llm_client import build_llm  # noqa: E402
 from jobagent.matching import run_matching  # noqa: E402
 from jobagent.preferences import load_preferences  # noqa: E402
 from jobagent.store import Store  # noqa: E402
@@ -44,10 +45,9 @@ def main() -> None:
             print(f"[ingest]   {r.source}: ERROR {r.error}")
 
     # 2) Match
-    mreport = run_matching(
-        store, profile, openrouter_key=settings.openrouter_api_key, model=settings.llm_model
-    )
-    mode = "heuristic+LLM" if mreport.used_llm else "heuristic"
+    llm = build_llm(settings)
+    mreport = run_matching(store, profile, llm=llm)
+    mode = f"heuristic+LLM ({' → '.join(llm.chain)})" if mreport.used_llm else "heuristic"
     print(f"[match] scored {mreport.scored} ({mode}); LLM-reranked {mreport.llm_reranked}")
 
     # 3) Digest

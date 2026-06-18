@@ -1,8 +1,6 @@
-"""Optional LLM reranker via OpenRouter (OpenAI-compatible API).
+"""LLM reranker — scores the top heuristic candidates with real fit analysis.
 
-Used only on the top heuristic candidates (cost control). Gated on
-OPENROUTER_API_KEY — without it the engine falls back to heuristic-only. The
-`openai` package is an optional dep ([llm] extra), imported lazily.
+Uses the shared MultiLLM (`.complete`), so it inherits multi-provider failover.
 """
 
 from __future__ import annotations
@@ -32,11 +30,8 @@ def _profile_blurb(p: Profile) -> str:
     )
 
 
-def llm_score(job: dict, profile: Profile, api_key: str, model: str) -> tuple[float, str, list[str]] | None:
+def llm_score(job: dict, profile: Profile, llm) -> tuple[float, str, list[str]] | None:
     """Return (score, rationale, gaps) or None if the call/parse fails."""
-    from openai import OpenAI  # lazy: optional [llm] extra
-
-    client = OpenAI(api_key=api_key, base_url="https://openrouter.ai/api/v1")
     user = (
         f"{_profile_blurb(profile)}\n\n"
         f"JOB\nTitle: {job.get('title')}\nCompany: {job.get('company')}\n"
@@ -44,14 +39,9 @@ def llm_score(job: dict, profile: Profile, api_key: str, model: str) -> tuple[fl
         f"Description (truncated):\n{(job.get('description') or '')[:4000]}"
     )
     try:
-        resp = client.chat.completions.create(
-            model=model,
-            messages=[{"role": "system", "content": _SYSTEM}, {"role": "user", "content": user}],
-            temperature=0,
-            response_format={"type": "json_object"},
-        )
-        data = json.loads(resp.choices[0].message.content)
+        raw = llm.complete(_SYSTEM, user, json_mode=True)
+        data = json.loads(raw)
         score = max(0.0, min(1.0, float(data["score"])))
         return round(score, 3), str(data.get("rationale", "")), list(data.get("gaps", []))
-    except Exception:  # noqa: BLE001 — never let a scoring call break the run
+    except Exception:  # noqa: BLE001 — never let scoring break the run
         return None

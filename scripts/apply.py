@@ -17,7 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from jobagent.apply import approve_and_send, load_cv_master, prepare_application  # noqa: E402
 from jobagent.bot.service import ranked_matches  # noqa: E402
 from jobagent.config import get_settings  # noqa: E402
-from jobagent.llm_client import from_settings as llm_from_settings  # noqa: E402
+from jobagent.llm_client import build_llm  # noqa: E402
 from jobagent.preferences import load_preferences  # noqa: E402
 from jobagent.store import Store  # noqa: E402
 
@@ -33,9 +33,9 @@ def main() -> None:
     store.init_schema()
 
     if cmd == "prepare":
-        llm = llm_from_settings(settings)
+        llm = build_llm(settings)
         if llm is None:
-            sys.exit("Set OPENROUTER_API_KEY to generate application assets.")
+            sys.exit("Set at least one LLM key (GROQ_API_KEY / GEMINI_API_KEY / OPENROUTER_API_KEY / …).")
         ranked = ranked_matches(store, 25)
         try:
             job = ranked[int(arg) - 1]

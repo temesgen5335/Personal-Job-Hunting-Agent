@@ -26,12 +26,11 @@ def run_matching(
     store: Store,
     profile: Profile,
     *,
-    openrouter_key: str = "",
-    model: str = "",
+    llm=None,
     llm_top_k: int = 30,
     llm_threshold: float = 0.45,
 ) -> MatchReport:
-    """Score all jobs heuristically; LLM-rerank the top candidates if a key is set."""
+    """Score all jobs heuristically; LLM-rerank the top candidates if an llm is given."""
     report = MatchReport()
     jobs = store.get_jobs()
 
@@ -42,12 +41,12 @@ def run_matching(
         report.scored += 1
         scored.append((job, score))
 
-    if openrouter_key and model:
+    if llm is not None:
         report.used_llm = True
         candidates = sorted(scored, key=lambda x: x[1], reverse=True)
         candidates = [j for j, s in candidates if s >= llm_threshold][:llm_top_k]
         for job in candidates:
-            result = llm_score(job, profile, openrouter_key, model)
+            result = llm_score(job, profile, llm)
             if result is not None:
                 score, rationale, gaps = result
                 store.upsert_match(
