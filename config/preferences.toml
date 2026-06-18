@@ -6,6 +6,8 @@
 name = "Temesgen Gebreabzgi"
 headline = "AI Engineer & Full-Stack Developer (3+ yrs) — agentic systems, RAG, production AI"
 cv_path = "docs/Temesgen_Gebreabzgi_CV.pdf"
+email = "you@example.com"   # used to auto-fill ATS forms (Phase 4)
+phone = "+10000000000"
 
 # What to surface. Matching scores roles against these.
 target_roles = [

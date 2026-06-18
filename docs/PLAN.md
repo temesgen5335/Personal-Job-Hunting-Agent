@@ -61,11 +61,23 @@ Decisions locked in:
       inline Approve/Cancel; Approve calls approve_and_send (blocking work off-thread)
 - **Exit:** apply to email-based postings end-to-end with one approval. ✅
 
-## Phase 4 — HITL form-fill (Tier 2)
-- [ ] `apply_executor`: Playwright fill for Greenhouse/Lever/Ashby layouts
-- [ ] Pause + screenshot before submit → Telegram approval → submit
-- [ ] CAPTCHA / hard-block → hand back deep link (R3)
-- **Exit:** one-approval assisted submission on the three ATS platforms.
+## Phase 4 — HITL form-fill (Tier 2) ✅
+- [x] Pure field-mapping: detect_platform + field_plan for Greenhouse/Lever/Ashby
+      + ApplicantInfo.from_profile (profile gained email/phone)
+- [x] `execute()` driver (injectable page): fills candidate selectors, reports
+      missing fields, screenshots; R2 (submit only when asked) + R3 (CAPTCHA blocks submit)
+- [x] apply_to_job() launches Playwright (chromium, lazy import)
+- [x] scripts/apply_ats.py CLI: preview (fill+screenshot, no submit) → submit
+- [x] 7 tests via FakePage (fill, missing, R2, R3, platform/applicant)
+- [x] Bot: ATS path → fill + screenshot preview + Submit/Cancel buttons
+- [x] apply_target trusts job source (handles custom career domains, e.g. instacart→GH)
+- [x] graceful degradation: best-effort screenshot, never crashes the bot
+- [x] fixed threading bug: each bot worker thread opens its own SQLite Store
+- [ ] On VPS: `playwright install chromium` (deploy step)
+- **Exit:** one-approval assisted submission. ✅ (mechanically complete)
+- Real-world note: Greenhouse/Ashby use Cloudflare Turnstile + heavy SPAs, so live
+  auto-fill is often partial → R3 hands back the link + screenshot for manual finish.
+  This is by design (don't fight anti-bot); Lever tends to fill better.
 
 ## Phase 5 — Tracking dashboard
 - [ ] Next.js read-only dashboard over the same store

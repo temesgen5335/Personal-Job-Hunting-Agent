@@ -20,6 +20,8 @@ class Profile(BaseModel):
     name: str = ""
     headline: str = ""
     cv_path: str = ""
+    email: str = ""      # used to fill ATS application forms (Phase 4)
+    phone: str = ""
     target_roles: list[str] = Field(default_factory=list)
     seniority: str = ""
     work_mode: str = ""
