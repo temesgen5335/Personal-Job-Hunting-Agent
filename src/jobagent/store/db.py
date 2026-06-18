@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from jobagent.core.schemas import Event, JobPosting, Match
@@ -138,6 +138,45 @@ class Store:
             (min_score, limit),
         ).fetchall()
         return [dict(r) for r in rows]
+
+    def get_matches(
+        self,
+        limit: int = 10,
+        min_score: float = 0.0,
+        max_age_days: int | None = None,
+        location: str = "any",
+        keywords: list[str] | None = None,
+    ) -> list[dict]:
+        """Ranked matches with optional filters: recency (posted_at→first_seen_at
+        fallback), location (remote/hybrid/any), keyword OR-match on title/desc/tags."""
+        where = ["m.score >= ?"]
+        params: list = [min_score]
+
+        if max_age_days:
+            cutoff = (datetime.now(timezone.utc) - timedelta(days=max_age_days)).isoformat()
+            where.append("COALESCE(NULLIF(j.posted_at, ''), j.first_seen_at) >= ?")
+            params.append(cutoff)
+
+        if location == "remote":
+            where.append("(j.is_remote = 1 OR LOWER(j.location) LIKE '%remote%')")
+        elif location == "hybrid":
+            where.append("LOWER(j.location) LIKE '%hybrid%'")
+
+        if keywords:
+            ors = []
+            for kw in keywords:
+                ors.append("(LOWER(j.title) LIKE ? OR LOWER(j.description) LIKE ? OR LOWER(j.tags) LIKE ?)")
+                k = f"%{kw.lower()}%"
+                params += [k, k, k]
+            where.append("(" + " OR ".join(ors) + ")")
+
+        sql = (
+            "SELECT j.*, m.score, m.rationale, m.gaps FROM matches m "
+            "JOIN jobs j ON j.id = m.job_id WHERE " + " AND ".join(where)
+            + " ORDER BY m.score DESC LIMIT ?"
+        )
+        params.append(limit)
+        return [dict(r) for r in self.conn.execute(sql, params).fetchall()]
 
     def get_job(self, job_id: str) -> dict | None:
         row = self.conn.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()

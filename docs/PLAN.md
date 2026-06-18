@@ -41,6 +41,9 @@ Decisions locked in:
 - [x] Telegram bot (Bot API): `/start` `/help` `/jobs [N]` `/status`, owner-locked
 - [x] Digest push script for Hermes cron (scripts/send_digest.py)
 - **Exit:** ranked digest available via /jobs and pushable to Telegram. ✅
+- [x] Interactive `/menu`: inline filters (date Today/2d/Week/Month/Any · location
+      remote/hybrid/any · keywords) + Show-jobs with tap-to-Apply buttons. Filter
+      state shared by /jobs and /apply numbering. (store.get_matches)
 
 ## Deployment — VPS (systemd) ✅ artifacts ready
 - [x] Unified pipeline (ingest→match→digest) + shared adapter registry
