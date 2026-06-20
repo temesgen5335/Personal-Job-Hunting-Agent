@@ -71,6 +71,18 @@ portfolio = "https://temesgendev.vercel.app"
 github = "https://github.com/temesgen5335"
 linkedin = "https://linkedin.com/in/temesgen-gebreabzgi"
 
+# Turn whole job SOURCES on/off without deleting their config. Set false to stop
+# ingesting from one. (Add/remove specific companies under [watchlist]; add/remove
+# Telegram channels via TELEGRAM_CHANNELS in .env.)
+[sources]
+remoteok = true
+remotive = true
+greenhouse = true
+lever = true
+ashby = true
+telegram = true
+aggregator = false   # LinkedIn/Indeed/Glassdoor via JSearch/SerpApi — needs an API key + adapter
+
 # Verified live (2026-06-18) — every slug below resolved to real open postings.
 # Adapters silently skip any slug that stops resolving, so pruning is safe.
 [watchlist]

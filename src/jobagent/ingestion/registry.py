@@ -27,10 +27,12 @@ def _merge(*lists: list[str]) -> list[str]:
 
 
 def build_adapters(settings) -> list[BaseAdapter]:
-    """Company watchlist comes from config/preferences.toml; env vars supplement it.
-    Free sources always run; credentialed/ATS adapters gate themselves via `enabled`."""
-    wl = load_preferences().watchlist
-    return [
+    """Company watchlist + per-source toggles come from config/preferences.toml; env
+    vars supplement slugs/channels. A source disabled in [sources] is dropped here;
+    enabled ones still self-gate on creds/slugs via their `enabled` property."""
+    prefs = load_preferences()
+    wl, src = prefs.watchlist, prefs.sources
+    all_adapters = [
         RemoteOKAdapter(),
         RemotiveAdapter(),
         GreenhouseAdapter(_merge(wl.greenhouse, split_slugs(settings.greenhouse_slugs))),
@@ -44,3 +46,4 @@ def build_adapters(settings) -> list[BaseAdapter]:
             limit=settings.telegram_fetch_limit,
         ),
     ]
+    return [a for a in all_adapters if src.is_enabled(a.source.value)]

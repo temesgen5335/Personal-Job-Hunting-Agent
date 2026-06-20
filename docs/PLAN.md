@@ -82,10 +82,14 @@ Decisions locked in:
   auto-fill is often partial → R3 hands back the link + screenshot for manual finish.
   This is by design (don't fight anti-bot); Lever tends to fill better.
 
-## Phase 5 — Tracking dashboard
-- [ ] Next.js read-only dashboard over the same store
-- [ ] Funnel, status, history, source analytics
-- **Exit:** web view; Telegram stays primary.
+## Phase 5 — Tracking dashboard ✅ (Astro)
+- [x] Astro SSR app reading the same SQLite store read-only (better-sqlite3)
+- [x] Overview (counts, jobs-by-source, application funnel, top matches)
+- [x] Jobs page — filterable table (date/location/keywords via query params)
+- [x] Applications page — status tracking + links
+- [x] Built + run-verified: all pages 200, live data from the real store
+- **Exit:** web view; Telegram stays primary. ✅
+- [ ] Deploy step: run `npm run build && npm start` on the VPS (or behind the bot host)
 
 ---
 

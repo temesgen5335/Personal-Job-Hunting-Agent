@@ -28,6 +28,12 @@ artifacts/
 cv_master.md
 
 
+# Dashboard (Astro / Node)
+dashboard/node_modules/
+dashboard/dist/
+dashboard/.astro/
+dashboard/package-lock.json
+
 # OS / editor
 .DS_Store
 .idea/
