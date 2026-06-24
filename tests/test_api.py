@@ -8,6 +8,7 @@ from jobagent.api import create_app
 from jobagent.config import Settings
 from jobagent.core.schemas import ApplyMethod, JobPosting, Match, Source
 from jobagent.preferences import Profile
+from jobagent.secrets_store import SecretStore
 from jobagent.store import Store
 
 
@@ -90,3 +91,42 @@ def test_prepare_unknown_job_404(client):
 def test_ats_preview_rejects_non_ats(client):
     # The email job isn't an ATS posting → 400.
     assert client.post("/ats/preview", json={"job_id": client._email_job_id}).status_code == 400
+
+
+def test_config_auth_and_roundtrip(tmp_path, monkeypatch):
+    monkeypatch.setenv("JOBAGENT_DB_PATH", str(tmp_path / "c.db"))
+    monkeypatch.setenv("JOBAGENT_SECRETS_PATH", str(tmp_path / "secrets.enc"))
+    monkeypatch.setenv("JOBAGENT_MASTER_KEY", SecretStore.generate_key())
+    monkeypatch.setenv("DASHBOARD_PASSWORD", "hunter2")
+    settings = Settings(_env_file=None)
+    Store(settings.db_path).init_schema()
+
+    app = create_app(settings=settings, profile=Profile(name="T"), llm=None, cv_master="x",
+                     mailer=lambda *a, **k: None)
+    c = TestClient(app)
+
+    assert c.get("/config").status_code == 401                       # no token
+    assert c.post("/auth/login", json={"password": "wrong"}).status_code == 401
+    token = c.post("/auth/login", json={"password": "hunter2"}).json()["token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    view = c.get("/config", headers=headers).json()["config"]
+    assert "groq_api_key" in view and "llm_provider" in view
+
+    r = c.put("/config", headers=headers,
+              json={"values": {"groq_api_key": "gsk_secret", "llm_provider": "groq"}})
+    assert r.status_code == 200
+    assert r.json()["config"]["groq_api_key"] == {"set": True}        # masked
+    assert r.json()["config"]["llm_provider"] == "groq"
+    # Persisted (encrypted) and never echoed in plaintext.
+    assert SecretStore().load()["groq_api_key"] == "gsk_secret"
+
+
+def test_config_disabled_without_password(tmp_path, monkeypatch):
+    monkeypatch.setenv("JOBAGENT_DB_PATH", str(tmp_path / "d.db"))
+    monkeypatch.delenv("DASHBOARD_PASSWORD", raising=False)
+    settings = Settings(_env_file=None)
+    app = create_app(settings=settings, profile=Profile(name="T"), llm=None, cv_master="x")
+    c = TestClient(app)
+    assert c.post("/auth/login", json={"password": "x"}).status_code == 403   # fail closed
+    assert c.get("/config").status_code == 403

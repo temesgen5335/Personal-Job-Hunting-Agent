@@ -28,7 +28,7 @@ _PROVIDERS = {
     "anthropic": {"kind": "anthropic"},
 }
 # Backups are tried in this order (free/fast first), after the primary.
-_DEFAULT_ORDER = ["groq", "gemini", "openrouter", "openai", "anthropic"]
+_DEFAULT_ORDER = ["groq", "gemini", "openrouter", "custom", "openai", "anthropic"]
 
 
 def _strip_fences(text: str) -> str:
@@ -135,11 +135,22 @@ def build_llm(settings, temperature: float = 0.3) -> MultiLLM | None:
         "gemini": settings.gemini_model,
         "anthropic": settings.anthropic_model,
     }
-    primary = settings.llm_provider if settings.llm_provider in _PROVIDERS else "groq"
+    # Custom OpenAI-compatible endpoint (Ollama/vLLM/etc.) — enabled by a base_url;
+    # api_key may be blank for local servers (OpenAI client still needs a placeholder).
+    custom_base = getattr(settings, "custom_llm_base_url", "")
+
+    primary = settings.llm_provider if settings.llm_provider in (*_PROVIDERS, "custom") else "groq"
     order = [primary] + [p for p in _DEFAULT_ORDER if p != primary]
 
     backends = []
     for name in order:
+        if name == "custom":
+            if not custom_base:
+                continue
+            backends.append(OpenAICompatBackend(
+                "custom", settings.custom_llm_api_key or "not-needed",
+                settings.custom_llm_model or "default", custom_base, temperature))
+            continue
         if not keys.get(name):
             continue
         spec = _PROVIDERS[name]

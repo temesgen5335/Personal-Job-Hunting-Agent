@@ -8,10 +8,11 @@ tests can inject a temp store, a fake LLM, and a fake mailer.
 
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 from typing import Any
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException
+from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel
 
 from jobagent.apply import approve_and_send, prepare_application
@@ -19,12 +20,13 @@ from jobagent.apply.ats import apply_target
 from jobagent.apply.ats_flow import create_ats_application, run_ats
 from jobagent.apply.email_send import send_email
 from jobagent.bot.service import MatchFilter, ranked_matches
-from jobagent.config import get_settings
+from jobagent.config import get_settings, reload_settings
 from jobagent.ingestion.registry import build_adapters
 from jobagent.ingestion.runner import run_ingestion
 from jobagent.llm_client import build_llm
 from jobagent.matching import run_matching
 from jobagent.preferences import load_preferences
+from jobagent.secrets_store import MANAGED_FIELDS, SecretStore, masked_view
 from jobagent.store import Store
 
 _UNSET = object()
@@ -32,6 +34,18 @@ _UNSET = object()
 
 class JobIdReq(BaseModel):
     job_id: str
+
+
+class LoginReq(BaseModel):
+    password: str
+
+
+class ConfigPatch(BaseModel):
+    values: dict
+
+
+def _token_for(password: str, master_key: str) -> str:
+    return hashlib.sha256(f"{password}|{master_key}".encode()).hexdigest()
 
 
 def _ingest_task(db_path: str, settings, profile, llm) -> None:
@@ -46,23 +60,80 @@ def _ingest_task(db_path: str, settings, profile, llm) -> None:
 def create_app(settings=None, profile=None, llm: Any = _UNSET, cv_master: str | None = None, mailer=None) -> FastAPI:
     settings = settings or get_settings()
     profile = profile or load_preferences().profile
-    llm = build_llm(settings) if llm is _UNSET else llm
     mailer = mailer or send_email
+    # Injected llm (tests) is fixed; otherwise build fresh per call so config edits apply.
+    llm_injected = llm is not _UNSET
     if cv_master is None:
         p = Path("config/cv_master.md")
         cv_master = p.read_text() if p.exists() else ""
 
     app = FastAPI(title="Personal Job Agent API", version="2.0")
 
+    # The dashboard runs on a different origin and calls the API from the browser.
+    from fastapi.middleware.cors import CORSMiddleware
+
+    origins = [o.strip() for o in (settings.cors_origins or "*").split(",") if o.strip()] or ["*"]
+    app.add_middleware(
+        CORSMiddleware, allow_origins=origins,
+        allow_methods=["*"], allow_headers=["*"],
+    )
+
     def store() -> Store:
         return Store(settings.db_path)
 
+    def _llm():
+        return llm if llm_injected else build_llm(get_settings())
+
+    # --- auth (gates /config) -------------------------------------------------
+    def _expected_token() -> str | None:
+        return _token_for(settings.dashboard_password, settings.master_key) if settings.dashboard_password else None
+
+    def require_auth(authorization: str | None = Header(None)) -> None:
+        expected = _expected_token()
+        if expected is None:
+            raise HTTPException(403, "Config UI disabled — set DASHBOARD_PASSWORD.")
+        token = (authorization or "").removeprefix("Bearer ").strip()
+        if token != expected:
+            raise HTTPException(401, "Unauthorized.")
+
+    @app.post("/auth/login")
+    def login(body: LoginReq):
+        if not settings.dashboard_password:
+            raise HTTPException(403, "Config UI disabled — set DASHBOARD_PASSWORD.")
+        if body.password != settings.dashboard_password:
+            raise HTTPException(401, "Wrong password.")
+        return {"token": _token_for(body.password, settings.master_key)}
+
+    def _effective_managed() -> dict:
+        # env baseline (create_app's settings) overlaid by the encrypted store.
+        base = {f: getattr(settings, f, None) for f in MANAGED_FIELDS}
+        try:
+            base.update({k: v for k, v in SecretStore().load().items() if k in MANAGED_FIELDS})
+        except Exception:  # noqa: BLE001 — unreadable store → show env baseline only
+            pass
+        return base
+
+    @app.get("/config", dependencies=[Depends(require_auth)])
+    def get_config():
+        return {"config": masked_view(_effective_managed())}
+
+    @app.put("/config", dependencies=[Depends(require_auth)])
+    def put_config(patch: ConfigPatch):
+        try:
+            SecretStore().update(patch.values)
+        except RuntimeError as e:
+            raise HTTPException(400, str(e))
+        reload_settings()   # so other endpoints (build_llm) pick up new keys this process
+        return {"config": masked_view(_effective_managed())}
+
     @app.get("/health")
     def health():
+        chain = _llm()
         return {
             "status": "ok",
             "store_exists": Path(settings.db_path).exists(),
-            "llm_chain": llm.chain if llm else [],
+            "llm_chain": chain.chain if chain else [],
+            "config_ui": bool(settings.dashboard_password),
         }
 
     @app.get("/stats")
@@ -97,19 +168,20 @@ def create_app(settings=None, profile=None, llm: Any = _UNSET, cv_master: str | 
     def match():
         s = store()
         try:
-            r = run_matching(s, profile, llm=llm)
+            r = run_matching(s, profile, llm=_llm())
             return {"scored": r.scored, "used_llm": r.used_llm, "llm_reranked": r.llm_reranked}
         finally:
             s.close()
 
     @app.post("/ingest", status_code=202)
     def ingest(bg: BackgroundTasks):
-        bg.add_task(_ingest_task, settings.db_path, settings, profile, llm)
+        bg.add_task(_ingest_task, settings.db_path, settings, profile, _llm())
         return {"status": "started"}
 
     @app.post("/apply/prepare")
     def apply_prepare(req: JobIdReq):
-        if llm is None:
+        current_llm = _llm()
+        if current_llm is None:
             raise HTTPException(400, "No LLM configured (set an LLM key).")
         if not cv_master:
             raise HTTPException(400, "config/cv_master.md missing.")
@@ -118,7 +190,7 @@ def create_app(settings=None, profile=None, llm: Any = _UNSET, cv_master: str | 
             job = s.get_job(req.job_id)
             if not job:
                 raise HTTPException(404, "Job not found.")
-            b = prepare_application(s, job, profile, cv_master, llm)
+            b = prepare_application(s, job, profile, cv_master, current_llm)
             return {
                 "application_id": b.application_id, "apply_method": b.apply_method,
                 "cv_markdown": b.cv_markdown, "cover_letter": b.cover_letter,

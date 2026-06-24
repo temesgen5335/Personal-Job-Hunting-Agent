@@ -41,13 +41,19 @@ service layer FastAPI exposes; the bot and dashboard stop touching the store dir
       no risk to a working bot); both bot and API exercise the same service layer
 - **Exit:** dashboard runs against the API; bot + API share one service layer. ✅
 
-### v2.1 — Config UI + secret management
-- Auth on the dashboard (single admin password/token — it now edits secrets).
-- **Encrypted secret store** (gitignored file or OS keyring), edited via UI:
-  LLM provider + keys, Telegram tokens, SMTP, sources toggles, watchlist, profile.
-- **Custom OpenAI-compatible provider** (Ollama/vLLM/any base_url) in the failover chain.
-- Security note: secrets-in-UI is acceptable for a self-hosted single-user box behind
-  your own network; the auth gate + encryption-at-rest are mandatory, not optional.
+### v2.1 — Config UI + secret management ✅
+- [x] **Encrypted secret store** (`secrets_store.py`, Fernet via JOBAGENT_MASTER_KEY)
+      holding LLM keys/provider/models, Telegram tokens, SMTP, custom endpoint
+- [x] `config.get_settings()` overlays the store on env so api/bot/pipeline agree;
+      `reload_settings()` applies edits live within the API process
+- [x] **Custom OpenAI-compatible provider** (Ollama/vLLM/any base_url) in the failover chain
+- [x] Auth-gated config API: POST /auth/login, GET/PUT /config (admin password, fail-closed)
+- [x] secrets masked on read; encrypted at rest (verified); 9 tests (87 total); live-verified
+- [x] Dashboard **Settings page** + login (settings.astro): edit LLM/Telegram/SMTP from
+      the UI; secrets blank-to-keep; CORS enabled; live-verified end to end
+- [ ] (later) surface profile/sources/watchlist editing (preferences.toml) in the UI
+- Security: secrets-in-UI is acceptable for a self-hosted single-user box behind your
+  own network; the auth gate + encryption-at-rest are mandatory (both implemented).
 - **Exit:** a fresh user configures everything from the dashboard, no file editing.
 
 ### v2.2 — Fit-checker (confidence score + explainable report)

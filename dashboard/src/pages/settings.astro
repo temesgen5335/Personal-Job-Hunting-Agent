@@ -1,0 +1,141 @@
+---
+import Layout from "../layouts/Layout.astro";
+import { apiBase } from "../lib/api";
+// Client-visible API URL (the browser calls /auth/login + /config directly).
+const apiUrl = apiBase();
+---
+
+<Layout title="Settings">
+  <h1>Settings</h1>
+  <p class="muted">Edit credentials & LLM config. Secrets are encrypted at rest; blank a
+    secret field to leave it unchanged. Restart the bot/pipeline to apply new keys there.</p>
+
+  <div id="login" class="panel" style="display:none">
+    <strong>🔒 Admin login</strong>
+    <form id="login-form" class="filters" style="margin-top:10px">
+      <input type="password" id="password" placeholder="dashboard password" autocomplete="current-password" />
+      <button type="submit">Unlock</button>
+      <span id="login-msg" class="muted"></span>
+    </form>
+  </div>
+
+  <div id="config" style="display:none">
+    <div id="form"></div>
+    <div class="panel" style="display:flex; gap:12px; align-items:center">
+      <button id="save">Save changes</button>
+      <button id="logout" style="background:#333;color:var(--text)">Log out</button>
+      <span id="save-msg" class="muted"></span>
+    </div>
+  </div>
+
+  <div id="error" class="panel" style="display:none"></div>
+
+  <script define:vars={{ apiUrl }}>
+    const TOKEN_KEY = "jobagent_token";
+    const GROUPS = [
+      { title: "LLM", fields: [
+        { k: "llm_provider", label: "Primary provider", type: "select",
+          options: ["groq", "gemini", "openrouter", "custom", "openai", "anthropic"] },
+        { k: "groq_api_key", secret: true }, { k: "gemini_api_key", secret: true },
+        { k: "openrouter_api_key", secret: true }, { k: "openai_api_key", secret: true },
+        { k: "anthropic_api_key", secret: true },
+        { k: "groq_model" }, { k: "gemini_model" }, { k: "openrouter_model" },
+        { k: "openai_model" }, { k: "anthropic_model" },
+        { k: "custom_llm_base_url", label: "Custom base URL" },
+        { k: "custom_llm_api_key", secret: true }, { k: "custom_llm_model" },
+      ]},
+      { title: "Telegram", fields: [
+        { k: "telegram_bot_token", secret: true }, { k: "telegram_chat_id" },
+        { k: "telegram_api_id" }, { k: "telegram_api_hash", secret: true },
+        { k: "telegram_phone" }, { k: "telegram_channels" },
+      ]},
+      { title: "Email (SMTP)", fields: [
+        { k: "smtp_host" }, { k: "smtp_port" }, { k: "smtp_user" },
+        { k: "smtp_password", secret: true }, { k: "apply_from_email" },
+      ]},
+    ];
+    const ALL = GROUPS.flatMap((g) => g.fields);
+    const SECRET = new Set(ALL.filter((f) => f.secret).map((f) => f.k));
+    const labelOf = (f) => f.label || f.k.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+
+    const $ = (id) => document.getElementById(id);
+    const token = () => localStorage.getItem(TOKEN_KEY);
+    const headers = () => ({ "Content-Type": "application/json", Authorization: `Bearer ${token()}` });
+
+    function showError(msg) { const e = $("error"); e.style.display = "block"; e.textContent = "⚠️ " + msg; }
+
+    async function login(ev) {
+      ev.preventDefault();
+      $("login-msg").textContent = "…";
+      try {
+        const r = await fetch(`${apiUrl}/auth/login`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ password: $("password").value }),
+        });
+        if (!r.ok) { $("login-msg").textContent = r.status === 401 ? "wrong password" : `error ${r.status}`; return; }
+        localStorage.setItem(TOKEN_KEY, (await r.json()).token);
+        $("login-msg").textContent = "";
+        await loadConfig();
+      } catch (e) { showError(`Can't reach API at ${apiUrl} — ${e.message}`); }
+    }
+
+    function renderForm(cfg) {
+      const html = GROUPS.map((g) => `
+        <div class="panel"><strong>${g.title}</strong><table style="margin-top:8px"><tbody>
+        ${g.fields.map((f) => {
+          const v = cfg[f.k];
+          let input;
+          if (f.type === "select") {
+            input = `<select id="f_${f.k}">${f.options.map((o) =>
+              `<option value="${o}" ${o === v ? "selected" : ""}>${o}</option>`).join("")}</select>`;
+          } else if (f.secret) {
+            const set = v && v.set;
+            input = `<input id="f_${f.k}" type="password" placeholder="${set ? "•••••• (set — leave blank to keep)" : "not set"}" />`;
+          } else {
+            input = `<input id="f_${f.k}" type="text" value="${v == null ? "" : String(v).replace(/"/g, "&quot;")}" />`;
+          }
+          return `<tr><td style="width:200px" class="muted">${labelOf(f)}</td><td>${input}</td></tr>`;
+        }).join("")}
+        </tbody></table></div>`).join("");
+      $("form").innerHTML = html;
+    }
+
+    async function loadConfig() {
+      try {
+        const r = await fetch(`${apiUrl}/config`, { headers: headers() });
+        if (r.status === 401) { localStorage.removeItem(TOKEN_KEY); return gate(); }
+        if (!r.ok) return showError(`config load failed (${r.status})`);
+        renderForm((await r.json()).config);
+        $("login").style.display = "none";
+        $("config").style.display = "block";
+      } catch (e) { showError(`Can't reach API at ${apiUrl} — ${e.message}`); }
+    }
+
+    async function save() {
+      const patch = {};
+      for (const f of ALL) {
+        const el = $(`f_${f.k}`); if (!el) continue;
+        const val = el.value.trim();
+        if (SECRET.has(f.k)) { if (val) patch[f.k] = val; }   // blank secret = keep existing
+        else patch[f.k] = val;
+      }
+      $("save-msg").textContent = "saving…";
+      try {
+        const r = await fetch(`${apiUrl}/config`, { method: "PUT", headers: headers(), body: JSON.stringify({ values: patch }) });
+        if (!r.ok) { $("save-msg").textContent = `error ${r.status}`; return; }
+        renderForm((await r.json()).config);
+        $("save-msg").textContent = "✅ saved";
+      } catch (e) { showError(e.message); }
+    }
+
+    function gate() {
+      $("config").style.display = "none";
+      $("login").style.display = "block";
+    }
+
+    $("login-form").addEventListener("submit", login);
+    $("save").addEventListener("click", save);
+    $("logout").addEventListener("click", () => { localStorage.removeItem(TOKEN_KEY); gate(); });
+    token() ? loadConfig() : gate();
+  </script>
+</Layout>

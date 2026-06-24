@@ -5,8 +5,6 @@ Secrets live only in .env (gitignored) or the process environment — never in c
 
 from __future__ import annotations
 
-from functools import lru_cache
-
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -44,6 +42,16 @@ class Settings(BaseSettings):
     openai_model: str = Field("gpt-4o-mini", alias="OPENAI_MODEL")
     gemini_model: str = Field("gemini-2.0-flash", alias="GEMINI_MODEL")
     anthropic_model: str = Field("claude-sonnet-4-6", alias="ANTHROPIC_MODEL")
+
+    # Custom OpenAI-compatible endpoint (Ollama / vLLM / any local or hosted server).
+    custom_llm_base_url: str = Field("", alias="CUSTOM_LLM_BASE_URL")
+    custom_llm_api_key: str = Field("", alias="CUSTOM_LLM_API_KEY")
+    custom_llm_model: str = Field("", alias="CUSTOM_LLM_MODEL")
+
+    # v2.1 config UI: admin password (gates the config endpoints) + secret-store key.
+    dashboard_password: str = Field("", alias="DASHBOARD_PASSWORD")
+    master_key: str = Field("", alias="JOBAGENT_MASTER_KEY")
+    cors_origins: str = Field("*", alias="JOBAGENT_CORS_ORIGINS")  # comma-separated; * = any (token auth)
 
     # Telegram — channel reader (Telethon)
     telegram_api_id: int | None = Field(None, alias="TELEGRAM_API_ID")
@@ -85,6 +93,40 @@ class Settings(BaseSettings):
     apply_from_email: str = Field("", alias="APPLY_FROM_EMAIL")
 
 
-@lru_cache
+def _build_effective() -> Settings:
+    """Env/.env settings, then overlaid by the encrypted secret store (if present)."""
+    s = Settings()
+    try:
+        from jobagent.secrets_store import SecretStore
+
+        overlay = SecretStore().load()
+    except Exception:  # noqa: BLE001 — missing key/crypto or unreadable store → env-only
+        overlay = {}
+    if overlay:
+        fields = set(Settings.model_fields)
+        update = {k: v for k, v in overlay.items() if k in fields and v not in (None, "")}
+        # model_copy bypasses validation — coerce numeric fields the UI stores as strings.
+        int_fields = {"telegram_chat_id", "telegram_api_id", "telegram_owner_id", "smtp_port"}
+        for k in list(update):
+            if k in int_fields and isinstance(update[k], str) and update[k].strip().lstrip("-").isdigit():
+                update[k] = int(update[k])
+        if update:
+            s = s.model_copy(update=update)
+    return s
+
+
+_cached: Settings | None = None
+
+
 def get_settings() -> Settings:
-    return Settings()
+    global _cached
+    if _cached is None:
+        _cached = _build_effective()
+    return _cached
+
+
+def reload_settings() -> Settings:
+    """Bust the cache so config-store edits take effect (call after a config write)."""
+    global _cached
+    _cached = None
+    return get_settings()

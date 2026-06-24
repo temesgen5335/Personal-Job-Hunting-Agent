@@ -19,8 +19,8 @@ telegram = ["telethon>=1.36", "python-telegram-bot>=21.0"]
 mcp = ["fastmcp>=2.0"]
 apply = ["playwright>=1.44"]
 llm = ["openai>=1.30", "anthropic>=0.40"]  # openai SDK covers Groq/OpenRouter/OpenAI/Gemini
-api = ["fastapi>=0.110", "uvicorn>=0.29"]   # v2 orchestrator (bot + dashboard backend)
-dev = ["pytest>=8.0", "ruff>=0.5", "pytest-asyncio>=0.23", "fastapi>=0.110"]
+api = ["fastapi>=0.110", "uvicorn>=0.29", "cryptography>=42.0"]  # v2 orchestrator + encrypted config store
+dev = ["pytest>=8.0", "ruff>=0.5", "pytest-asyncio>=0.23", "fastapi>=0.110", "cryptography>=42.0"]
 
 [build-system]
 requires = ["hatchling"]
