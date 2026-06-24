@@ -1,13 +1,21 @@
 ---
 import Layout from "../layouts/Layout.astro";
-import { getApplications, storeExists } from "../lib/db";
+import { getApplications, apiBase, type AppRow } from "../lib/api";
 
-const apps = storeExists() ? getApplications(200) : [];
+let apps: AppRow[] = [];
+let error: string | null = null;
+try {
+  apps = await getApplications(200);
+} catch (e) {
+  error = (e as Error).message;
+}
 const fmt = (s: string | null) => (s ? new Date(s).toLocaleString() : "—");
 ---
 
 <Layout title="Applications">
   <h1>Applications <span class="muted" style="font-size:14px">({apps.length})</span></h1>
+
+  {error && <div class="panel">⚠️ Can't reach the API at <code>{apiBase()}</code> — {error}</div>}
 
   <div class="panel">
     <table>
@@ -24,7 +32,7 @@ const fmt = (s: string | null) => (s ? new Date(s).toLocaleString() : "—");
             <td>{(a.apply_url || a.url) && <a href={a.apply_url || a.url} target="_blank">link ↗</a>}</td>
           </tr>
         ))}
-        {apps.length === 0 && <tr><td colspan="7" class="muted">No applications yet — use /apply in the bot.</td></tr>}
+        {apps.length === 0 && !error && <tr><td colspan="7" class="muted">No applications yet — use /apply in the bot.</td></tr>}
       </tbody>
     </table>
   </div>

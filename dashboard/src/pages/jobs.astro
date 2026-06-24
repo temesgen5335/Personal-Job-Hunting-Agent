@@ -1,19 +1,21 @@
 ---
 import Layout from "../layouts/Layout.astro";
-import { getMatches, storeExists, type MatchFilter } from "../lib/db";
+import { getMatches, apiBase, type MatchFilter, type MatchRow } from "../lib/api";
 
 const url = Astro.url;
 const daysParam = url.searchParams.get("days") ?? "0";
 const location = (url.searchParams.get("location") ?? "any") as MatchFilter["location"];
 const q = url.searchParams.get("q") ?? "";
 
-const filter: MatchFilter = {
-  days: Number(daysParam) || 0,
-  location,
-  q: q.trim() || undefined,
-  limit: 100,
-};
-const rows = storeExists() ? getMatches(filter) : [];
+const filter: MatchFilter = { days: Number(daysParam) || 0, location, q: q.trim() || undefined, limit: 100 };
+
+let rows: MatchRow[] = [];
+let error: string | null = null;
+try {
+  rows = await getMatches(filter);
+} catch (e) {
+  error = (e as Error).message;
+}
 
 const dateOpts = [["0", "Any time"], ["1", "Today"], ["2", "2 days"], ["7", "Week"], ["30", "Month"]];
 const locOpts = ["any", "remote", "hybrid"];
@@ -39,6 +41,8 @@ const fmtDate = (s: string | null) => (s ? new Date(s).toLocaleDateString() : "�
     <a href="/jobs" class="muted">reset</a>
   </form>
 
+  {error && <div class="panel">⚠️ Can't reach the API at <code>{apiBase()}</code> — {error}</div>}
+
   <div class="panel">
     <table>
       <thead><tr><th>#</th><th>Score</th><th>Role</th><th>Company</th><th>Location</th><th>Source</th><th>Posted</th><th></th></tr></thead>
@@ -55,7 +59,7 @@ const fmtDate = (s: string | null) => (s ? new Date(s).toLocaleDateString() : "�
             <td>{(m.apply_url || m.url) && <a href={m.apply_url || m.url} target="_blank">apply ↗</a>}</td>
           </tr>
         ))}
-        {rows.length === 0 && <tr><td colspan="8" class="muted">No matches for these filters.</td></tr>}
+        {rows.length === 0 && !error && <tr><td colspan="8" class="muted">No matches for these filters.</td></tr>}
       </tbody>
     </table>
   </div>

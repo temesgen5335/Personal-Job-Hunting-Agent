@@ -1,18 +1,23 @@
 # Job Agent Dashboard (Astro)
 
-Read-only web view over the same SQLite store the agent writes
-(`../data/jobagent.db`). SSR — live data on each request, no separate API.
+Web view that fetches the **FastAPI orchestrator** (v2). SSR — live data each request.
+Start the API first (`scripts/run_api.py`), then point the dashboard at it via
+`JOBAGENT_API_URL`.
 
 ## Run
 ```bash
+# 1) backend (from repo root) — pick a free port
+PORT=8077 .venv/bin/python scripts/run_api.py
+
+# 2) dashboard
 cd dashboard
-npm install            # first time (builds better-sqlite3)
-npm run dev            # http://localhost:4321
+npm install
+JOBAGENT_API_URL=http://127.0.0.1:8077 npm run dev    # http://localhost:4321
 ```
 Production:
 ```bash
 npm run build
-JOBAGENT_DB_PATH=/abs/path/to/data/jobagent.db npm start   # node ./dist/server/entry.mjs
+JOBAGENT_API_URL=http://127.0.0.1:8077 npm start       # node ./dist/server/entry.mjs
 ```
 
 ## Pages
@@ -21,8 +26,8 @@ JOBAGENT_DB_PATH=/abs/path/to/data/jobagent.db npm start   # node ./dist/server/
 - **/applications** — application tracking (status, dates, links)
 
 ## Config
-- `JOBAGENT_DB_PATH` — absolute path to the store (defaults to `../data/jobagent.db`).
+- `JOBAGENT_API_URL` — backend base URL (default `http://127.0.0.1:8000`).
 - `HOST` / `PORT` — standard `@astrojs/node` standalone server vars.
 
-Read-only by design: the dashboard never writes. All mutations go through the
-FastAPI/bot path (the agent), keeping the store single-writer.
+Currently read-only (analytics). v2.1 adds config + actions via the API. All
+mutations go through the FastAPI orchestrator, keeping the store single-writer.

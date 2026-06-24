@@ -1,10 +1,16 @@
 ---
 import Layout from "../layouts/Layout.astro";
-import { getStats, getMatches, storeExists, storePath } from "../lib/db";
+import { getStats, getMatches, apiBase, type Stats, type MatchRow } from "../lib/api";
 
-const ready = storeExists();
-const stats = ready ? getStats() : null;
-const top = ready ? getMatches({ limit: 10 }) : [];
+let stats: Stats | null = null;
+let top: MatchRow[] = [];
+let error: string | null = null;
+try {
+  stats = await getStats();
+  top = await getMatches({ limit: 10 });
+} catch (e) {
+  error = (e as Error).message;
+}
 const maxSource = stats ? Math.max(1, ...stats.bySource.map((s) => s.n)) : 1;
 const fmt = (s: string | null) => (s ? new Date(s).toLocaleString() : "—");
 ---
@@ -12,9 +18,11 @@ const fmt = (s: string | null) => (s ? new Date(s).toLocaleString() : "—");
 <Layout title="Overview">
   <h1>Overview</h1>
 
-  {!ready && (
+  {error && (
     <div class="panel">
-      No store found at <code>{storePath()}</code>. Run <code>python scripts/pipeline.py --no-send</code> first.
+      ⚠️ Can't reach the API at <code>{apiBase()}</code> — {error}.<br />
+      Start it: <code>PORT=8077 .venv/bin/python scripts/run_api.py</code> and set
+      <code>JOBAGENT_API_URL</code> to match.
     </div>
   )}
 

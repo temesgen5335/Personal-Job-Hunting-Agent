@@ -29,12 +29,17 @@ service layer FastAPI exposes; the bot and dashboard stop touching the store dir
 
 ## Phases
 
-### v2.0 — FastAPI orchestrator (foundation)
-- Extract a service layer; FastAPI app with REST endpoints: jobs, matches,
-  applications, stats, trigger ingest/match, prepare/approve apply, ATS preview/submit.
-- Bot refactored to call the API (or shared service); dashboard reads via API.
-- Keep SQLite as SSoT; FastAPI is the sole mutator (restores R40-style discipline).
-- **Exit:** bot + dashboard both run against one backend; tests green.
+### v2.0 — FastAPI orchestrator (foundation) ✅
+- [x] FastAPI app (`jobagent/api/app.py`, `create_app` factory) wrapping the service
+      layer: GET /health /stats /jobs (filtered) /applications; POST /match,
+      /ingest (background), /apply/prepare, /apply/{id}/approve, /ats/preview, /ats/{id}/submit
+- [x] Per-request Store (SQLite thread-safety); injectable settings/llm/mailer for tests
+- [x] scripts/run_api.py (uvicorn); 6 API tests via TestClient (78 total)
+- [x] Live-verified on the real store (7,345 jobs, multi-LLM chain, filters)
+- [x] Astro dashboard now fetches the API (better-sqlite3 removed); live-verified E2E
+- [x] Bot keeps calling the shared service modules in-process (no HTTP hop — faster,
+      no risk to a working bot); both bot and API exercise the same service layer
+- **Exit:** dashboard runs against the API; bot + API share one service layer. ✅
 
 ### v2.1 — Config UI + secret management
 - Auth on the dashboard (single admin password/token — it now edits secrets).

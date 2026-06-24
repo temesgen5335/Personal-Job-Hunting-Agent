@@ -104,12 +104,20 @@ class Store:
         last_ingest = self.conn.execute(
             "SELECT created_at FROM events WHERE kind='ingest' ORDER BY id DESC LIMIT 1"
         ).fetchone()
+        apps = [
+            {"status": r["status"], "n": r["n"]}
+            for r in self.conn.execute(
+                "SELECT status, COUNT(*) AS n FROM applications GROUP BY status ORDER BY n DESC"
+            )
+        ]
         return {
             "total_jobs": self.count_jobs(),
             "by_source": by_source,
             "matches": matches,
             "strong_matches": strong,
             "last_ingest": last_ingest["created_at"] if last_ingest else None,
+            "apps": apps,
+            "total_apps": sum(a["n"] for a in apps),
         }
 
     # --- matches ----------------------------------------------------------
@@ -181,6 +189,15 @@ class Store:
     def get_job(self, job_id: str) -> dict | None:
         row = self.conn.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
         return dict(row) if row else None
+
+    def list_applications(self, limit: int = 200) -> list[dict]:
+        rows = self.conn.execute(
+            "SELECT a.id, a.status, a.apply_method, a.created_at, a.submitted_at, "
+            "j.title, j.company, j.url, j.apply_url FROM applications a "
+            "JOIN jobs j ON j.id = a.job_id ORDER BY a.created_at DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [dict(r) for r in rows]
 
     # --- applications + cv variants --------------------------------------
     def insert_cv_variant(self, cv) -> str:
