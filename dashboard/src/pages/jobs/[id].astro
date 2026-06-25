@@ -48,6 +48,21 @@ const pct = job ? Math.round(job.score * 100) : 0;
     </>
   )}
 
+  <style>
+    .fit-head { display: flex; gap: 16px; align-items: center; margin-bottom: 14px; }
+    .fit-ring { width: 64px; height: 64px; border-radius: 50%; flex: none;
+      display: grid; place-items: center; font: 700 20px var(--mono); color: var(--accent-2);
+      background: radial-gradient(circle at 50% 50%, var(--accent-dim), transparent 70%);
+      border: 2px solid var(--accent); }
+    .fit-ring span { font-size: 11px; }
+    .fit-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; }
+    .fit-sec h4 { margin: 0 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 600; }
+    .chip { display: inline-block; margin: 0 4px 4px 0; padding: 3px 9px; border-radius: 8px; font-size: 12.5px;
+      background: var(--panel-2); border: 1px solid var(--border-2); }
+    .chip.ok { background: rgba(63,185,80,.12); color: #5ad16b; border-color: rgba(63,185,80,.28); }
+    .chip.gap { background: rgba(227,160,8,.12); color: #e3a008; border-color: rgba(227,160,8,.28); }
+  </style>
+
   <script define:vars={{ apiUrl }}>
     const btn = document.getElementById("fit-btn");
     btn?.addEventListener("click", async () => {
@@ -60,13 +75,20 @@ const pct = job ? Math.round(job.score * 100) : 0;
         });
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         const f = await r.json();
+        const chips = (arr, cls) => (arr || []).map((x) => `<span class="chip ${cls || ""}">${x}</span>`).join(" ") || "<span class='muted'>—</span>";
+        const locOk = f.location_fit;
         out.innerHTML = `
-          <div style="font-size:20px" class="score">${Math.round(f.score * 100)}% fit
-            <span class="badge">${f.source}</span></div>
-          <p style="margin:8px 0 4px"><b>Matched:</b> ${(f.matched || []).join(", ") || "—"}</p>
-          <p style="margin:4px 0"><b>Gaps:</b> ${(f.missing || []).join(", ") || "none"}</p>
-          ${f.experience ? `<p class="muted" style="margin:4px 0">${f.experience}</p>` : ""}
-          ${f.summary ? `<p style="margin:4px 0">${f.summary}</p>` : ""}`;
+          <div class="fit-head">
+            <div class="fit-ring">${Math.round(f.score * 100)}<span>%</span></div>
+            <div><div class="fit-src badge">${f.source} assessment</div>
+              ${f.summary ? `<p style="margin:6px 0 0">${f.summary}</p>` : ""}</div>
+          </div>
+          <div class="fit-grid">
+            <div class="fit-sec"><h4>🛠 Skills / keywords <span class="muted">(${Math.round((f.coverage||0)*100)}% coverage)</span></h4>${chips(f.matched, "ok")}</div>
+            <div class="fit-sec"><h4>⚠️ Requirement gaps</h4>${chips(f.missing, "gap")}</div>
+            <div class="fit-sec"><h4>📍 Location</h4><span class="chip ${locOk ? "ok" : "gap"}">${f.location_note || (locOk ? "fits" : "mismatch")}</span></div>
+            <div class="fit-sec"><h4>🧭 Experience</h4><span class="muted">${f.experience || "—"}</span></div>
+          </div>`;
       } catch (e) {
         out.textContent = `Fit check failed: ${e.message}`;
       }

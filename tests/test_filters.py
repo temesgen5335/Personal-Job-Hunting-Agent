@@ -70,6 +70,41 @@ def test_ranked_matches_applies_filter(tmp_path):
     s.close()
 
 
+def test_exclude_and_include_locations(tmp_path):
+    s = _store(tmp_path)
+    _add(s, "RemoteUS", score=0.9, location="Remote - US only")
+    _add(s, "RemoteWW", score=0.9, location="Remote - Worldwide")
+    _add(s, "IndiaRole", score=0.9, location="Bangalore, India")
+    # exclude: drop US-only and India
+    got = {r["title"] for r in s.get_matches(exclude_locations=["US only", "India"])}
+    assert got == {"RemoteWW"}
+    # include (keep-only): only worldwide
+    got2 = {r["title"] for r in s.get_matches(include_locations=["worldwide"])}
+    assert got2 == {"RemoteWW"}
+    s.close()
+
+
+def test_offset_pagination(tmp_path):
+    s = _store(tmp_path)
+    for i in range(5):
+        _add(s, f"Job{i}", score=0.9 - i * 0.1, location="Remote")
+    page1 = [r["title"] for r in s.get_matches(limit=2, offset=0)]
+    page2 = [r["title"] for r in s.get_matches(limit=2, offset=2)]
+    assert page1 == ["Job0", "Job1"] and page2 == ["Job2", "Job3"]
+    s.close()
+
+
+def test_filter_from_profile_remote_default():
+    from jobagent.preferences import Profile
+    flt = MatchFilter.from_profile(Profile(must_haves=["remote"], exclude_locations=["US only"],
+                                           preferred_locations=["worldwide"]))
+    assert flt.location == "remote"
+    assert flt.exclude_locations == ["US only"]
+    assert flt.include_locations == ["worldwide"]
+    # no remote must-have → any
+    assert MatchFilter.from_profile(Profile(must_haves=[])).location == "any"
+
+
 def test_menu_action_updates_filter():
     flt = MatchFilter()
     apply_menu_action(flt, "date", "7")

@@ -154,14 +154,18 @@ def create_app(settings=None, profile=None, llm: Any = _UNSET, cv_master: str | 
             s.close()
 
     @app.get("/jobs")
-    def jobs(days: int = 0, location: str = "any", q: str | None = None, limit: int = 50):
+    def jobs(days: int = 0, location: str = "any", q: str | None = None,
+             exclude: str | None = None, include: str | None = None,
+             limit: int = 50, offset: int = 0):
+        split = lambda v: [x.strip() for x in (v or "").split(",") if x.strip()]  # noqa: E731
         flt = MatchFilter(
             max_age_days=days or None, location=location,
             keywords=[w for w in (q or "").replace(",", " ").split() if w],
+            exclude_locations=split(exclude), include_locations=split(include),
         )
         s = store()
         try:
-            return {"jobs": ranked_matches(s, limit, flt)}
+            return {"jobs": ranked_matches(s, limit, flt, offset=offset)}
         finally:
             s.close()
 

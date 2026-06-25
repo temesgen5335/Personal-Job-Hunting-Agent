@@ -54,6 +54,17 @@ def test_assess_fit_falls_back_to_heuristic_on_llm_error():
     assert isinstance(r, FitReport)
 
 
+def test_location_fit_remote_pref():
+    p = Profile(must_haves=["remote"], exclude_locations=["US only"],
+                target_roles=["AI Engineer"], core_skills=["Python"], keywords=["python"])
+    remote = heuristic_fit({"title": "AI Engineer", "description": "Python", "is_remote": True, "location": "Remote"}, p, "Python")
+    assert remote.location_fit is True
+    onsite = heuristic_fit({"title": "AI Engineer", "description": "Python", "is_remote": False, "location": "Berlin"}, p, "Python")
+    assert onsite.location_fit is False and "not remote" in onsite.location_note
+    excluded = heuristic_fit({"title": "AI Engineer", "description": "Python", "is_remote": True, "location": "Remote - US only"}, p, "Python")
+    assert excluded.location_fit is False and "excluded" in excluded.location_note
+
+
 def test_format_short_contains_pct_and_sections():
     r = heuristic_fit({"title": "AI Engineer", "description": "Python FastAPI LangChain"}, PROFILE, CV)
     text = r.format_short()

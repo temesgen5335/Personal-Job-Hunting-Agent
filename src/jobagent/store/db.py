@@ -154,9 +154,13 @@ class Store:
         max_age_days: int | None = None,
         location: str = "any",
         keywords: list[str] | None = None,
+        exclude_locations: list[str] | None = None,
+        include_locations: list[str] | None = None,
+        offset: int = 0,
     ) -> list[dict]:
-        """Ranked matches with optional filters: recency (posted_at→first_seen_at
-        fallback), location (remote/hybrid/any), keyword OR-match on title/desc/tags."""
+        """Ranked matches with filters: recency, location mode (remote/hybrid/any),
+        keyword OR-match, exclude_locations (drop), include_locations (keep-only),
+        and pagination via offset."""
         where = ["m.score >= ?"]
         params: list = [min_score]
 
@@ -178,12 +182,23 @@ class Store:
                 params += [k, k, k]
             where.append("(" + " OR ".join(ors) + ")")
 
+        for loc in exclude_locations or []:
+            where.append("LOWER(COALESCE(j.location,'')) NOT LIKE ?")
+            params.append(f"%{loc.lower()}%")
+
+        if include_locations:
+            ors = []
+            for loc in include_locations:
+                ors.append("LOWER(COALESCE(j.location,'')) LIKE ?")
+                params.append(f"%{loc.lower()}%")
+            where.append("(" + " OR ".join(ors) + ")")
+
         sql = (
             "SELECT j.*, m.score, m.rationale, m.gaps FROM matches m "
             "JOIN jobs j ON j.id = m.job_id WHERE " + " AND ".join(where)
-            + " ORDER BY m.score DESC LIMIT ?"
+            + " ORDER BY m.score DESC LIMIT ? OFFSET ?"
         )
-        params.append(limit)
+        params += [limit, offset]
         return [dict(r) for r in self.conn.execute(sql, params).fetchall()]
 
     def get_job(self, job_id: str) -> dict | None:

@@ -32,6 +32,10 @@ class Profile(BaseModel):
     must_haves: list[str] = Field(default_factory=list)
     nice_to_haves: list[str] = Field(default_factory=list)
     exclude_keywords: list[str] = Field(default_factory=list)
+    # Location filtering. preferred_locations: if set, keep only jobs matching one.
+    # exclude_locations: always drop jobs whose location matches any (e.g. "US only").
+    preferred_locations: list[str] = Field(default_factory=list)
+    exclude_locations: list[str] = Field(default_factory=list)
     keywords: list[str] = Field(default_factory=list)
     links: dict = Field(default_factory=dict)
 

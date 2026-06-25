@@ -53,7 +53,10 @@ export interface MatchFilter {
   days?: number;
   location?: "remote" | "hybrid" | "any";
   q?: string;
+  exclude?: string;   // comma-separated locations to drop
+  include?: string;   // comma-separated locations to keep-only
   limit?: number;
+  offset?: number;
 }
 
 export async function getMatches(f: MatchFilter = {}): Promise<MatchRow[]> {
@@ -61,7 +64,10 @@ export async function getMatches(f: MatchFilter = {}): Promise<MatchRow[]> {
   if (f.days) p.set("days", String(f.days));
   if (f.location) p.set("location", f.location);
   if (f.q) p.set("q", f.q);
+  if (f.exclude) p.set("exclude", f.exclude);
+  if (f.include) p.set("include", f.include);
   p.set("limit", String(f.limit ?? 50));
+  if (f.offset) p.set("offset", String(f.offset));
   return (await getJSON(`/jobs?${p.toString()}`)).jobs;
 }
 

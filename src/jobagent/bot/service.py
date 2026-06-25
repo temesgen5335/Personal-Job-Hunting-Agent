@@ -29,7 +29,20 @@ class MatchFilter:
     max_age_days: int | None = None        # None = any time
     location: str = "any"                  # remote | hybrid | any
     keywords: list[str] = field(default_factory=list)
+    exclude_locations: list[str] = field(default_factory=list)  # drop if location matches
+    include_locations: list[str] = field(default_factory=list)  # keep-only if set
     min_score: float = 0.0
+
+    @classmethod
+    def from_profile(cls, profile) -> "MatchFilter":
+        """Default filter seeded from preferences: remote-only if it's a must-have,
+        plus the profile's preferred/excluded locations. This is the persistent default."""
+        remote_pref = "remote" in [m.lower() for m in profile.must_haves]
+        return cls(
+            location="remote" if remote_pref else "any",
+            exclude_locations=list(profile.exclude_locations),
+            include_locations=list(profile.preferred_locations),
+        )
 
 
 def apply_menu_action(flt: MatchFilter, action: str, value: str) -> MatchFilter:
@@ -62,13 +75,15 @@ def is_owner(chat_id: int | None, owner_id: int | None) -> bool:
     return owner_id is not None and chat_id == owner_id
 
 
-def ranked_matches(store: Store, n: int = 10, flt: MatchFilter | None = None) -> list[dict]:
+def ranked_matches(store: Store, n: int = 10, flt: MatchFilter | None = None, offset: int = 0) -> list[dict]:
     """The diversified, ranked, FILTERED shortlist. /jobs and /apply <rank> share this
     so the numbering a user sees maps to the right job."""
     flt = flt or MatchFilter()
     pool = store.get_matches(
         limit=max(n * 8, 40), min_score=flt.min_score,
         max_age_days=flt.max_age_days, location=flt.location, keywords=flt.keywords,
+        exclude_locations=flt.exclude_locations, include_locations=flt.include_locations,
+        offset=offset,
     )
     return diversify(pool, n, max_per_company=2)
 

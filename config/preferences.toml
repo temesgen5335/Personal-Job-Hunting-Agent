@@ -59,6 +59,11 @@ exclude_keywords = [
     "unpaid", "internship", "clearance required", "US citizens only",
 ]
 
+# Location filters. preferred_locations: if non-empty, ONLY jobs matching one are shown.
+# exclude_locations: always drop jobs whose location contains any of these substrings.
+preferred_locations = []                       # e.g. ["remote", "worldwide", "EMEA", "Africa"]
+exclude_locations = ["US only", "United States only", "India only"]
+
 # Free-text positive keywords for the embedding/keyword prefilter.
 keywords = [
     "AI engineer", "agent", "agentic", "LLM", "RAG", "full-stack",

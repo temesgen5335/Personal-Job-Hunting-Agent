@@ -348,7 +348,8 @@ def build_application(settings, profile, llm, cv_master: str) -> Application:
     app = Application.builder().token(settings.telegram_bot_token).build()
     app.bot_data.update(
         settings=settings, owner_id=settings.telegram_destination,
-        profile=profile, llm=llm, cv_master=cv_master, filter=MatchFilter(),
+        profile=profile, llm=llm, cv_master=cv_master,
+        filter=MatchFilter.from_profile(profile),   # persistent default (e.g. remote-only)
     )
     app.add_handler(CommandHandler(["start", "help", "menu"], menu))
     app.add_handler(CommandHandler("jobs", jobs))

@@ -3,11 +3,20 @@ import Layout from "../layouts/Layout.astro";
 import { getMatches, apiBase, type MatchFilter, type MatchRow } from "../lib/api";
 
 const url = Astro.url;
-const daysParam = url.searchParams.get("days") ?? "0";
-const location = (url.searchParams.get("location") ?? "any") as MatchFilter["location"];
-const q = url.searchParams.get("q") ?? "";
+const sp = url.searchParams;
+const daysParam = sp.get("days") ?? "0";
+const location = (sp.get("location") ?? "any") as MatchFilter["location"];
+const q = sp.get("q") ?? "";
+const exclude = sp.get("exclude") ?? "";
+const include = sp.get("include") ?? "";
+const page = Math.max(1, Number(sp.get("page") || "1"));
+const LIMIT = 25;
 
-const filter: MatchFilter = { days: Number(daysParam) || 0, location, q: q.trim() || undefined, limit: 100 };
+const filter: MatchFilter = {
+  days: Number(daysParam) || 0, location, q: q.trim() || undefined,
+  exclude: exclude.trim() || undefined, include: include.trim() || undefined,
+  limit: LIMIT, offset: (page - 1) * LIMIT,
+};
 
 let rows: MatchRow[] = [];
 let error: string | null = null;
@@ -20,25 +29,48 @@ try {
 const dateOpts = [["0", "Any time"], ["1", "Today"], ["2", "2 days"], ["7", "Week"], ["30", "Month"]];
 const locOpts = ["any", "remote", "hybrid"];
 const fmtDate = (s: string | null) => (s ? new Date(s).toLocaleDateString() : "—");
+
+// Build a page link preserving current filters.
+const pageHref = (p: number) => {
+  const u = new URLSearchParams(sp);
+  u.set("page", String(p));
+  return `/jobs?${u.toString()}`;
+};
+const hasNext = rows.length === LIMIT;
 ---
 
 <Layout title="Jobs">
-  <h1>Jobs <span class="muted" style="font-size:14px">({rows.length})</span></h1>
+  <div style="display:flex; align-items:baseline; justify-content:space-between; gap:12px">
+    <h1>Jobs</h1>
+    <span class="muted" style="font-size:13px">page {page} · showing {rows.length}</span>
+  </div>
 
-  <form class="filters panel" method="get">
-    <label>Date
-      <select name="days">
-        {dateOpts.map(([v, l]) => <option value={v} selected={v === daysParam}>{l}</option>)}
-      </select>
-    </label>
-    <label>Location
-      <select name="location">
-        {locOpts.map((l) => <option value={l} selected={l === location}>{l}</option>)}
-      </select>
-    </label>
-    <input type="search" name="q" placeholder="keywords e.g. frontend ai" value={q} />
-    <button type="submit">Filter</button>
-    <a href="/jobs" class="muted">reset</a>
+  <form class="filter-bar panel" method="get">
+    <div class="fgrid">
+      <label class="fld">Posted within
+        <select name="days">
+          {dateOpts.map(([v, l]) => <option value={v} selected={v === daysParam}>{l}</option>)}
+        </select>
+      </label>
+      <label class="fld">Location
+        <select name="location">
+          {locOpts.map((l) => <option value={l} selected={l === location}>{l}</option>)}
+        </select>
+      </label>
+      <label class="fld">Keywords
+        <input type="search" name="q" placeholder="frontend ai agent" value={q} />
+      </label>
+      <label class="fld">Exclude locations
+        <input type="text" name="exclude" placeholder="US only, India" value={exclude} />
+      </label>
+      <label class="fld">Only locations
+        <input type="text" name="include" placeholder="remote, worldwide, EMEA" value={include} />
+      </label>
+    </div>
+    <div class="factions">
+      <button type="submit">Apply filters</button>
+      <a href="/jobs" class="muted">reset</a>
+    </div>
   </form>
 
   {error && <div class="panel">⚠️ Can't reach the API at <code>{apiBase()}</code> — {error}</div>}
@@ -49,7 +81,7 @@ const fmtDate = (s: string | null) => (s ? new Date(s).toLocaleDateString() : "�
       <tbody>
         {rows.map((m, i) => (
           <tr>
-            <td class="muted">{i + 1}</td>
+            <td class="muted">{(page - 1) * LIMIT + i + 1}</td>
             <td class="score">{Math.round(m.score * 100)}%</td>
             <td><a href={`/jobs/${m.id}`}>{m.title}</a><br /><span class="muted" style="font-size:12px">{m.rationale}</span></td>
             <td>{m.company}</td>
@@ -63,4 +95,24 @@ const fmtDate = (s: string | null) => (s ? new Date(s).toLocaleDateString() : "�
       </tbody>
     </table>
   </div>
+
+  <div class="pager">
+    {page > 1 ? <a class="pgbtn" href={pageHref(page - 1)}>← Prev</a> : <span class="pgbtn disabled">← Prev</span>}
+    <span class="muted">page {page}</span>
+    {hasNext ? <a class="pgbtn" href={pageHref(page + 1)}>Next →</a> : <span class="pgbtn disabled">Next →</span>}
+  </div>
+
+  <style>
+    .filter-bar { display: flex; flex-direction: column; gap: 14px; }
+    .fgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; }
+    .fld { flex-direction: column; align-items: stretch; gap: 6px; font-size: 12px; color: var(--faint);
+      text-transform: uppercase; letter-spacing: .05em; font-weight: 600; }
+    .fld select, .fld input { text-transform: none; letter-spacing: normal; font-weight: 400; color: var(--text); }
+    .factions { display: flex; gap: 14px; align-items: center; }
+    .pager { display: flex; gap: 16px; align-items: center; justify-content: center; }
+    .pgbtn { padding: 7px 14px; border: 1px solid var(--border-2); border-radius: 8px; background: var(--panel);
+      color: var(--text); text-decoration: none; }
+    .pgbtn:hover { background: var(--hover); text-decoration: none; }
+    .pgbtn.disabled { color: var(--faint); border-color: var(--border); pointer-events: none; }
+  </style>
 </Layout>
