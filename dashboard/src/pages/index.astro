@@ -50,7 +50,7 @@ const fmt = (s: string | null) => (s ? new Date(s).toLocaleString() : "—");
               <tr>
                 <td style="width:120px">{s.source}</td>
                 <td style="width:70px" class="muted">{s.n}</td>
-                <td><div class="bar" style={`width:${(s.n / maxSource) * 100}%`}></div></td>
+                <td><div class="bar-track"><div class="bar" style={`width:${(s.n / maxSource) * 100}%`}></div></div></td>
               </tr>
             ))}
           </tbody>
