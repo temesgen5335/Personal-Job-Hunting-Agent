@@ -1,16 +1,19 @@
 ---
 import Layout from "../layouts/Layout.astro";
-import { getStats, getMatches, apiBase, type Stats, type MatchRow } from "../lib/api";
+import { getStats, getMatches, getAnalytics, apiBase, type Stats, type MatchRow, type Analytics } from "../lib/api";
 
 let stats: Stats | null = null;
 let top: MatchRow[] = [];
+let analytics: Analytics | null = null;
 let error: string | null = null;
 try {
   stats = await getStats();
   top = await getMatches({ limit: 10 });
+  analytics = await getAnalytics();
 } catch (e) {
   error = (e as Error).message;
 }
+const pctRate = (r: number) => `${Math.round(r * 100)}%`;
 const maxSource = stats ? Math.max(1, ...stats.bySource.map((s) => s.n)) : 1;
 const fmt = (s: string | null) => (s ? new Date(s).toLocaleString() : "—");
 ---
@@ -53,10 +56,27 @@ const fmt = (s: string | null) => (s ? new Date(s).toLocaleString() : "—");
 
       <div class="panel">
         <strong>Application funnel</strong>
-        {stats.apps.length === 0 ? (
+        {!analytics || analytics.total === 0 ? (
           <p class="muted">No applications yet. Use <code>/apply</code> in the bot.</p>
         ) : (
-          <p>{stats.apps.map((a) => (<span class={`badge ${a.status}`} style="margin-right:8px">{a.status}: {a.n}</span>))}</p>
+          <>
+            <p style="margin:10px 0">
+              {Object.entries(analytics.by_status).map(([s, n]) => (
+                <span class={`badge ${s}`} style="margin-right:8px">{s}: {n}</span>
+              ))}
+            </p>
+            <div class="cards" style="margin:0">
+              <div class="card"><div class="n">{analytics.submitted}</div><div class="l">Submitted</div></div>
+              <div class="card"><div class="n">{pctRate(analytics.response_rate)}</div><div class="l">Response rate</div></div>
+              <div class="card"><div class="n">{pctRate(analytics.interview_rate)}</div><div class="l">Interview rate</div></div>
+              <div class="card"><div class="n">{pctRate(analytics.offer_rate)}</div><div class="l">Offer rate</div></div>
+            </div>
+            {analytics.by_source.length > 0 && (
+              <p class="muted" style="margin-top:12px">
+                By source: {analytics.by_source.map((s) => `${s.source} ${s.n}`).join(" · ")}
+              </p>
+            )}
+          </>
         )}
       </div>
 

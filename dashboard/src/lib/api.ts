@@ -80,3 +80,27 @@ export interface AppRow {
 export async function getApplications(limit = 200): Promise<AppRow[]> {
   return (await getJSON(`/applications?limit=${limit}`)).applications;
 }
+
+export interface Analytics {
+  total: number;
+  by_status: Record<string, number>;
+  by_source: { source: string; n: number }[];
+  timeline: { day: string; n: number }[];
+  submitted: number;
+  interview: number;
+  offer: number;
+  rejected: number;
+  response_rate: number;
+  interview_rate: number;
+  offer_rate: number;
+}
+
+export async function getAnalytics(): Promise<Analytics> {
+  return getJSON("/analytics");
+}
+
+export const APPLICATION_STATUSES = [
+  "matched", "drafting", "awaiting_approval", "submitted",
+  "rejected", "interview", "offer", "skipped", "failed",
+];
+

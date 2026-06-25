@@ -21,6 +21,7 @@ from jobagent.apply.ats_flow import create_ats_application, run_ats
 from jobagent.apply.email_send import send_email
 from jobagent.bot.service import MatchFilter, ranked_matches
 from jobagent.config import get_settings, reload_settings
+from jobagent.core.schemas import ApplicationStatus
 from jobagent.fit import assess_fit
 from jobagent.ingestion.registry import build_adapters
 from jobagent.ingestion.runner import run_ingestion
@@ -43,6 +44,13 @@ class LoginReq(BaseModel):
 
 class ConfigPatch(BaseModel):
     values: dict
+
+
+class StatusReq(BaseModel):
+    status: str
+
+
+_VALID_STATUSES = {s.value for s in ApplicationStatus}
 
 
 def _token_for(password: str, master_key: str) -> str:
@@ -162,6 +170,27 @@ def create_app(settings=None, profile=None, llm: Any = _UNSET, cv_master: str | 
         s = store()
         try:
             return {"applications": s.list_applications(limit)}
+        finally:
+            s.close()
+
+    @app.patch("/applications/{app_id}")
+    def update_application(app_id: str, body: StatusReq):
+        if body.status not in _VALID_STATUSES:
+            raise HTTPException(400, f"Invalid status. One of: {sorted(_VALID_STATUSES)}")
+        s = store()
+        try:
+            if not s.get_application(app_id):
+                raise HTTPException(404, "Application not found.")
+            s.update_application(app_id, status=body.status)
+        finally:
+            s.close()
+        return {"id": app_id, "status": body.status}
+
+    @app.get("/analytics")
+    def analytics():
+        s = store()
+        try:
+            return s.application_analytics()
         finally:
             s.close()
 

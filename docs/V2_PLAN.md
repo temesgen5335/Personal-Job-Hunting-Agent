@@ -65,11 +65,13 @@ service layer FastAPI exposes; the bot and dashboard stop touching the store dir
 - [ ] (later) surface fit in the dashboard job/detail view
 - **Exit:** /apply shows a fit score + breakdown. ✅
 
-### v2.3 — Application tracker + analytics
-- Track applied jobs (not just pulled): status pipeline, response/interview/offer.
-- Dashboard analytics: applied funnel, response rate, fit-vs-outcome, source
-  effectiveness, activity over time.
-- **Exit:** overview shows the full funnel from pulled → matched → applied → outcome.
+### v2.3 — Application tracker + analytics ✅
+- [x] store.application_analytics(): funnel, outcome rates, by-source, daily timeline
+- [x] API: PATCH /applications/{id} {status} (outcome tracking) + GET /analytics
+- [x] Dashboard: Applications page inline status editing (PATCH); Overview analytics
+      (funnel badges, submitted/response/interview/offer rates, by-source)
+- [x] 3 tests (95 total); live-verified (endpoint + dashboard render)
+- **Exit:** overview shows the funnel pulled → matched → applied → outcome. ✅
 
 ### v2.4 — UI polish
 - Clean, interactive dashboard: charts, filters, job/application detail views.

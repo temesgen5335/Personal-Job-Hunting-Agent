@@ -131,6 +131,22 @@ def test_config_auth_and_roundtrip(tmp_path, monkeypatch):
     assert SecretStore().load()["groq_api_key"] == "gsk_secret"
 
 
+def test_update_application_status_and_analytics(client):
+    # Create an application via prepare, then move it through the funnel.
+    app_id = client.post("/apply/prepare", json={"job_id": client._email_job_id}).json()["application_id"]
+
+    assert client.patch(f"/applications/{app_id}", json={"status": "bogus"}).status_code == 400
+    assert client.patch("/applications/nope", json={"status": "interview"}).status_code == 404
+
+    r = client.patch(f"/applications/{app_id}", json={"status": "interview"})
+    assert r.status_code == 200 and r.json()["status"] == "interview"
+
+    a = client.get("/analytics").json()
+    assert a["total"] >= 1
+    assert a["by_status"].get("interview") == 1
+    assert any(s["source"] == "remoteok" for s in a["by_source"])
+
+
 def test_config_disabled_without_password(tmp_path, monkeypatch):
     monkeypatch.setenv("JOBAGENT_DB_PATH", str(tmp_path / "d.db"))
     monkeypatch.delenv("DASHBOARD_PASSWORD", raising=False)

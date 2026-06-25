@@ -1,6 +1,6 @@
 ---
 import Layout from "../layouts/Layout.astro";
-import { getApplications, apiBase, type AppRow } from "../lib/api";
+import { getApplications, apiBase, APPLICATION_STATUSES, type AppRow } from "../lib/api";
 
 let apps: AppRow[] = [];
 let error: string | null = null;
@@ -9,13 +9,15 @@ try {
 } catch (e) {
   error = (e as Error).message;
 }
+const apiUrl = apiBase();
 const fmt = (s: string | null) => (s ? new Date(s).toLocaleString() : "—");
 ---
 
 <Layout title="Applications">
   <h1>Applications <span class="muted" style="font-size:14px">({apps.length})</span></h1>
+  <p class="muted">Change a status to track outcomes (interview, offer, rejected). Saves instantly.</p>
 
-  {error && <div class="panel">⚠️ Can't reach the API at <code>{apiBase()}</code> — {error}</div>}
+  {error && <div class="panel">⚠️ Can't reach the API at <code>{apiUrl}</code> — {error}</div>}
 
   <div class="panel">
     <table>
@@ -26,7 +28,11 @@ const fmt = (s: string | null) => (s ? new Date(s).toLocaleString() : "—");
             <td>{a.title}</td>
             <td>{a.company}</td>
             <td class="muted">{a.apply_method}</td>
-            <td><span class={`badge ${a.status}`}>{a.status}</span></td>
+            <td>
+              <select class="status-select" data-id={a.id}>
+                {APPLICATION_STATUSES.map((s) => <option value={s} selected={s === a.status}>{s}</option>)}
+              </select>
+            </td>
             <td class="muted">{fmt(a.created_at)}</td>
             <td class="muted">{fmt(a.submitted_at)}</td>
             <td>{(a.apply_url || a.url) && <a href={a.apply_url || a.url} target="_blank">link ↗</a>}</td>
@@ -36,4 +42,24 @@ const fmt = (s: string | null) => (s ? new Date(s).toLocaleString() : "—");
       </tbody>
     </table>
   </div>
+
+  <script define:vars={{ apiUrl }}>
+    document.querySelectorAll(".status-select").forEach((el) => {
+      el.addEventListener("change", async (e) => {
+        const sel = e.target;
+        const prev = sel.dataset.prev || sel.value;
+        try {
+          const r = await fetch(`${apiUrl}/applications/${sel.dataset.id}`, {
+            method: "PATCH", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ status: sel.value }),
+          });
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          sel.dataset.prev = sel.value;
+        } catch (err) {
+          alert(`Update failed: ${err.message}`);
+          sel.value = prev;
+        }
+      });
+    });
+  </script>
 </Layout>

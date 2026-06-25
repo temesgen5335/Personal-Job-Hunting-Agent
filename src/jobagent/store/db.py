@@ -190,6 +190,46 @@ class Store:
         row = self.conn.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
         return dict(row) if row else None
 
+    def application_analytics(self, days: int = 30) -> dict:
+        """Funnel, outcome rates, by-source, and a daily timeline for the dashboard."""
+        by_status = {
+            r["status"]: r["n"]
+            for r in self.conn.execute("SELECT status, COUNT(*) n FROM applications GROUP BY status")
+        }
+        by_source = [
+            {"source": r["source"], "n": r["n"]}
+            for r in self.conn.execute(
+                "SELECT j.source, COUNT(*) n FROM applications a JOIN jobs j ON j.id=a.job_id "
+                "GROUP BY j.source ORDER BY n DESC"
+            )
+        ]
+        timeline = [
+            {"day": r["d"], "n": r["n"]}
+            for r in self.conn.execute(
+                "SELECT substr(created_at,1,10) d, COUNT(*) n FROM applications "
+                "GROUP BY d ORDER BY d DESC LIMIT ?",
+                (days,),
+            )
+        ]
+        submitted = by_status.get("submitted", 0)
+        interview = by_status.get("interview", 0)
+        offer = by_status.get("offer", 0)
+        rejected = by_status.get("rejected", 0)
+        rate = lambda n: round(n / submitted, 3) if submitted else 0.0  # noqa: E731
+        return {
+            "total": sum(by_status.values()),
+            "by_status": by_status,
+            "by_source": by_source,
+            "timeline": timeline,
+            "submitted": submitted,
+            "interview": interview,
+            "offer": offer,
+            "rejected": rejected,
+            "response_rate": rate(interview + offer + rejected),
+            "interview_rate": rate(interview),
+            "offer_rate": rate(offer),
+        }
+
     def list_applications(self, limit: int = 200) -> list[dict]:
         rows = self.conn.execute(
             "SELECT a.id, a.status, a.apply_method, a.created_at, a.submitted_at, "
