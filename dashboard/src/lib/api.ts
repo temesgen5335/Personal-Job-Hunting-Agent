@@ -81,6 +81,17 @@ export async function getApplications(limit = 200): Promise<AppRow[]> {
   return (await getJSON(`/applications?limit=${limit}`)).applications;
 }
 
+export interface JobDetail extends MatchRow {
+  description?: string;
+  salary_text?: string | null;
+  apply_email?: string | null;
+  tags?: string;
+}
+
+export async function getJob(id: string): Promise<JobDetail> {
+  return getJSON(`/job/${encodeURIComponent(id)}`);
+}
+
 export interface Analytics {
   total: number;
   by_status: Record<string, number>;

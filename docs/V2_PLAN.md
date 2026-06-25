@@ -73,10 +73,20 @@ service layer FastAPI exposes; the bot and dashboard stop touching the store dir
 - [x] 3 tests (95 total); live-verified (endpoint + dashboard render)
 - **Exit:** overview shows the funnel pulled → matched → applied → outcome. ✅
 
-### v2.4 — UI polish
-- Clean, interactive dashboard: charts, filters, job/application detail views.
-- Keep it simple and fast; no heavy framework creep.
-- **Exit:** a dashboard that's pleasant to live in daily.
+### v2.4 — UI polish ✅
+- [x] Job detail page (/jobs/[id]) with full description + on-demand **Check fit**
+      button (surfaces the v2.2 fit-checker in the dashboard)
+- [x] API GET /job/{id} (job + match); clickable job titles → detail
+- [x] Inline SVG applications-per-day chart on Overview
+- [x] CSS polish: hover rows, responsive table scroll, styled description blocks
+- [x] 95 tests; live-verified (detail render, /job/{id}, fit button, 404)
+- **Exit:** a dashboard that's pleasant to live in daily. ✅
+
+---
+
+## v2 status: complete 🎉
+All phases shipped (v2.0 orchestrator → v2.4 polish). Self-hostable, configurable
+from the UI, fit-aware, with application tracking + analytics. 95 tests passing.
 
 ## Cross-cutting
 - Hard rules from v1 carry forward (no CV fabrication, no submit without approval,

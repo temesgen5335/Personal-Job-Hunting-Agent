@@ -173,6 +173,18 @@ def create_app(settings=None, profile=None, llm: Any = _UNSET, cv_master: str | 
         finally:
             s.close()
 
+    @app.get("/job/{job_id}")
+    def job_detail(job_id: str):
+        s = store()
+        try:
+            job = s.get_job(job_id)
+            if not job:
+                raise HTTPException(404, "Job not found.")
+            match = s.get_match(job_id) or {}
+        finally:
+            s.close()
+        return {**job, **match}
+
     @app.patch("/applications/{app_id}")
     def update_application(app_id: str, body: StatusReq):
         if body.status not in _VALID_STATUSES:

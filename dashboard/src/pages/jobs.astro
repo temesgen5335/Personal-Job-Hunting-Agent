@@ -51,7 +51,7 @@ const fmtDate = (s: string | null) => (s ? new Date(s).toLocaleDateString() : "â
           <tr>
             <td class="muted">{i + 1}</td>
             <td class="score">{Math.round(m.score * 100)}%</td>
-            <td>{m.title}<br /><span class="muted" style="font-size:12px">{m.rationale}</span></td>
+            <td><a href={`/jobs/${m.id}`}>{m.title}</a><br /><span class="muted" style="font-size:12px">{m.rationale}</span></td>
             <td>{m.company}</td>
             <td class="muted">{m.location || (m.is_remote ? "Remote" : "â€”")}</td>
             <td><span class="badge">{m.source}</span></td>

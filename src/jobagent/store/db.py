@@ -190,6 +190,12 @@ class Store:
         row = self.conn.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
         return dict(row) if row else None
 
+    def get_match(self, job_id: str) -> dict | None:
+        row = self.conn.execute(
+            "SELECT score, rationale, gaps FROM matches WHERE job_id=?", (job_id,)
+        ).fetchone()
+        return dict(row) if row else None
+
     def application_analytics(self, days: int = 30) -> dict:
         """Funnel, outcome rates, by-source, and a daily timeline for the dashboard."""
         by_status = {

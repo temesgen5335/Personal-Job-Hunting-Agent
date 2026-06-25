@@ -14,6 +14,10 @@ try {
   error = (e as Error).message;
 }
 const pctRate = (r: number) => `${Math.round(r * 100)}%`;
+// Applications-per-day, oldest→newest, for the inline SVG chart.
+const timeline = (analytics?.timeline ?? []).slice().reverse();
+const tlMax = Math.max(1, ...timeline.map((t) => t.n));
+const BW = 26, GAP = 6, H = 90;
 const maxSource = stats ? Math.max(1, ...stats.bySource.map((s) => s.n)) : 1;
 const fmt = (s: string | null) => (s ? new Date(s).toLocaleString() : "—");
 ---
@@ -75,6 +79,22 @@ const fmt = (s: string | null) => (s ? new Date(s).toLocaleString() : "—");
               <p class="muted" style="margin-top:12px">
                 By source: {analytics.by_source.map((s) => `${s.source} ${s.n}`).join(" · ")}
               </p>
+            )}
+            {timeline.length > 0 && (
+              <div style="margin-top:16px">
+                <span class="muted" style="font-size:13px">Applications per day</span>
+                <svg width={timeline.length * (BW + GAP)} height={H + 20} style="display:block; margin-top:6px">
+                  {timeline.map((t, i) => {
+                    const h = Math.round((t.n / tlMax) * H);
+                    return (
+                      <g transform={`translate(${i * (BW + GAP)},0)`}>
+                        <rect x="0" y={H - h} width={BW} height={h} rx="3" fill="var(--accent)"></rect>
+                        <text x={BW / 2} y={H + 14} text-anchor="middle" fill="var(--muted)" font-size="9">{t.day.slice(5)}</text>
+                      </g>
+                    );
+                  })}
+                </svg>
+              </div>
             )}
           </>
         )}
