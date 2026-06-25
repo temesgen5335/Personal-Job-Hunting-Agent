@@ -88,6 +88,15 @@ def test_prepare_unknown_job_404(client):
     assert client.post("/apply/prepare", json={"job_id": "nope"}).status_code == 404
 
 
+def test_fit_endpoint(client):
+    r = client.post("/fit", json={"job_id": client._email_job_id})
+    assert r.status_code == 200
+    body = r.json()
+    assert 0.0 <= body["score"] <= 1.0
+    assert "matched" in body and "missing" in body and body["source"] in ("heuristic", "llm")
+    assert client.post("/fit", json={"job_id": "nope"}).status_code == 404
+
+
 def test_ats_preview_rejects_non_ats(client):
     # The email job isn't an ATS posting → 400.
     assert client.post("/ats/preview", json={"job_id": client._email_job_id}).status_code == 400

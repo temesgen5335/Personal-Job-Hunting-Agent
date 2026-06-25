@@ -43,6 +43,7 @@ from jobagent.bot.service import (
     status_text,
 )
 from jobagent.core.schemas import ApplicationStatus
+from jobagent.fit import assess_fit
 from jobagent.store import Store
 
 MD = ParseMode.MARKDOWN
@@ -216,6 +217,10 @@ async def _start_apply(context, msg, rank: int) -> None:
         ats_app_id = create_ats_application(store, job) if platform else None
     finally:
         store.close()
+
+    # Fit check first — show the confidence + matched/gaps before drafting/filling.
+    fit = await asyncio.to_thread(assess_fit, job, _bd(context, "profile"), _bd(context, "cv_master"), _llm())
+    await msg.reply_text(fit.format_short(), parse_mode=MD)
 
     # --- ATS (Tier-2): fill + screenshot preview, then Submit/Cancel ---
     if platform:

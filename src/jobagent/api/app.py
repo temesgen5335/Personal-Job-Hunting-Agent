@@ -21,6 +21,7 @@ from jobagent.apply.ats_flow import create_ats_application, run_ats
 from jobagent.apply.email_send import send_email
 from jobagent.bot.service import MatchFilter, ranked_matches
 from jobagent.config import get_settings, reload_settings
+from jobagent.fit import assess_fit
 from jobagent.ingestion.registry import build_adapters
 from jobagent.ingestion.runner import run_ingestion
 from jobagent.llm_client import build_llm
@@ -177,6 +178,17 @@ def create_app(settings=None, profile=None, llm: Any = _UNSET, cv_master: str | 
     def ingest(bg: BackgroundTasks):
         bg.add_task(_ingest_task, settings.db_path, settings, profile, _llm())
         return {"status": "started"}
+
+    @app.post("/fit")
+    def fit(req: JobIdReq):
+        s = store()
+        try:
+            job = s.get_job(req.job_id)
+            if not job:
+                raise HTTPException(404, "Job not found.")
+        finally:
+            s.close()
+        return assess_fit(job, profile, cv_master, _llm()).to_dict()
 
     @app.post("/apply/prepare")
     def apply_prepare(req: JobIdReq):

@@ -56,14 +56,14 @@ service layer FastAPI exposes; the bot and dashboard stop touching the store dir
   own network; the auth gate + encryption-at-rest are mandatory (both implemented).
 - **Exit:** a fresh user configures everything from the dashboard, no file editing.
 
-### v2.2 — Fit-checker (confidence score + explainable report)
-- A dedicated fit model run at apply-time and shown in bot + dashboard:
-  - **Keyword/ATS coverage:** % of the JD's key terms present in the CV.
-  - **Requirement match:** LLM extracts JD requirements → matched / partial / missing.
-  - **Experience match:** seniority + years vs. the role.
-  - **Confidence %** + a short "why" and the top gaps to address.
-- Surfaced as "You're ~78% fit — missing: Kubernetes, on-call experience" before you apply.
-- **Exit:** every job in /apply and the dashboard shows a fit score + breakdown.
+### v2.2 — Fit-checker (confidence score + explainable report) ✅
+- [x] `fit.py`: heuristic_fit (ATS keyword coverage, no API) + llm_fit (matched/missing
+      requirements, experience read, confidence) + assess_fit (LLM with heuristic fallback)
+- [x] API `POST /fit {job_id}` → FitReport
+- [x] Bot `/apply` shows the fit (confidence % + matched + gaps) before drafting/filling
+- [x] 7 tests (94 total); live-verified (Groq: 80% fit with JD-specific gaps)
+- [ ] (later) surface fit in the dashboard job/detail view
+- **Exit:** /apply shows a fit score + breakdown. ✅
 
 ### v2.3 — Application tracker + analytics
 - Track applied jobs (not just pulled): status pipeline, response/interview/offer.
