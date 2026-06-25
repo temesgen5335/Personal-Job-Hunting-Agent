@@ -16,4 +16,5 @@ app = create_app()
 if __name__ == "__main__":
     import os
 
-    uvicorn.run(app, host=os.environ.get("HOST", "127.0.0.1"), port=int(os.environ.get("PORT", "8000")))
+    # Default 8077 (8000 commonly clashes with other local services). Override with PORT.
+    uvicorn.run(app, host=os.environ.get("HOST", "127.0.0.1"), port=int(os.environ.get("PORT", "8077")))

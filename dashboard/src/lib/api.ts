@@ -1,6 +1,6 @@
 // Dashboard data layer — talks to the FastAPI orchestrator (v2), not SQLite directly.
-// Set JOBAGENT_API_URL to point at the backend (default http://127.0.0.1:8000).
-const API = process.env.JOBAGENT_API_URL || "http://127.0.0.1:8000";
+// Set JOBAGENT_API_URL to point at the backend (default http://127.0.0.1:8077).
+const API = process.env.JOBAGENT_API_URL || "http://127.0.0.1:8077";
 
 export function apiBase(): string {
   return API;
