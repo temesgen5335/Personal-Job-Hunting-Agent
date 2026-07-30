@@ -11,6 +11,8 @@ Usage:
 
 import argparse
 import sys
+import time
+import uuid
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
@@ -18,6 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from jobagent.bot.notify import send_message  # noqa: E402
 from jobagent.bot.service import jobs_text  # noqa: E402
 from jobagent.config import get_settings  # noqa: E402
+from jobagent.core.schemas import Event  # noqa: E402
 from jobagent.digest import format_followups, health_banner  # noqa: E402
 from jobagent.ingestion.registry import build_adapters  # noqa: E402
 from jobagent.ingestion.runner import run_ingestion  # noqa: E402
@@ -38,8 +41,14 @@ def main() -> None:
     store = Store(settings.db_path)
     store.init_schema()
 
+    # One id for the whole pass — every event below carries it, so a slow or failing
+    # run is reconstructable from the events table (store.events_for_run).
+    run_id = uuid.uuid4().hex[:12]
+    started = time.monotonic()
+    print(f"[run] {run_id}")
+
     # 1) Ingest
-    report = run_ingestion(build_adapters(settings), store)
+    report = run_ingestion(build_adapters(settings), store, run_id=run_id)
     print(f"[ingest] {report.total_new} new / {report.total_fetched} fetched")
     for r in report.results:
         if r.error:
@@ -47,7 +56,7 @@ def main() -> None:
 
     # 2) Match
     llm = build_llm(settings)
-    mreport = run_matching(store, profile, llm=llm)
+    mreport = run_matching(store, profile, llm=llm, run_id=run_id)
     mode = f"heuristic+LLM ({' → '.join(llm.chain)})" if mreport.used_llm else "heuristic"
     print(f"[match] scored {mreport.scored} ({mode}); LLM-reranked {mreport.llm_reranked}")
 
@@ -59,8 +68,10 @@ def main() -> None:
     if banner:
         print("[health] " + banner.strip().replace("\n", "\n[health] "))
     if args.no_send:
+        digest_status = "skipped (--no-send)"
         print("[digest] skipped (--no-send)")
     elif not (settings.telegram_bot_token and settings.telegram_destination):
+        digest_status = "skipped (no bot creds)"
         print("[digest] skipped (no TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID)")
     else:
         try:
@@ -68,10 +79,22 @@ def main() -> None:
                 settings.telegram_bot_token, settings.telegram_destination,
                 banner + jobs_text(store, args.top) + followups,
             )
+            digest_status = f"sent ({sent} message(s))"
             print(f"[digest] sent in {sent} message(s)")
         except Exception as exc:  # noqa: BLE001 — report, don't fail the whole run
+            digest_status = f"failed: {exc}"
             print(f"[digest] send failed: {exc}")
 
+    # 4) Run summary — the ledger row `store.list_runs()` and GET /runs read.
+    store.log_event(Event(kind="run", payload={
+        "run_id": run_id,
+        "duration_s": round(time.monotonic() - started, 1),
+        "ingest": {"fetched": report.total_fetched, "new": report.total_new,
+                   "errors": [r.source for r in report.results if r.error]},
+        "match": {"scored": mreport.scored, "llm_reranked": mreport.llm_reranked},
+        "digest": digest_status,
+    }))
+    print(f"[run] {run_id} done in {round(time.monotonic() - started, 1)}s")
     store.close()
 
 

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from jobagent.core.schemas import Match
+from jobagent.core.schemas import Event, Match
 from jobagent.matching.heuristic import heuristic_score
 from jobagent.matching.llm import llm_score
 from jobagent.preferences import Profile
@@ -29,6 +29,7 @@ def run_matching(
     llm=None,
     llm_top_k: int = 30,
     llm_threshold: float = 0.45,
+    run_id: str | None = None,
 ) -> MatchReport:
     """Score all jobs heuristically; LLM-rerank the top candidates if an llm is given."""
     report = MatchReport()
@@ -54,4 +55,10 @@ def run_matching(
                 )
                 report.llm_reranked += 1
 
+    # Matching previously logged nothing, so the ledger showed ingestion and then
+    # silence — a matching pass that crashed or scored zero jobs was invisible.
+    store.log_event(Event(kind="match", payload={
+        "scored": report.scored, "llm_reranked": report.llm_reranked,
+        "used_llm": report.used_llm, "run_id": run_id,
+    }))
     return report

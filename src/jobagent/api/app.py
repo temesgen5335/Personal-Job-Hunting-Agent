@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -81,11 +82,11 @@ def _token_for(password: str, master_key: str) -> str:
     return hashlib.sha256(f"{password}|{master_key}".encode()).hexdigest()
 
 
-def _ingest_task(db_path: str, settings, profile, llm) -> None:
+def _ingest_task(db_path: str, settings, profile, llm, run_id: str) -> None:
     store = Store(db_path)
     try:
-        run_ingestion(build_adapters(settings), store)
-        run_matching(store, profile, llm=llm)
+        run_ingestion(build_adapters(settings), store, run_id=run_id)
+        run_matching(store, profile, llm=llm, run_id=run_id)
     finally:
         store.close()
 
@@ -312,8 +313,30 @@ def create_app(settings=None, profile=None, llm: Any = _UNSET, cv_master: str | 
 
     @app.post("/ingest", status_code=202, dependencies=auth)
     def ingest(bg: BackgroundTasks):
-        bg.add_task(_ingest_task, settings.db_path, settings, profile, _llm())
-        return {"status": "started"}
+        # The id is returned immediately so the caller can watch /runs/{id} while
+        # the background task is still going.
+        run_id = uuid.uuid4().hex[:12]
+        bg.add_task(_ingest_task, settings.db_path, settings, profile, _llm(), run_id)
+        return {"status": "started", "run_id": run_id}
+
+    @app.get("/runs")
+    def runs(limit: int = 20):
+        s = store()
+        try:
+            return {"runs": s.list_runs(limit)}
+        finally:
+            s.close()
+
+    @app.get("/runs/{run_id}")
+    def run_events(run_id: str):
+        s = store()
+        try:
+            events = s.events_for_run(run_id)
+        finally:
+            s.close()
+        if not events:
+            raise HTTPException(404, "No events for that run id.")
+        return {"run_id": run_id, "events": events}
 
     @app.post("/fit", dependencies=auth)
     def fit(req: JobIdReq):

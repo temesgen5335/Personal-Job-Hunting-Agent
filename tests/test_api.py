@@ -340,3 +340,41 @@ def test_drafting_suppresses_the_reminder_until_the_next_window(client):
 
 def test_followup_draft_unknown_application_404(client):
     assert client.post("/followups/nope/draft").status_code == 404
+
+
+# --- Tier 3: run ledger ------------------------------------------------------------
+
+def test_ingest_returns_a_run_id_and_runs_lists_ledger(client, monkeypatch):
+    import os
+
+    import jobagent.api.app as api_mod
+    from jobagent.core.schemas import Event
+    from jobagent.store import Store
+
+    # TestClient executes BackgroundTasks synchronously — left real, /ingest would
+    # run an actual network ingestion inside the test suite (R17). Stub the task and
+    # assert the endpoint passed it the same run_id it returned to the caller.
+    seen = {}
+    monkeypatch.setattr(api_mod, "_ingest_task",
+                        lambda db, st, pf, llm, run_id: seen.setdefault("run_id", run_id))
+
+    r = client.post("/ingest")
+    assert r.status_code == 202 and len(r.json()["run_id"]) == 12
+    assert seen["run_id"] == r.json()["run_id"]     # id threads into the task
+
+    # Seed a summary the way the pipeline logs one; the API reads the same ledger.
+    st = Store(os.environ["JOBAGENT_DB_PATH"])
+    st.log_event(Event(kind="run", payload={"run_id": "abc123", "duration_s": 4.2,
+                                            "ingest": {"fetched": 3, "new": 1, "errors": []},
+                                            "match": {"scored": 3, "llm_reranked": 0},
+                                            "digest": "sent (1 message(s))"}))
+    st.log_event(Event(kind="ingest", payload={"source": "remoteok", "fetched": 3,
+                                               "new": 1, "run_id": "abc123"}))
+    st.close()
+
+    runs = client.get("/runs").json()["runs"]
+    assert runs[0]["run_id"] == "abc123" and runs[0]["digest"].startswith("sent")
+
+    ev = client.get("/runs/abc123").json()
+    assert {e["kind"] for e in ev["events"]} == {"run", "ingest"}
+    assert client.get("/runs/never-happened").status_code == 404

@@ -424,6 +424,46 @@ class Store:
             out.append(row)
         return out
 
+    def list_runs(self, limit: int = 20) -> list[dict]:
+        """The run ledger: one row per pipeline pass, newest first.
+
+        Reads the `run` summary events the pipeline logs at the end of each pass.
+        This is the answer to "what has the agent actually done lately" — counts per
+        stage, digest outcome, duration — without grepping journald.
+        """
+        rows = self.conn.execute(
+            "SELECT payload, created_at FROM events WHERE kind='run' ORDER BY id DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        out = []
+        for r in rows:
+            try:
+                payload = json.loads(r["payload"])
+            except (ValueError, TypeError):
+                payload = {}
+            payload["finished_at"] = r["created_at"]
+            out.append(payload)
+        return out
+
+    def events_for_run(self, run_id: str) -> list[dict]:
+        """Every event a single pass emitted, oldest first — the reconstruction view."""
+        rows = self.conn.execute(
+            """
+            SELECT kind, job_id, payload, created_at FROM events
+            WHERE json_extract(payload, '$.run_id') = ? ORDER BY id ASC
+            """,
+            (run_id,),
+        ).fetchall()
+        out = []
+        for r in rows:
+            try:
+                payload = json.loads(r["payload"])
+            except (ValueError, TypeError):
+                payload = {}
+            out.append({"kind": r["kind"], "job_id": r["job_id"],
+                        "created_at": r["created_at"], **payload})
+        return out
+
     # --- events -----------------------------------------------------------
     def log_event(self, event: Event) -> None:
         self.conn.execute(

@@ -35,7 +35,13 @@ class RunReport:
         return sum(r.fetched for r in self.results)
 
 
-def run_ingestion(adapters: list[BaseAdapter], store: Store) -> RunReport:
+def run_ingestion(adapters: list[BaseAdapter], store: Store, *, run_id: str | None = None) -> RunReport:
+    """Drive every enabled adapter once.
+
+    `run_id` is the observability spine: the same id rides every event this pass
+    emits (here, matching, and the pipeline summary), so one slow or failing run can
+    be reconstructed from the events table instead of guessed at from timestamps.
+    """
     report = RunReport()
     for adapter in adapters:
         src = adapter.source.value
@@ -49,11 +55,13 @@ def run_ingestion(adapters: list[BaseAdapter], store: Store) -> RunReport:
                 result.fetched += 1
                 if is_new:
                     result.new += 1
-            store.log_event(
-                Event(kind="ingest", payload={"source": src, "fetched": result.fetched, "new": result.new})
-            )
+            store.log_event(Event(kind="ingest", payload={
+                "source": src, "fetched": result.fetched, "new": result.new, "run_id": run_id,
+            }))
         except Exception as exc:  # noqa: BLE001 — one bad source must not kill the run
             result.error = f"{type(exc).__name__}: {exc}"
-            store.log_event(Event(kind="error", payload={"source": src, "error": result.error}))
+            store.log_event(Event(kind="error", payload={
+                "source": src, "error": result.error, "run_id": run_id,
+            }))
         report.results.append(result)
     return report
