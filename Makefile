@@ -1,0 +1,74 @@
+# Personal Job Agent — runner
+#
+# Entry points verified from the repo (not assumed):
+#   backend API : scripts/run_api.py   → uvicorn, HOST/PORT env, default 127.0.0.1:8077
+#   telegram bot: scripts/run_bot.py   → long-polling Bot API process
+#   dashboard   : dashboard/ npm run dev → astro dev, default port 4321
+#   pipeline    : scripts/pipeline.py  → ingest → match → digest (systemd/cron entry)
+#
+# No n8n / external orchestrator exists in this system — scheduling is systemd
+# timers (deploy/) or GitHub Actions (.github/workflows/digest.yml). There is
+# nothing else to bring up for a meaningful local run.
+#
+# Python env: uses .venv/ (created by `make install`, via uv when available).
+
+SHELL        := /bin/bash
+VENV         := .venv
+PY           := $(VENV)/bin/python
+API_PORT     ?= 8077
+DASH_PORT    ?= 4321
+
+.PHONY: install run run_backend run_bot run_dashboard check test pipeline
+
+install: ## backend + dashboard deps (idempotent)
+	@if command -v uv >/dev/null 2>&1; then \
+		[ -d $(VENV) ] || uv venv $(VENV); \
+		uv pip install -q -e ".[dev,api,llm,telegram]" --python $(PY); \
+	else \
+		[ -d $(VENV) ] || python3 -m venv $(VENV); \
+		$(PY) -m pip install -q -e ".[dev,api,llm,telegram]"; \
+	fi
+	@cd dashboard && npm install --silent
+	@echo "✅ install done. Optional Tier-2 ATS: $(PY) -m playwright install chromium"
+
+check: ## preflight: env file, required vars, ports, db — fail fast per item
+	@fail=0; \
+	if [ ! -f .env ]; then echo "❌ .env missing — cp .env.example .env and fill it in"; fail=1; \
+	else \
+		. ./.env 2>/dev/null; \
+		if [ -z "$$GROQ_API_KEY$$GEMINI_API_KEY$$OPENROUTER_API_KEY$$OPENAI_API_KEY$$ANTHROPIC_API_KEY$$CUSTOM_LLM_BASE_URL" ]; then \
+			echo "⚠️  no LLM key set — matching falls back to heuristic-only, apply drafting will fail"; fi; \
+		[ -z "$$TELEGRAM_BOT_TOKEN" ] && echo "⚠️  TELEGRAM_BOT_TOKEN unset — bot + digest push disabled"; \
+		[ -z "$$TELEGRAM_CHAT_ID" ]  && echo "⚠️  TELEGRAM_CHAT_ID unset — bot owner-gate + digest destination missing"; \
+		[ -z "$$DASHBOARD_PASSWORD" ] && echo "⚠️  DASHBOARD_PASSWORD unset — dashboard Settings page disabled (fail-closed)"; \
+	fi; \
+	[ -x "$(PY)" ] || { echo "❌ $(VENV) missing — run: make install"; fail=1; }; \
+	[ -f config/preferences.toml ] || { echo "❌ config/preferences.toml missing"; fail=1; }; \
+	[ -f config/cv_master.md ] || echo "⚠️  config/cv_master.md missing — CV tailoring will use empty CV text"; \
+	if lsof -nP -iTCP:$(API_PORT) -sTCP:LISTEN >/dev/null 2>&1; then \
+		echo "❌ port $(API_PORT) already in use (API) — stop it or run: make run API_PORT=<other>"; fail=1; fi; \
+	if lsof -nP -iTCP:$(DASH_PORT) -sTCP:LISTEN >/dev/null 2>&1; then \
+		echo "❌ port $(DASH_PORT) already in use (dashboard)"; fail=1; fi; \
+	[ -f data/jobagent.db ] || echo "ℹ️  no data/jobagent.db yet — will be created; seed with: make pipeline"; \
+	[ $$fail -eq 0 ] && echo "✅ preflight ok" || exit 1
+
+run_backend: ## API only (uvicorn on $(API_PORT))
+	PORT=$(API_PORT) $(PY) scripts/run_api.py
+
+run_bot: ## telegram bot only (long-polling)
+	$(PY) scripts/run_bot.py
+
+run_dashboard: ## dashboard only (astro dev on $(DASH_PORT))
+	cd dashboard && JOBAGENT_API_URL=http://127.0.0.1:$(API_PORT) npm run dev -- --port $(DASH_PORT)
+
+run: check ## API + dashboard together; prefixed logs; one Ctrl-C tears both down
+	@trap 'kill 0' INT TERM EXIT; \
+	( PORT=$(API_PORT) $(PY) scripts/run_api.py 2>&1 | sed -e 's/^/[api ] /' ) & \
+	( cd dashboard && JOBAGENT_API_URL=http://127.0.0.1:$(API_PORT) npm run dev -- --port $(DASH_PORT) 2>&1 | sed -e 's/^/[dash] /' ) & \
+	wait
+
+pipeline: ## one ingest → match pass, no Telegram push
+	$(PY) scripts/pipeline.py --no-send
+
+test: ## 99-test offline suite
+	$(PY) -m pytest tests/ -q
