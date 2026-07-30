@@ -219,7 +219,12 @@ async def _start_apply(context, msg, rank: int) -> None:
         store.close()
 
     # Fit check first — show the confidence + matched/gaps before drafting/filling.
-    fit = await asyncio.to_thread(assess_fit, job, _bd(context, "profile"), _bd(context, "cv_master"), _llm())
+    # The LLM comes from bot_data (see build_application), like profile/cv_master.
+    # This previously called an undefined `_llm()` — a NameError that crashed /apply
+    # on the fit-check line, before anything was drafted.
+    fit = await asyncio.to_thread(
+        assess_fit, job, _bd(context, "profile"), _bd(context, "cv_master"), _bd(context, "llm")
+    )
     await msg.reply_text(fit.format_short(), parse_mode=MD)
 
     # --- ATS (Tier-2): fill + screenshot preview, then Submit/Cancel ---
