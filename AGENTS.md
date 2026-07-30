@@ -1,0 +1,100 @@
+# Personal Job Agent — AGENTS.md
+
+Read `.claude/context.md`, `.claude/rules.md`, `.claude/agent.md`, `.claude/memory.md` before starting any task.
+
+---
+
+## 1. Quick Orientation
+
+Self-hosted autonomous job-hunting agent. Ingests postings from Telegram channels + job boards, matches against a structured profile, surfaces ranked results via a Telegram bot, generates tailored application assets (CV, cover letter, email), fills ATS forms with HITL approval, and tracks outcomes on a dashboard.
+
+Three services: **FastAPI** (orchestrator, port 8077) + **Telegram bot** (primary UI) + **Astro dashboard** (analytics + config).
+
+---
+
+## 2. Non-Negotiables
+
+- **R2 — HITL gate**: Never submit an application without explicit user approval. Both email and ATS paths stop and show what will be sent.
+- **R1 — No CV fabrication**: Tailoring reframes real experience only.
+- **R3 — No CAPTCHA solving**: Hand the user a deep link on any anti-bot block.
+- **R9 — Secrets in `.env` / encrypted store only**: Never commit credentials.
+- **R10 — Pydantic `ConfigDict` only**: Class-based `class Config:` is banned.
+- **R12 — No commit without user approval**: Surface the draft message and wait.
+- **R13 — No `Co-Authored-By` trailer**: Omit the line entirely.
+
+Full rules: `.claude/rules.md`
+
+---
+
+## 3. Key Commands
+
+```bash
+# Backend
+cd ~/PersonalAgent
+pip install -e ".[dev,api,telegram,llm]"
+uvicorn jobagent.api.app:app --port 8077            # FastAPI
+python scripts/run_bot.py                            # Telegram bot
+
+# Dashboard
+cd dashboard && npm install && npm run dev           # Astro on 4321
+
+# Tests (99 tests, all offline, no credentials needed)
+pytest tests/ -v --tb=short
+pytest tests/test_api.py -v                          # single file
+
+# Pipeline (ingest → match → digest)
+python scripts/pipeline.py --no-send                 # dry run
+python scripts/pipeline.py                           # with Telegram push
+```
+
+---
+
+## 4. Architecture (one sentence each)
+
+- **FastAPI** (`src/jobagent/api/app.py`) — sole backend; `create_app()` factory for testability.
+- **Service layer** (`src/jobagent/`) — ingestion, matching, fit, apply, LLM, digest. Shared by bot and API.
+- **Telegram bot** (`src/jobagent/bot/`) — calls service layer in-process (no HTTP hop).
+- **Dashboard** (`dashboard/`) — Astro SSR, fetches FastAPI REST API.
+- **Store** (`src/jobagent/store/db.py`) — SQLite, per-request open/close for thread safety.
+- **MultiLLM** (`src/jobagent/llm_client.py`) — ordered failover: Groq → Gemini → OpenRouter → custom → OpenAI → Anthropic.
+- **Secret store** (`src/jobagent/secrets_store.py`) — Fernet-encrypted config on disk, overlays `.env`.
+
+Full architecture + module map: `.claude/agent.md`
+
+---
+
+## 5. What NOT To Do
+
+| Anti-pattern | Rule |
+|---|---|
+| Auto-submit without user approval | R2 |
+| Invent CV skills/titles/dates | R1 |
+| Solve CAPTCHAs | R3 |
+| Share a Store across threads | R15 |
+| Use `class Config:` in Pydantic models | R10 |
+| Use `from __future__ import annotations` in FastAPI dep files | R11 |
+| Commit without explicit user approval | R12 |
+| Add `Co-Authored-By` to commits | R13 |
+| Commit `.env`, `.session`, or credential files | R9 |
+| Scan HTML strings for CAPTCHA (use DOM selectors) | R3 |
+| Hit real APIs in tests | R17 |
+
+---
+
+## 6. Test Patterns
+
+- `FakeLLM` — returns canned JSON/text, no network.
+- `FakePage` — injectable Playwright page for ATS tests, no browser.
+- `TestClient(create_app(...))` — sync FastAPI testing with injected deps.
+- `tmp_path` — isolated SQLite store per test.
+- `monkeypatch` — env var overrides, settings cache reset.
+- `conftest.py` — auto-resets `cfg._cached = None` around every test.
+
+---
+
+## 7. Configuration
+
+- `config/preferences.toml` — user profile, target roles, skills, watchlist, source toggles.
+- `.env` — secrets (API keys, Telegram tokens, SMTP). See `.env.example`.
+- Dashboard Settings page — auth-gated UI for LLM/Telegram/SMTP config (encrypted at rest).
+- `JOBAGENT_MASTER_KEY` — Fernet key for the secret store. Generate with `python scripts/genkey.py`.
