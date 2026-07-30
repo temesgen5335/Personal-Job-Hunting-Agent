@@ -12,6 +12,20 @@ Tailoring reframes, reorders, and emphasizes *real* experience to match a job
 description. It never invents skills, titles, dates, or employers. Every
 `CVVariant` traces to `base_cv_id`. The LLM prompt enforces this explicitly.
 
+**R1a — Every generator that makes claims must receive the CV.**
+A prompt containing the job ad but no CV leaves the employer's requirements as the
+only facts available, and models assert them as the candidate's. A real run of
+`draft_email` produced "over 8 years of experience" (actual: 3+) and named three
+technologies absent from the CV — in the email that gets *sent*. Either pass
+`cv_master_md`, or forbid claims outright as `FOLLOWUP_SYSTEM` does. Never add a
+generator that describes the candidate from the job ad alone.
+
+**R1b — Prompt guardrails are load-bearing; test them.**
+The anti-fabrication clauses are asserted in `tests/test_apply.py` and
+`tests/test_followups.py`. FakeLLM tests cannot catch fabrication — only a real model
+run can — so when changing a generator prompt, run it live against a job ad whose
+requirements the CV does NOT satisfy and check what it claims.
+
 **R2 — No submission without explicit per-job approval.**
 `applications.approved_at` is set ONLY by an explicit user approval action (Telegram
 button or API call). Tier 1 (email) and Tier 2 (ATS form-fill) both stop at the
@@ -70,6 +84,22 @@ Class-based `class Config:` inside Pydantic models is banned. Fix on touch.
 **R11 — No `from __future__ import annotations` in files with FastAPI dependency injection.**
 Causes 422 errors in strict mode because `Request` annotations become strings.
 Already hit and fixed in `feature_flag.py` — don't reintroduce.
+
+---
+
+## Application Lifecycle
+
+**R23 — Status changes follow `ALLOWED_TRANSITIONS`.**
+An application is a real-world process: you cannot un-submit, and `offer` cannot revert
+to `matched`. Invalid moves are refused with 422 naming the legal set. A deliberate
+correction passes `correction=true`, which bypasses the map and logs a
+`status_correction` event — possible, but never silent. `allowed_next` ships with each
+row so the UI never duplicates the map.
+
+**R24 — Follow-ups are drafts only. There is no send path.**
+`draft_followup` returns text; nothing in `generators.py` can reach a mailer, and
+`tests/test_followups.py` asserts that structurally. The user sends nudges personally.
+Do not add a send endpoint for follow-ups.
 
 ---
 

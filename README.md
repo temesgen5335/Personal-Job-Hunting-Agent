@@ -30,7 +30,7 @@ Anthropic, or any OpenAI-compatible endpoint). See [docs/ARCHITECTURE.md](docs/A
 A **FastAPI orchestrator** sits between the interfaces and the data: the dashboard
 calls it over REST, and the bot calls the same service layer in-process.
 
-## Status: v2 complete (131 tests passing)
+## Status: v2 complete (182 tests passing)
 Ingestion · matching · Telegram bot (menu + filters) · Tier-1 email apply · Tier-2
 ATS form-fill · multi-LLM failover · FastAPI orchestrator · Astro dashboard with
 config UI, fit-checker, analytics, and pipeline health · VPS + GitHub Actions deploy.
@@ -78,7 +78,11 @@ Two files, same split as `.env.example` / `.env`:
   overlaid section-by-section onto the committed file, so the repo never carries
   anyone's contact details.
 - **`config/preferences.toml`** (committed) holds shareable search config:
-  target roles, skills, domains, must-haves, exclude-keywords.
+  target roles, skills, domains, must-haves, exclude-keywords, and
+  **`[profile.skill_weights]`** — per-skill importance (unlisted skills weigh 1.0).
+  Raise what you want to be hired for and lower generic tooling; this is what stops a
+  posting that merely mentions Docker + AWS from ranking like one built on your
+  differentiators.
 - `[sources]` — turn whole sources on/off (`remoteok`, `greenhouse`, `telegram`, …).
 - `[watchlist]` — Greenhouse/Lever/Ashby company slugs to track (add/remove freely).
 - Put your CV text in `config/cv_master.md` (and PDF at the `cv_path` you set) — used

@@ -93,6 +93,29 @@ A fourth, still open: **git history retains the PII and CV** that Tier 1 removed
 tracking. That needs `git filter-repo` and a force-push — the owner's call, and it
 should happen before the repo is ever public.
 
+## The R1 near-miss (Tier 2, July 2026)
+
+Tier 2 verification against the *real* LLM found two fabrication bugs that a fully
+green 172-test suite had not:
+
+- `draft_email` — the email actually sent to employers — claimed "over 8 years of
+  experience" for a candidate with 3+, and asserted three technologies absent from the
+  CV. Cause: `email_prompt` passed the job ad but no CV, so the employer's requirement
+  list was the only material available and the model mirrored it back.
+- `draft_followup` invented "over 5 years of experience" for the same reason, plus a
+  literal `[date of application, 11 days ago]` placeholder in sendable text.
+
+Also found: models emit literal newlines inside JSON strings, so strict `json.loads`
+failed and the fallback returned the **entire raw JSON blob as the email body**. An
+employer would have received `{"subject": ...}`.
+
+Two durable lessons, now rules R1a/R1b:
+1. Any generator that describes the candidate must receive the CV, or be forbidden from
+   making claims at all.
+2. FakeLLM tests verify plumbing, never truthfulness. Prompt changes need a live run
+   against a job ad the CV does not satisfy — that is the only way this class of bug
+   becomes visible.
+
 ## Known Limitations
 
 - **No LinkedIn/Indeed/Glassdoor adapter.** These sites are aggressively anti-bot with
@@ -122,7 +145,7 @@ should happen before the repo is ever public.
 | v2.4+ | `7da7aae` | Portfolio theme, header fix, location filters, fit breakdown, pagination |
 | gov | `e1d5a12` | `.claude/` governance dir + `CLAUDE.md`/`AGENTS.md` entrypoints |
 | gov | `f7556b4` | Makefile runner (install / check / run) |
-| Tier 1 | *(pending)* | Audit remediation: API auth on writes, CORS default, browser API URL, retry/backoff, pipeline health, PII split, docs truth-pass |
+| Tier 1 | `608b483`..`7ff2ea8` | Audit remediation: API auth on writes, CORS default, browser API URL, retry/backoff, pipeline health, PII split, docs truth-pass |
 
 ---
 

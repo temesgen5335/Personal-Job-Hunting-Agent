@@ -62,7 +62,11 @@ Two interfaces, one backend:
 | Pipeline health | Done (Tier 1) — staleness + error count + per-source freshness, dashboard banner, digest warnings |
 | Source retry/backoff | Done (Tier 1) — bounded jittered backoff, capped Retry-After |
 | PII split | Done (Tier 1) — identity in gitignored overlay; committed config is placeholders |
-| Test suite | 131 tests, 21 test files, zero network, injectable fakes throughout |
+| Status lifecycle | Done (Tier 2) — transition map enforced, audited correction override |
+| Weighted matching | Done (Tier 2) — skill weights, role-zone tiers, seniority + must-have checks |
+| Gap surfacing | Done (Tier 2) — gaps as chips in the dashboard job list |
+| Follow-up reminders | Done (Tier 2) — quiet-application list + drafted nudges (never sent) |
+| Test suite | 182 tests, 23 test files, zero network, injectable fakes throughout |
 
 ## Known Gaps (from the July 2026 audit)
 
@@ -74,13 +78,17 @@ pipeline health, retry/backoff, docs truth-pass). Still open:
   operation the owner must run. Do it before the repo is ever made public.
 - **No triage actions** — jobs cannot be dismissed, snoozed, or annotated; the store
   has no column for it. This is the top dashboard gap.
-- **Application status transitions are unenforced** — `PATCH /applications/{id}`
-  accepts any valid enum value, including backward moves (offer → matched).
 - **Concurrent ingestion is unguarded** — two overlapping `/ingest` calls can run
   simultaneously; there is no lock.
 - **Dedup is weak for Telegram** — the hash is company+title+location and the
   Telegram parser never sets a company, so those postings dedup on the title line only.
 - **Heuristic scores overwrite LLM scores** each run; no score provenance is kept.
+- **Tag-driven role signal** lets a few postings score strongly on stack tags rather
+  than the title (3 of 218 strong matches, all from one dev marketplace that tags its
+  whole stack regardless of role). Left alone deliberately: tuning the scorer around
+  one board's tagging habit would be overfitting.
+- **FakeLLM tests cannot detect fabrication.** Two R1 violations survived a full green
+  suite and were only caught by running the real model (see R1a/R1b).
 - **The Telegram handlers have no runtime test coverage.** `tests/test_bot.py` covers
   only the pure helpers in `bot/service.py`; the handlers in `bot/app.py` need live
   `Update`/`Context` objects. This is how a call to an undefined `_llm()` shipped in
@@ -100,5 +108,5 @@ pipeline health, retry/backoff, docs truth-pass). Still open:
 
 - **11,700+** jobs scored in a live run (8,253 fetched in a single pass across 6 adapters)
 - **40** companies in the ATS watchlist (Greenhouse/Lever/Ashby)
-- **131** tests across 21 files — all run offline, no network, no credentials
+- **182** tests across 23 files — all run offline, no network, no credentials
 - **6** LLM providers with automatic failover (3 free, 3 paid)

@@ -34,7 +34,7 @@ make check          # preflight: env vars, free ports, store presence
 make run            # API (:8077) + dashboard (:4321), one Ctrl-C stops both
 make run_bot        # Telegram bot (separate long-lived process)
 make pipeline       # one ingest → match pass, no Telegram push
-make test           # 131 offline tests, no credentials needed
+make test           # 182 offline tests, no credentials needed
 
 # Single test file
 .venv/bin/python -m pytest tests/test_api.py -v
@@ -54,6 +54,8 @@ Writes need `DASHBOARD_PASSWORD` set — the API gates every non-GET route (R19)
 - **Secret store** (`src/jobagent/secrets_store.py`) — Fernet-encrypted config on disk, overlays `.env`.
 - **Auth** — every non-GET API route requires a bearer token from `DASHBOARD_PASSWORD`; fails closed (R19).
 - **Health** (`store.pipeline_health()`) — staleness, error count, per-source freshness; bannered in the dashboard and the digest.
+- **Matching** (`matching/heuristic.py`) — preference-weighted: `skill_weights`, title-vs-body role tiers, seniority and must-have checks.
+- **Lifecycle** (`core/schemas.ALLOWED_TRANSITIONS`) — enforced status graph; `correction=true` overrides and audits.
 
 Full architecture + module map: `.claude/agent.md`
 
@@ -76,6 +78,10 @@ Full architecture + module map: `.claude/agent.md`
 | Default `JOBAGENT_CORS_ORIGINS` to `*` | R20 |
 | Call `client.get` directly in an adapter (bypasses retry) | R21 |
 | Put real name/email/phone in the committed `preferences.toml` | R22 |
+| Add a generator that describes the candidate without passing the CV | R1a |
+| Change a generator prompt without a live real-model check | R1b |
+| Move an application status outside `ALLOWED_TRANSITIONS` silently | R23 |
+| Add a send path for follow-up nudges | R24 |
 | Scan HTML strings for CAPTCHA (use DOM selectors) | R3 |
 | Hit real APIs in tests | R17 |
 
