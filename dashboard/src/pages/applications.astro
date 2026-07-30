@@ -1,6 +1,6 @@
 ---
 import Layout from "../layouts/Layout.astro";
-import { getApplications, apiBase, APPLICATION_STATUSES, type AppRow } from "../lib/api";
+import { getApplications, apiBase, publicApiBase, APPLICATION_STATUSES, type AppRow } from "../lib/api";
 
 let apps: AppRow[] = [];
 let error: string | null = null;
@@ -10,6 +10,7 @@ try {
   error = (e as Error).message;
 }
 const apiUrl = apiBase();
+const publicUrl = publicApiBase();   // browser-side PATCH target
 const fmt = (s: string | null) => (s ? new Date(s).toLocaleString() : "—");
 ---
 
@@ -43,17 +44,17 @@ const fmt = (s: string | null) => (s ? new Date(s).toLocaleString() : "—");
     </table>
   </div>
 
-  <script define:vars={{ apiUrl }}>
+  <script define:vars={{ publicUrl }}>
     document.querySelectorAll(".status-select").forEach((el) => {
       el.addEventListener("change", async (e) => {
         const sel = e.target;
         const prev = sel.dataset.prev || sel.value;
         try {
-          const r = await fetch(`${apiUrl}/applications/${sel.dataset.id}`, {
-            method: "PATCH", headers: { "Content-Type": "application/json" },
+          const r = await fetch(`${publicUrl}/applications/${sel.dataset.id}`, {
+            method: "PATCH", headers: window.JA.headers(),
             body: JSON.stringify({ status: sel.value }),
           });
-          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          if (!r.ok) throw new Error(window.JA.explain(r.status));
           sel.dataset.prev = sel.value;
         } catch (err) {
           alert(`Update failed: ${err.message}`);

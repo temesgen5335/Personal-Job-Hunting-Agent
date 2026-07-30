@@ -1,8 +1,8 @@
 ---
 import Layout from "../layouts/Layout.astro";
-import { apiBase } from "../lib/api";
-// Client-visible API URL (the browser calls /auth/login + /config directly).
-const apiUrl = apiBase();
+import { publicApiBase } from "../lib/api";
+// Browser-facing URL: these fetches run in the visitor's browser, not on the server.
+const apiUrl = publicApiBase();
 ---
 
 <Layout title="Settings">

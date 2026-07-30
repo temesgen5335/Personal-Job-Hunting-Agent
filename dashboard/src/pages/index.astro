@@ -20,6 +20,10 @@ const tlMax = Math.max(1, ...timeline.map((t) => t.n));
 const BW = 26, GAP = 6, H = 90;
 const maxSource = stats ? Math.max(1, ...stats.bySource.map((s) => s.n)) : 1;
 const fmt = (s: string | null) => (s ? new Date(s).toLocaleString() : "—");
+// Per-source freshness. A source that has gone quiet is the early warning that a
+// credential expired or a board changed its API — long before the totals look wrong.
+const srcHealth = stats?.health?.sources ?? [];
+const quiet = (h: number | null) => h === null || h > 48;
 ---
 
 <Layout title="Overview">
@@ -30,6 +34,21 @@ const fmt = (s: string | null) => (s ? new Date(s).toLocaleString() : "—");
       ⚠️ Can't reach the API at <code>{apiBase()}</code> — {error}.<br />
       Start it: <code>PORT=8077 .venv/bin/python scripts/run_api.py</code> and set
       <code>JOBAGENT_API_URL</code> to match.
+    </div>
+  )}
+
+  {stats?.health?.is_stale && (
+    <div class="panel stale">
+      <strong>⚠️ Pipeline looks stale.</strong>
+      {stats.health.last_ingest
+        ? ` Last successful ingestion was ${fmt(stats.health.last_ingest)} (${Math.round(stats.health.hours_since_ingest ?? 0)}h ago, threshold ${stats.health.stale_after_hours}h).`
+        : " No ingestion has ever completed."}
+      {stats.health.last_error && (
+        <div class="muted" style="margin-top:6px">
+          Last error — <code>{stats.health.last_error.source ?? "unknown"}</code>: {stats.health.last_error.error}
+        </div>
+      )}
+      <div class="muted" style="margin-top:6px">Run <code>make pipeline</code> or check the ingest timer.</div>
     </div>
   )}
 
@@ -57,6 +76,39 @@ const fmt = (s: string | null) => (s ? new Date(s).toLocaleString() : "—");
         </table>
         <p class="muted" style="margin:12px 0 0">Last ingest: {fmt(stats.lastIngest)}</p>
       </div>
+
+      {srcHealth.length > 0 && (
+        <div class="panel">
+          <strong>Source freshness</strong>
+          <p class="muted" style="margin:4px 0 10px">
+            When each source last delivered. A source gone quiet is the early warning
+            that a credential expired or a board changed its API.
+          </p>
+          <table>
+            <thead><tr><th>Source</th><th>Last delivered</th><th>Fetched</th><th>New</th><th></th></tr></thead>
+            <tbody>
+              {srcHealth.map((s) => (
+                <tr>
+                  <td style="width:120px">{s.source}</td>
+                  <td class="muted">{s.hours_since === null ? "—" : `${Math.round(s.hours_since)}h ago`}</td>
+                  <td class="muted">{s.fetched ?? "—"}</td>
+                  <td class="muted">{s.new ?? "—"}</td>
+                  <td>
+                    <span class={`badge ${quiet(s.hours_since) ? "bad" : "ok"}`}>
+                      {quiet(s.hours_since) ? "quiet" : "fresh"}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {stats.health && stats.health.recent_errors > 0 && (
+            <p class="muted" style="margin:12px 0 0">
+              <span class="badge bad">{stats.health.recent_errors} error(s)</span> logged in the last 24h.
+            </p>
+          )}
+        </div>
+      )}
 
       <div class="panel">
         <strong>Application funnel</strong>

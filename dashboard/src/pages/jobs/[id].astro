@@ -1,6 +1,6 @@
 ---
 import Layout from "../../layouts/Layout.astro";
-import { getJob, apiBase, type JobDetail } from "../../lib/api";
+import { getJob, apiBase, publicApiBase, type JobDetail } from "../../lib/api";
 
 const { id } = Astro.params;
 let job: JobDetail | null = null;
@@ -11,6 +11,7 @@ try {
   error = (e as Error).message;
 }
 const apiUrl = apiBase();
+const publicUrl = publicApiBase();   // browser-side fit-check target
 const link = job?.apply_url || job?.url || null;
 const pct = job ? Math.round(job.score * 100) : 0;
 ---
@@ -63,17 +64,17 @@ const pct = job ? Math.round(job.score * 100) : 0;
     .chip.gap { background: rgba(227,160,8,.12); color: #e3a008; border-color: rgba(227,160,8,.28); }
   </style>
 
-  <script define:vars={{ apiUrl }}>
+  <script define:vars={{ publicUrl }}>
     const btn = document.getElementById("fit-btn");
     btn?.addEventListener("click", async () => {
       const out = document.getElementById("fit-out");
       out.textContent = "Checking…";
       try {
-        const r = await fetch(`${apiUrl}/fit`, {
-          method: "POST", headers: { "Content-Type": "application/json" },
+        const r = await fetch(`${publicUrl}/fit`, {
+          method: "POST", headers: window.JA.headers(),
           body: JSON.stringify({ job_id: btn.dataset.job }),
         });
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        if (!r.ok) throw new Error(window.JA.explain(r.status));
         const f = await r.json();
         const chips = (arr, cls) => (arr || []).map((x) => `<span class="chip ${cls || ""}">${x}</span>`).join(" ") || "<span class='muted'>—</span>";
         const locOk = f.location_fit;

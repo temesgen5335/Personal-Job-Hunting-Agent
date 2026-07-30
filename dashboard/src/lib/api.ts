@@ -6,10 +6,42 @@ export function apiBase(): string {
   return API;
 }
 
+// Browser-facing base URL, for fetches that run in the visitor's browser rather
+// than on the server. These are different addresses: a server-side 127.0.0.1 means
+// "this machine", which in a browser means the visitor's own laptop. Set
+// PUBLIC_JOBAGENT_API_URL whenever the dashboard and API are not co-hosted
+// (e.g. dashboard on Vercel, API on a VPS). Falls back to the server URL, which is
+// correct for local development where both are on one machine.
+export function publicApiBase(): string {
+  return (
+    import.meta.env.PUBLIC_JOBAGENT_API_URL ||
+    process.env.PUBLIC_JOBAGENT_API_URL ||
+    API
+  );
+}
+
 async function getJSON(path: string): Promise<any> {
   const res = await fetch(`${API}${path}`);
   if (!res.ok) throw new Error(`API ${res.status} ${res.statusText} for ${path}`);
   return res.json();
+}
+
+export interface SourceHealth {
+  source: string;
+  last_ingest: string | null;
+  hours_since: number | null;
+  fetched: number | null;
+  new: number | null;
+}
+
+export interface Health {
+  last_ingest: string | null;
+  hours_since_ingest: number | null;
+  is_stale: boolean;
+  stale_after_hours: number;
+  recent_errors: number;
+  last_error: { source: string | null; error: string | null; at: string } | null;
+  sources: SourceHealth[];
 }
 
 export interface Stats {
@@ -20,6 +52,7 @@ export interface Stats {
   lastIngest: string | null;
   bySource: { source: string; n: number }[];
   apps: { status: string; n: number }[];
+  health: Health | null;
 }
 
 export async function getStats(): Promise<Stats> {
@@ -32,6 +65,7 @@ export async function getStats(): Promise<Stats> {
     lastIngest: s.last_ingest ?? null,
     bySource: Object.entries(s.by_source ?? {}).map(([source, n]) => ({ source, n: n as number })),
     apps: s.apps ?? [],
+    health: s.health ?? null,
   };
 }
 

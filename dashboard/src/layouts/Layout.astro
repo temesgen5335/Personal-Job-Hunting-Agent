@@ -16,6 +16,29 @@ const isActive = (href: string) => (href === "/" ? path === "/" : path.startsWit
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{title} · Job Agent</title>
+    <!--
+      Shared client-side auth for dashboard actions (fit check, status edits).
+      The API gates every write, so those fetches need the bearer token minted by
+      the password login on the Settings page. `is:inline` keeps this un-bundled so
+      it runs before the inline page scripts that depend on it.
+    -->
+    <script is:inline>
+      window.JA = {
+        token: () => localStorage.getItem("jobagent_token"),
+        headers() {
+          const t = this.token();
+          const h = { "Content-Type": "application/json" };
+          if (t) h.Authorization = `Bearer ${t}`;
+          return h;
+        },
+        // Turn an auth failure into something actionable rather than a bare 401.
+        explain(status) {
+          return status === 401 || status === 403
+            ? "Not signed in — open Settings, sign in, then retry."
+            : `HTTP ${status}`;
+        },
+      };
+    </script>
   </head>
   <body>
     <header>
@@ -124,6 +147,12 @@ const isActive = (href: string) => (href === "/" ? path === "/" : path.startsWit
       .badge.interview { background: rgba(86,160,255,.14); color: var(--info); border-color: rgba(86,160,255,.3); }
       .badge.offer { background: rgba(227,160,8,.16); color: #f0b429; border-color: rgba(227,160,8,.32); }
       .badge.rejected, .badge.failed { background: rgba(248,81,73,.14); color: #ff6a60; border-color: rgba(248,81,73,.3); }
+      /* Pipeline health (M1). Semantic, never decorative: `bad`/`stale` mean something
+         has actually stopped working and needs a look. */
+      .badge.ok { background: rgba(74,222,128,.13); color: var(--good); border-color: rgba(74,222,128,.3); }
+      .badge.bad { background: rgba(248,113,113,.14); color: var(--danger); border-color: rgba(248,113,113,.32); }
+      .panel.stale { border-color: rgba(251,191,36,.45); background: rgba(251,191,36,.07); }
+      .panel.stale strong { color: var(--warn); }
       .badge.awaiting_approval, .badge.drafting { background: rgba(227,160,8,.12); color: #e3a008; border-color: rgba(227,160,8,.28); }
 
       /* Forms */
