@@ -9,6 +9,7 @@ tests can inject a temp store, a fake LLM, and a fake mailer.
 from __future__ import annotations
 
 import hashlib
+import json
 from pathlib import Path
 from typing import Any
 
@@ -16,12 +17,13 @@ from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel
 
 from jobagent.apply import approve_and_send, prepare_application
+from jobagent.apply.generators import draft_followup
 from jobagent.apply.ats import apply_target
 from jobagent.apply.ats_flow import create_ats_application, run_ats
 from jobagent.apply.email_send import send_email
 from jobagent.bot.service import MatchFilter, ranked_matches
 from jobagent.config import get_settings, reload_settings
-from jobagent.core.schemas import ApplicationStatus
+from jobagent.core.schemas import ApplicationStatus, Event, allowed_next, can_transition
 from jobagent.fit import assess_fit
 from jobagent.ingestion.registry import build_adapters
 from jobagent.ingestion.runner import run_ingestion
@@ -32,6 +34,21 @@ from jobagent.secrets_store import MANAGED_FIELDS, SecretStore, masked_view
 from jobagent.store import Store
 
 _UNSET = object()
+
+
+def _decode_gaps(rows: list[dict]) -> list[dict]:
+    """gaps is stored as JSON text; hand clients a real array so neither the
+    dashboard nor any other consumer has to parse SQLite's encoding."""
+    for r in rows:
+        raw = r.get("gaps")
+        if isinstance(raw, str):
+            try:
+                r["gaps"] = json.loads(raw or "[]")
+            except (ValueError, TypeError):
+                r["gaps"] = []
+        elif raw is None:
+            r["gaps"] = []
+    return rows
 
 
 class JobIdReq(BaseModel):
@@ -46,8 +63,15 @@ class ConfigPatch(BaseModel):
     values: dict
 
 
+class FollowupReq(BaseModel):
+    days_waiting: int | None = None
+
+
 class StatusReq(BaseModel):
     status: str
+    # Escape hatch for fixing a mis-click. Bypasses the transition map and logs an
+    # event, so an out-of-order change is possible but never silent.
+    correction: bool = False
 
 
 _VALID_STATUSES = {s.value for s in ApplicationStatus}
@@ -174,7 +198,7 @@ def create_app(settings=None, profile=None, llm: Any = _UNSET, cv_master: str | 
         )
         s = store()
         try:
-            return {"jobs": ranked_matches(s, limit, flt, offset=offset)}
+            return {"jobs": _decode_gaps(ranked_matches(s, limit, flt, offset=offset))}
         finally:
             s.close()
 
@@ -182,9 +206,14 @@ def create_app(settings=None, profile=None, llm: Any = _UNSET, cv_master: str | 
     def applications(limit: int = 200):
         s = store()
         try:
-            return {"applications": s.list_applications(limit)}
+            rows = s.list_applications(limit)
         finally:
             s.close()
+        # allowed_next travels with each row so the UI never duplicates the
+        # transition map — the Python definition stays the single source of truth.
+        for r in rows:
+            r["allowed_next"] = sorted(allowed_next(r["status"]))
+        return {"applications": rows}
 
     @app.get("/job/{job_id}")
     def job_detail(job_id: str):
@@ -196,7 +225,7 @@ def create_app(settings=None, profile=None, llm: Any = _UNSET, cv_master: str | 
             match = s.get_match(job_id) or {}
         finally:
             s.close()
-        return {**job, **match}
+        return _decode_gaps([{**job, **match}])[0]
 
     @app.patch("/applications/{app_id}", dependencies=auth)
     def update_application(app_id: str, body: StatusReq):
@@ -204,12 +233,65 @@ def create_app(settings=None, profile=None, llm: Any = _UNSET, cv_master: str | 
             raise HTTPException(400, f"Invalid status. One of: {sorted(_VALID_STATUSES)}")
         s = store()
         try:
-            if not s.get_application(app_id):
+            existing = s.get_application(app_id)
+            if not existing:
                 raise HTTPException(404, "Application not found.")
+            current = existing["status"]
+            if not can_transition(current, body.status):
+                if not body.correction:
+                    # 422: the value is a real status, but the move is not part of the
+                    # process. Name the legal moves so the caller can act on it.
+                    raise HTTPException(422, {
+                        "message": f"Cannot move {current} → {body.status}.",
+                        "current": current,
+                        "allowed": sorted(allowed_next(current)),
+                        "hint": "Pass correction=true to override a mis-click (audited).",
+                    })
+                s.log_event(Event(kind="status_correction", job_id=existing.get("job_id"), payload={
+                    "application_id": app_id, "from": current, "to": body.status,
+                }))
             s.update_application(app_id, status=body.status)
         finally:
             s.close()
-        return {"id": app_id, "status": body.status}
+        return {"id": app_id, "status": body.status, "allowed_next": sorted(allowed_next(body.status))}
+
+    @app.get("/followups")
+    def followups(after_days: int = 7):
+        """Submitted applications that have gone quiet. Read-only."""
+        s = store()
+        try:
+            return {"followups": s.applications_needing_followup(after_days=after_days),
+                    "after_days": after_days}
+        finally:
+            s.close()
+
+    @app.post("/followups/{app_id}/draft", dependencies=auth)
+    def followup_draft(app_id: str, body: FollowupReq | None = None):
+        """Draft a nudge for a quiet application.
+
+        DRAFT ONLY — there is deliberately no send endpoint for follow-ups. The user
+        sends these personally, so nothing here can put mail on the wire.
+        """
+        current_llm = _llm()
+        if current_llm is None:
+            raise HTTPException(400, "No LLM configured (set an LLM key).")
+        s = store()
+        try:
+            application = s.get_application(app_id)
+            if not application:
+                raise HTTPException(404, "Application not found.")
+            job = s.get_job(application["job_id"])
+            if not job:
+                raise HTTPException(404, "Job not found.")
+            days = (body.days_waiting if body and body.days_waiting is not None else 7)
+            subject, text = draft_followup(profile.name or "", job, days, current_llm)
+            # Logged so the reminder stops firing until the next window.
+            s.log_event(Event(kind="followup_drafted", job_id=application["job_id"],
+                              payload={"application_id": app_id, "days_waiting": days}))
+        finally:
+            s.close()
+        return {"application_id": app_id, "subject": subject, "body": text,
+                "to": job.get("apply_email"), "sent": False}
 
     @app.get("/analytics")
     def analytics():

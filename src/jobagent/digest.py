@@ -70,3 +70,18 @@ def health_banner(report, health: dict) -> str:
     if stale:
         lines.append(f"⚠️ No new data in 48h+ from: {', '.join(stale)}")
     return "\n".join(lines) + "\n\n" if lines else ""
+
+
+def format_followups(pending: list[dict]) -> str:
+    """A 'these have gone quiet' block for the digest.
+
+    Empty when nothing is waiting, so the digest gains no routine noise. Drafting the
+    actual nudge is a separate, explicit action — this only tells you it is time.
+    """
+    if not pending:
+        return ""
+    lines = [f"\n\n\u23f0 {len(pending)} application(s) awaiting a reply:"]
+    for p in pending:
+        company = p.get("company") or "?"
+        lines.append(f"  \u2022 {p.get('title')} \u2014 {company} ({p.get('days_waiting')}d)")
+    return "\n".join(lines)

@@ -137,14 +137,17 @@ def test_config_auth_and_roundtrip(tmp_path, monkeypatch):
 
 
 def test_update_application_status_and_analytics(client):
-    # Create an application via prepare, then move it through the funnel.
+    # Create an application via prepare, then walk it down a legal path.
     app_id = client.post("/apply/prepare", json={"job_id": client._email_job_id}).json()["application_id"]
 
     assert client.patch(f"/applications/{app_id}", json={"status": "bogus"}).status_code == 400
     assert client.patch("/applications/nope", json={"status": "interview"}).status_code == 404
 
+    # awaiting_approval → submitted → interview (the real process order).
+    assert client.patch(f"/applications/{app_id}", json={"status": "submitted"}).status_code == 200
     r = client.patch(f"/applications/{app_id}", json={"status": "interview"})
     assert r.status_code == 200 and r.json()["status"] == "interview"
+    assert "offer" in r.json()["allowed_next"]
 
     a = client.get("/analytics").json()
     assert a["total"] >= 1
@@ -220,3 +223,120 @@ def test_writes_fail_closed_without_password(tmp_path, monkeypatch):
 def test_cors_default_is_not_wildcard():
     """An open origin plus a reachable port is how a stranger drives your apply flow."""
     assert Settings(_env_file=None).cors_origins != "*"
+
+
+# --- M4: status lifecycle enforcement ---------------------------------------------
+
+def test_illegal_transition_is_refused_with_the_legal_set(client):
+    """An application is a real-world process: you cannot jump straight from
+    awaiting-approval to interview, because nothing was ever sent."""
+    app_id = client.post("/apply/prepare", json={"job_id": client._email_job_id}).json()["application_id"]
+    r = client.patch(f"/applications/{app_id}", json={"status": "interview"})
+    assert r.status_code == 422
+    detail = r.json()["detail"]
+    assert detail["current"] == "awaiting_approval"
+    assert detail["allowed"] == ["failed", "skipped", "submitted"]   # names the way out
+    # And the stored status is untouched by the refusal.
+    assert client.get("/applications").json()["applications"][0]["status"] == "awaiting_approval"
+
+
+def test_terminal_status_has_no_exits(client):
+    app_id = client.post("/apply/prepare", json={"job_id": client._email_job_id}).json()["application_id"]
+    client.patch(f"/applications/{app_id}", json={"status": "submitted"})
+    client.patch(f"/applications/{app_id}", json={"status": "rejected"})
+    r = client.patch(f"/applications/{app_id}", json={"status": "interview"})
+    assert r.status_code == 422 and r.json()["detail"]["allowed"] == []
+
+
+def test_correction_flag_overrides_and_is_audited(client):
+    """A mis-click must be fixable — but never silently."""
+    app_id = client.post("/apply/prepare", json={"job_id": client._email_job_id}).json()["application_id"]
+    r = client.patch(f"/applications/{app_id}", json={"status": "offer", "correction": True})
+    assert r.status_code == 200 and r.json()["status"] == "offer"
+
+
+def test_same_status_is_idempotent(client):
+    app_id = client.post("/apply/prepare", json={"job_id": client._email_job_id}).json()["application_id"]
+    assert client.patch(f"/applications/{app_id}", json={"status": "awaiting_approval"}).status_code == 200
+
+
+def test_applications_list_carries_allowed_next(client):
+    """The UI reads the legal moves off each row instead of duplicating the map."""
+    client.post("/apply/prepare", json={"job_id": client._email_job_id})
+    row = client.get("/applications").json()["applications"][0]
+    assert row["allowed_next"] == ["failed", "skipped", "submitted"]
+
+
+def test_jobs_list_returns_gaps_as_an_array(client, monkeypatch):
+    """gaps is JSON text in SQLite; the API must hand clients a real array so the
+    dashboard can render them without parsing storage encoding."""
+    import os
+
+    from jobagent.core.schemas import Match
+    from jobagent.store import Store
+
+    st = Store(os.environ["JOBAGENT_DB_PATH"])
+    st.upsert_match(Match(job_id=client._email_job_id, score=0.9, rationale="r",
+                          gaps=["not clearly remote", "level mismatch: 'junior' role"]))
+    st.close()
+
+    row = next(j for j in client.get("/jobs").json()["jobs"] if j["id"] == client._email_job_id)
+    assert row["gaps"] == ["not clearly remote", "level mismatch: 'junior' role"]
+    assert client.get(f"/job/{client._email_job_id}").json()["gaps"][0] == "not clearly remote"
+
+
+# --- Tier 2: follow-up reminders ---------------------------------------------------
+
+def _make_quiet_application(client, days_ago=10):
+    """Submit an application, then backdate it so it counts as gone quiet."""
+    import os
+    from datetime import datetime, timedelta, timezone
+
+    from jobagent.store import Store
+    app_id = client.post("/apply/prepare", json={"job_id": client._email_job_id}).json()["application_id"]
+    client.post(f"/apply/{app_id}/approve")             # → submitted
+    st = Store(os.environ["JOBAGENT_DB_PATH"])
+    st.conn.execute("UPDATE applications SET submitted_at=? WHERE id=?",
+                    ((datetime.now(timezone.utc) - timedelta(days=days_ago)).isoformat(), app_id))
+    st.conn.commit()
+    st.close()
+    return app_id
+
+
+def test_followups_endpoint_lists_quiet_applications(client):
+    app_id = _make_quiet_application(client)
+    body = client.get("/followups").json()
+    assert body["after_days"] == 7
+    assert [f["id"] for f in body["followups"]] == [app_id]
+    assert body["followups"][0]["days_waiting"] >= 10
+    # Window is tunable, and a wide window excludes it.
+    assert client.get("/followups", params={"after_days": 60}).json()["followups"] == []
+
+
+def test_followup_draft_returns_a_draft_and_sends_nothing(client):
+    """R2 in spirit: drafting a nudge must never put mail on the wire.
+
+    The setup deliberately sends the *initial* application, so the assertion is that
+    the draft call adds nothing on top of that — not that no mail exists at all.
+    """
+    app_id = _make_quiet_application(client)
+    before = len(client._mails)
+
+    r = client.post(f"/followups/{app_id}/draft", json={"days_waiting": 12})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["sent"] is False
+    assert body["subject"] and body["body"]
+    assert body["to"] == "jobs@acme.example"       # who you'd send it to, if you choose
+    assert len(client._mails) == before            # nothing new left the building
+
+
+def test_drafting_suppresses_the_reminder_until_the_next_window(client):
+    app_id = _make_quiet_application(client)
+    assert len(client.get("/followups").json()["followups"]) == 1
+    client.post(f"/followups/{app_id}/draft")
+    assert client.get("/followups").json()["followups"] == []
+
+
+def test_followup_draft_unknown_application_404(client):
+    assert client.post("/followups/nope/draft").status_code == 404

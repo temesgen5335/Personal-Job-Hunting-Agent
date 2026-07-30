@@ -18,7 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from jobagent.bot.notify import send_message  # noqa: E402
 from jobagent.bot.service import jobs_text  # noqa: E402
 from jobagent.config import get_settings  # noqa: E402
-from jobagent.digest import health_banner  # noqa: E402
+from jobagent.digest import format_followups, health_banner  # noqa: E402
 from jobagent.ingestion.registry import build_adapters  # noqa: E402
 from jobagent.ingestion.runner import run_ingestion  # noqa: E402
 from jobagent.llm_client import build_llm  # noqa: E402
@@ -54,6 +54,8 @@ def main() -> None:
     # 3) Digest — carries a health banner so a degraded run announces itself.
     health = store.pipeline_health()
     banner = health_banner(report, health)
+    # Quiet applications ride along with the digest rather than needing their own run.
+    followups = format_followups(store.applications_needing_followup())
     if banner:
         print("[health] " + banner.strip().replace("\n", "\n[health] "))
     if args.no_send:
@@ -64,7 +66,7 @@ def main() -> None:
         try:
             sent = send_message(
                 settings.telegram_bot_token, settings.telegram_destination,
-                banner + jobs_text(store, args.top),
+                banner + jobs_text(store, args.top) + followups,
             )
             print(f"[digest] sent in {sent} message(s)")
         except Exception as exc:  # noqa: BLE001 — report, don't fail the whole run

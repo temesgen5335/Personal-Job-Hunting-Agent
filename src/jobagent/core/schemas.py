@@ -52,6 +52,52 @@ class ApplicationStatus(str, Enum):
     failed = "failed"            # automation could not complete
 
 
+# Which status moves make sense. An application is a real-world process, so the graph
+# is mostly forward: you cannot un-submit something that was sent, and "offer" cannot
+# revert to "matched". Enforcing this stops the tracker from accumulating states that
+# never happened, which would quietly corrupt the funnel analytics.
+#
+# Deliberate corrections (a mis-click) are still possible via an explicit correction
+# flag on the API — see api/app.py — which bypasses this map and logs an event. The
+# map governs the normal path; it is not a cage.
+ALLOWED_TRANSITIONS: dict[str, set[str]] = {
+    ApplicationStatus.matched.value: {ApplicationStatus.drafting.value, ApplicationStatus.skipped.value},
+    ApplicationStatus.drafting.value: {
+        ApplicationStatus.awaiting_approval.value, ApplicationStatus.failed.value,
+        ApplicationStatus.skipped.value,
+    },
+    ApplicationStatus.awaiting_approval.value: {
+        ApplicationStatus.submitted.value, ApplicationStatus.skipped.value,
+        ApplicationStatus.failed.value,
+    },
+    # Post-submission outcomes. `offer` direct from `submitted` happens (small companies).
+    ApplicationStatus.submitted.value: {
+        ApplicationStatus.interview.value, ApplicationStatus.rejected.value,
+        ApplicationStatus.offer.value, ApplicationStatus.failed.value,
+    },
+    ApplicationStatus.interview.value: {
+        ApplicationStatus.offer.value, ApplicationStatus.rejected.value,
+    },
+    # Covers both a declined and a rescinded offer; there is no separate "declined".
+    ApplicationStatus.offer.value: {ApplicationStatus.rejected.value},
+    ApplicationStatus.rejected.value: set(),                                  # terminal
+    ApplicationStatus.skipped.value: {ApplicationStatus.matched.value},       # reconsider
+    ApplicationStatus.failed.value: {                                         # retry
+        ApplicationStatus.drafting.value, ApplicationStatus.skipped.value,
+    },
+}
+
+
+def allowed_next(current: str) -> set[str]:
+    """Statuses reachable from `current` on the normal path (excluding itself)."""
+    return set(ALLOWED_TRANSITIONS.get(current, set()))
+
+
+def can_transition(current: str, target: str) -> bool:
+    """True if target is reachable from current. Same→same is allowed (idempotent PATCH)."""
+    return target == current or target in ALLOWED_TRANSITIONS.get(current, set())
+
+
 class JobPosting(BaseModel):
     """Normalized job posting. The dedup_hash collapses the same role seen on
     multiple sources into one logical job."""

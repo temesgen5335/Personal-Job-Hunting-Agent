@@ -383,6 +383,47 @@ class Store:
         )
         self.conn.commit()
 
+    def applications_needing_followup(self, *, after_days: int = 7, limit: int = 50) -> list[dict]:
+        """Submitted applications that have gone quiet and deserve a nudge.
+
+        A follow-up logged inside the same window suppresses the reminder, so the list
+        renews itself after another `after_days` instead of either nagging every run or
+        going silent forever after one draft.
+        """
+        now = datetime.now(timezone.utc)
+        cutoff = (now - timedelta(days=after_days)).isoformat()
+        rows = self.conn.execute(
+            """
+            SELECT a.id, a.status, a.submitted_at, j.title, j.company,
+                   j.apply_email, j.url, j.apply_url
+            FROM applications a
+            JOIN jobs j ON j.id = a.job_id
+            WHERE a.status = 'submitted'
+              AND a.submitted_at IS NOT NULL
+              AND a.submitted_at <= ?
+              AND NOT EXISTS (
+                  SELECT 1 FROM events e
+                  WHERE e.kind = 'followup_drafted'
+                    AND json_extract(e.payload, '$.application_id') = a.id
+                    AND e.created_at > ?
+              )
+            ORDER BY a.submitted_at ASC
+            LIMIT ?
+            """,
+            (cutoff, cutoff, limit),
+        ).fetchall()
+
+        out = []
+        for r in rows:
+            row = dict(r)
+            try:
+                waited = (now - datetime.fromisoformat(row["submitted_at"])).days
+            except (ValueError, TypeError):
+                waited = after_days
+            row["days_waiting"] = max(0, waited)
+            out.append(row)
+        return out
+
     # --- events -----------------------------------------------------------
     def log_event(self, event: Event) -> None:
         self.conn.execute(
