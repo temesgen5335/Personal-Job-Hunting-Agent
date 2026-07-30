@@ -89,9 +89,14 @@ wrong here:
    nothing ever read, and stdout was the only alert channel. Fixed in Tier 1 via
    `pipeline_health()` + digest banner.
 
-A fourth, still open: **git history retains the PII and CV** that Tier 1 removed from
-tracking. That needs `git filter-repo` and a force-push — the owner's call, and it
-should happen before the repo is ever public.
+The fourth — **git history retained the PII and CV** — was closed on 2026-07-30:
+`git filter-repo` removed the CV PDF blob from every tree and replaced the phone/email
+strings in `config/preferences.toml`'s history with the same placeholders the tracked
+file uses. All 37 commits preserved (rewritten SHAs — this table was remapped), zero
+PII in any blob afterward, verified by full-history content scans. A pre-scrub backup
+bundle exists at `~/repos/personalAgent-pre-scrub-backup.bundle` (contains the PII —
+that is its job; delete after verifying the pushed repo). Note: a history rewrite
+invalidates every SHA recorded in docs — remap them in the same change, as done here.
 
 ## The R1 near-miss (Tier 2, July 2026)
 
@@ -136,16 +141,16 @@ Two durable lessons, now rules R1a/R1b:
 
 | Version | Commit | What changed |
 |---|---|---|
-| v1.0 | `80cc535` | Phase 0–4 complete: ingestion, matching, bot, Tier-1+2 apply, VPS deploy |
-| v2.0 | `1a4a752` | FastAPI orchestrator; dashboard fetches API instead of direct SQLite |
-| v2.1 | `7e6bf3c` | Encrypted config UI, auth-gated settings API, custom LLM provider |
-| v2.2 | `be7be62` | Fit-checker (confidence score + explainable report) |
-| v2.3 | `e23de67` | Application tracker + analytics (funnel, rates, timeline) |
-| v2.4 | `8b86fa6` | Job detail pages, on-demand fit check, inline charts |
-| v2.4+ | `7da7aae` | Portfolio theme, header fix, location filters, fit breakdown, pagination |
-| gov | `e1d5a12` | `.claude/` governance dir + `CLAUDE.md`/`AGENTS.md` entrypoints |
-| gov | `f7556b4` | Makefile runner (install / check / run) |
-| Tier 1 | `608b483`..`7ff2ea8` | Audit remediation: API auth on writes, CORS default, browser API URL, retry/backoff, pipeline health, PII split, docs truth-pass |
+| v1.0 | `8b68ebb` | Phase 0–4 complete: ingestion, matching, bot, Tier-1+2 apply, VPS deploy |
+| v2.0 | `6b8c007` | FastAPI orchestrator; dashboard fetches API instead of direct SQLite |
+| v2.1 | `3fed58c` | Encrypted config UI, auth-gated settings API, custom LLM provider |
+| v2.2 | `7c5eea9` | Fit-checker (confidence score + explainable report) |
+| v2.3 | `5746355` | Application tracker + analytics (funnel, rates, timeline) |
+| v2.4 | `546c5fe` | Job detail pages, on-demand fit check, inline charts |
+| v2.4+ | `aeee964` | Portfolio theme, header fix, location filters, fit breakdown, pagination |
+| gov | `eb3e34b` | `.claude/` governance dir + `CLAUDE.md`/`AGENTS.md` entrypoints |
+| gov | `86a2c20` | Makefile runner (install / check / run) |
+| Tier 1 | `c876038`..`ba4e5f8` | Audit remediation: API auth on writes, CORS default, browser API URL, retry/backoff, pipeline health, PII split, docs truth-pass |
 
 ---
 

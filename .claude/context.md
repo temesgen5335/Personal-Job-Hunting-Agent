@@ -62,6 +62,7 @@ Two interfaces, one backend:
 | Pipeline health | Done (Tier 1) — staleness + error count + per-source freshness, dashboard banner, digest warnings |
 | Source retry/backoff | Done (Tier 1) — bounded jittered backoff, capped Retry-After |
 | PII split | Done (Tier 1) — identity in gitignored overlay; committed config is placeholders |
+| History scrub | Done (2026-07-30) — CV blob + phone/email removed from all 37 commits via filter-repo |
 | Status lifecycle | Done (Tier 2) — transition map enforced, audited correction override |
 | Weighted matching | Done (Tier 2) — skill weights, role-zone tiers, seniority + must-have checks |
 | Gap surfacing | Done (Tier 2) — gaps as chips in the dashboard job list |
@@ -73,9 +74,6 @@ Two interfaces, one backend:
 Tier 1 of the remediation roadmap is complete (API auth, PII split, browser API URL,
 pipeline health, retry/backoff, docs truth-pass). Still open:
 
-- **Git history still contains the PII and CV** that were removed from tracking.
-  Scrubbing needs `git filter-repo` plus a force-push — a deliberate, destructive
-  operation the owner must run. Do it before the repo is ever made public.
 - **No triage actions** — jobs cannot be dismissed, snoozed, or annotated; the store
   has no column for it. This is the top dashboard gap.
 - **Concurrent ingestion is unguarded** — two overlapping `/ingest` calls can run
