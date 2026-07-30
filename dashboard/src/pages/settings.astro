@@ -1,4 +1,7 @@
 ---
+// Settings (design: Job Agent.dc.html). Locked gate first — these fields hold live
+// credentials — then grouped editors with set / not-set badges. Secrets are never
+// echoed by the API; a blank field keeps the stored value.
 import Layout from "../layouts/Layout.astro";
 import { publicApiBase } from "../lib/api";
 // Browser-facing URL: these fetches run in the visitor's browser, not on the server.
@@ -6,31 +9,35 @@ const apiUrl = publicApiBase();
 ---
 
 <Layout title="Settings">
-  <h1>Settings</h1>
-  <p class="muted">Edit credentials & LLM config. Secrets are encrypted at rest; blank a
-    secret field to leave it unchanged. Restart the bot/pipeline to apply new keys there.</p>
-
-  <div id="login" class="panel" style="display:none">
-    <strong>🔒 Admin login</strong>
-    <form id="login-form" class="filters" style="margin-top:10px">
-      <input type="password" id="password" placeholder="dashboard password" autocomplete="current-password" />
-      <button type="submit">Unlock</button>
-      <span id="login-msg" class="muted"></span>
+  <div id="login" class="lock" style="display:none">
+    <div style="font-size:16px;color:var(--strong)">Settings are locked</div>
+    <p style="font-size:13px;color:var(--muted);margin:8px 0 18px">
+      These fields hold live credentials. Enter the dashboard password to edit them.
+    </p>
+    <form id="login-form" style="display:flex;gap:8px">
+      <input type="password" id="password" placeholder="Password" autocomplete="current-password"
+             style="flex:1;background:#0d0d0d;border:1px solid var(--border);border-radius:8px;padding:8px 11px;font-size:13px;color:var(--text)" />
+      <button type="submit" class="btn primary" style="padding:8px 14px">Unlock</button>
     </form>
+    <div id="login-msg" class="muted" style="font-size:12px;margin-top:10px"></div>
   </div>
 
-  <div id="config" style="display:none">
+  <div id="config" style="display:none;max-width:620px">
+    <div style="margin-bottom:18px">
+      <h1 class="page">Settings</h1>
+      <div class="page-sub">Secrets are never returned by the API. Leave a field blank to keep the stored value.</div>
+    </div>
     <div id="form"></div>
-    <div class="panel" style="display:flex; gap:12px; align-items:center">
-      <button id="save">Save changes</button>
-      <button id="logout" style="background:#333;color:var(--text)">Log out</button>
-      <span id="save-msg" class="muted"></span>
+    <div style="display:flex;gap:8px;margin-top:16px;align-items:center">
+      <button id="save" class="btn primary" style="padding:8px 15px">Save changes</button>
+      <button id="logout" class="btn quiet" style="padding:8px 15px">Lock</button>
+      <span id="save-msg" class="muted" style="font-size:12.5px"></span>
     </div>
   </div>
 
-  <div id="error" class="panel" style="display:none"></div>
+  <div id="error" class="panel" style="display:none;margin-top:14px"></div>
 
-  <script define:vars={{ apiUrl }}>
+  <script is:inline define:vars={{ apiUrl }}>
     const TOKEN_KEY = "jobagent_token";
     const GROUPS = [
       { title: "LLM", fields: [
@@ -49,7 +56,7 @@ const apiUrl = publicApiBase();
         { k: "telegram_api_id" }, { k: "telegram_api_hash", secret: true },
         { k: "telegram_phone" }, { k: "telegram_channels" },
       ]},
-      { title: "Email (SMTP)", fields: [
+      { title: "SMTP", fields: [
         { k: "smtp_host" }, { k: "smtp_port" }, { k: "smtp_user" },
         { k: "smtp_password", secret: true }, { k: "apply_from_email" },
       ]},
@@ -61,7 +68,6 @@ const apiUrl = publicApiBase();
     const $ = (id) => document.getElementById(id);
     const token = () => localStorage.getItem(TOKEN_KEY);
     const headers = () => ({ "Content-Type": "application/json", Authorization: `Bearer ${token()}` });
-
     function showError(msg) { const e = $("error"); e.style.display = "block"; e.textContent = "⚠️ " + msg; }
 
     async function login(ev) {
@@ -72,7 +78,12 @@ const apiUrl = publicApiBase();
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ password: $("password").value }),
         });
-        if (!r.ok) { $("login-msg").textContent = r.status === 401 ? "wrong password" : `error ${r.status}`; return; }
+        if (!r.ok) {
+          $("login-msg").textContent = r.status === 401 ? "Wrong password."
+            : r.status === 403 ? "Editing is disabled — set DASHBOARD_PASSWORD on the API."
+            : `error ${r.status}`;
+          return;
+        }
         localStorage.setItem(TOKEN_KEY, (await r.json()).token);
         $("login-msg").textContent = "";
         await loadConfig();
@@ -81,29 +92,31 @@ const apiUrl = publicApiBase();
 
     function renderForm(cfg) {
       const html = GROUPS.map((g) => `
-        <div class="panel"><strong>${g.title}</strong><table style="margin-top:8px"><tbody>
+        <section class="s-group"><div class="s-title">${g.title}</div><div class="s-fields">
         ${g.fields.map((f) => {
           const v = cfg[f.k];
-          let input;
+          let input, badge = "";
           if (f.type === "select") {
             input = `<select id="f_${f.k}">${f.options.map((o) =>
               `<option value="${o}" ${o === v ? "selected" : ""}>${o}</option>`).join("")}</select>`;
           } else if (f.secret) {
             const set = v && v.set;
-            input = `<input id="f_${f.k}" type="password" placeholder="${set ? "•••••• (set — leave blank to keep)" : "not set"}" />`;
+            badge = `<span class="set-badge ${set ? "" : "no"}">${set ? "set" : "not set"}</span>`;
+            input = `<input id="f_${f.k}" type="password" placeholder="${set ? "blank to keep" : "not set"}" autocomplete="off" />`;
           } else {
-            input = `<input id="f_${f.k}" type="text" value="${v == null ? "" : String(v).replace(/"/g, "&quot;")}" />`;
+            const val = v == null ? "" : String(v).replace(/"/g, "&quot;");
+            input = `<input id="f_${f.k}" type="text" value="${val}" class="mono" />`;
           }
-          return `<tr><td style="width:200px" class="muted">${labelOf(f)}</td><td>${input}</td></tr>`;
+          return `<label class="field"><span>${labelOf(f)} ${badge}</span>${input}</label>`;
         }).join("")}
-        </tbody></table></div>`).join("");
+        </div></section>`).join("");
       $("form").innerHTML = html;
     }
 
     async function loadConfig() {
       try {
         const r = await fetch(`${apiUrl}/config`, { headers: headers() });
-        if (r.status === 401) { localStorage.removeItem(TOKEN_KEY); return gate(); }
+        if (r.status === 401 || r.status === 403) { localStorage.removeItem(TOKEN_KEY); return gate(); }
         if (!r.ok) return showError(`config load failed (${r.status})`);
         renderForm((await r.json()).config);
         $("login").style.display = "none";
@@ -124,7 +137,8 @@ const apiUrl = publicApiBase();
         const r = await fetch(`${apiUrl}/config`, { method: "PUT", headers: headers(), body: JSON.stringify({ values: patch }) });
         if (!r.ok) { $("save-msg").textContent = `error ${r.status}`; return; }
         renderForm((await r.json()).config);
-        $("save-msg").textContent = "✅ saved";
+        $("save-msg").textContent = "saved ✓";
+        setTimeout(() => { $("save-msg").textContent = ""; }, 2500);
       } catch (e) { showError(e.message); }
     }
 
@@ -139,3 +153,13 @@ const apiUrl = publicApiBase();
     token() ? loadConfig() : gate();
   </script>
 </Layout>
+
+<style is:global>
+  .lock { max-width: 340px; margin: 16vh auto; text-align: center; }
+  .s-group {
+    border: 1px solid var(--border); background: var(--panel);
+    border-radius: var(--radius); padding: 16px 18px; margin-bottom: 14px;
+  }
+  .s-title { font-size: 12px; color: var(--strong); margin-bottom: 14px; }
+  .s-fields { display: grid; gap: 12px; }
+</style>

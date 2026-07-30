@@ -1,4 +1,8 @@
 ---
+// Applications (design: Job Agent.dc.html). A quiet-application banner up top —
+// "gone quiet" is the state that needs a human — then the tracker table with a
+// status dot + select per row. Status edits keep the enforced-lifecycle flow:
+// out-of-process moves confirm first and go up with the audited correction flag.
 import Layout from "../layouts/Layout.astro";
 import { getApplications, getFollowups, apiBase, publicApiBase, APPLICATION_STATUSES,
          type AppRow, type Followup } from "../lib/api";
@@ -12,71 +16,109 @@ try {
 } catch (e) {
   error = (e as Error).message;
 }
-const apiUrl = apiBase();
-const publicUrl = publicApiBase();   // browser-side PATCH target
-const fmt = (s: string | null) => (s ? new Date(s).toLocaleString() : "—");
+const publicUrl = publicApiBase();
+
+const STATUS_COLOR: Record<string, string> = {
+  matched: "#737373", drafting: "#60a5fa", awaiting_approval: "#fbbf24",
+  submitted: "#7dd3fc", rejected: "#f87171", interview: "#4ade80",
+  offer: "#4ade80", skipped: "#585858", failed: "#f87171",
+};
+const quietDays = new Map(followups.map((f) => [f.id, f.days_waiting]));
+const submitted = apps.filter((a) => ["submitted", "interview", "offer", "rejected"].includes(a.status)).length;
+const fmtD = (s: string | null) =>
+  s ? new Date(s).toLocaleDateString(undefined, { day: "2-digit", month: "short" }) : "—";
 ---
 
 <Layout title="Applications">
-  <h1>Applications <span class="muted" style="font-size:14px">({apps.length})</span></h1>
-  <p class="muted">Change a status to track outcomes (interview, offer, rejected). Saves instantly.</p>
-
-  {followups.length > 0 && (
-    <div class="panel stale">
-      <strong>⏰ {followups.length} application(s) awaiting a reply</strong>
-      <p class="muted" style="margin:4px 0 10px">
-        Submitted over a week ago with no outcome recorded. Drafting a nudge never sends
-        it — you get editable text to send yourself.
-      </p>
-      <table>
-        <thead><tr><th>Role</th><th>Company</th><th>Waiting</th><th></th></tr></thead>
-        <tbody>
-          {followups.map((f) => (
-            <tr>
-              <td>{f.title}</td>
-              <td class="muted">{f.company}</td>
-              <td class="muted">{f.days_waiting}d</td>
-              <td><button class="nudge-btn" data-id={f.id} data-days={f.days_waiting}>Draft nudge</button></td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <div id="nudge-out"></div>
+  <div style="margin-bottom:18px">
+    <h1 class="page">Applications</h1>
+    <div class="page-sub">
+      {error ? "" : `${apps.length} applications · ${submitted} submitted · ${followups.length} gone quiet`}
     </div>
-  )}
-
-  {error && <div class="panel">⚠️ Can't reach the API at <code>{apiUrl}</code> — {error}</div>}
-
-  <div class="panel">
-    <table>
-      <thead><tr><th>Role</th><th>Company</th><th>Method</th><th>Status</th><th>Created</th><th>Submitted</th><th></th></tr></thead>
-      <tbody>
-        {apps.map((a) => (
-          <tr>
-            <td>{a.title}</td>
-            <td>{a.company}</td>
-            <td class="muted">{a.apply_method}</td>
-            <td>
-              <select class="status-select" data-id={a.id} data-prev={a.status}
-                      data-allowed={(a.allowed_next ?? []).join(",")}>
-                {APPLICATION_STATUSES.map((s) => (
-                  <option value={s} selected={s === a.status}>
-                    {s === a.status || (a.allowed_next ?? []).includes(s) ? s : `${s} (correction)`}
-                  </option>
-                ))}
-              </select>
-            </td>
-            <td class="muted">{fmt(a.created_at)}</td>
-            <td class="muted">{fmt(a.submitted_at)}</td>
-            <td>{(a.apply_url || a.url) && <a href={a.apply_url || a.url} target="_blank">link ↗</a>}</td>
-          </tr>
-        ))}
-        {apps.length === 0 && !error && <tr><td colspan="7" class="muted">No applications yet — use /apply in the bot.</td></tr>}
-      </tbody>
-    </table>
   </div>
 
-  <script define:vars={{ publicUrl }}>
+  {error && <div class="panel">⚠️ Can’t reach the API at <span class="mono">{apiBase()}</span> — {error}</div>}
+
+  {followups.length > 0 && (
+    <section class="nudge-banner">
+      <span class="n-dot"></span>
+      <span style="font-size:12.5px">
+        {followups.length} submitted application{followups.length === 1 ? "" : "s"} have gone quiet for over a week.
+      </span>
+      <button type="button" class="n-btn" id="nudge-toggle">Draft follow-ups</button>
+      <div class="nudge-body" id="nudge-body" hidden>
+        <p class="muted" style="font-size:12px;margin:4px 0 10px">
+          Drafting never sends anything — you get editable text to send yourself.
+        </p>
+        {followups.map((f) => (
+          <div class="nudge-row">
+            <span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+              {f.title} <span class="muted">· {f.company}</span>
+            </span>
+            <span class="mono" style="font-size:11px;color:var(--warn)">{f.days_waiting}d</span>
+            <button type="button" class="btn sm nudge-btn" data-id={f.id} data-days={f.days_waiting}>Draft nudge</button>
+          </div>
+        ))}
+        <div id="nudge-out"></div>
+      </div>
+    </section>
+  )}
+
+  {!error && (
+    <div class="apps-panel">
+      <div class="apps-head">
+        <span>Role</span><span>Method</span><span>Created</span><span>Submitted</span><span>Status</span>
+      </div>
+      {apps.map((a) => (
+        <div class="app-row">
+          <span style="min-width:0">
+            <span class="a-title">
+              {(a.apply_url || a.url)
+                ? <a href={a.apply_url || a.url} target="_blank" rel="noopener" style="color:var(--text)">{a.title}</a>
+                : a.title}
+            </span>
+            <span class="a-sub">
+              {a.company}
+              {quietDays.has(a.id) && a.status === "submitted" && (
+                <span class="mono" style="color:var(--warn);font-size:11px"> · quiet {quietDays.get(a.id)}d</span>
+              )}
+            </span>
+          </span>
+          <span class="mono cell">{a.apply_method}</span>
+          <span class="mono cell faint">{fmtD(a.created_at)}</span>
+          <span class="mono cell faint">{fmtD(a.submitted_at)}</span>
+          <span style="display:flex;align-items:center;gap:7px">
+            <span class="st-dot" style={`background:${STATUS_COLOR[a.status] ?? "#737373"}`}></span>
+            <select class="status-select mono" data-id={a.id} data-prev={a.status}
+                    data-allowed={(a.allowed_next ?? []).join(",")}
+                    style={`color:${STATUS_COLOR[a.status] ?? "var(--text)"}`}>
+              {APPLICATION_STATUSES.map((s) => (
+                <option value={s} selected={s === a.status}>
+                  {s === a.status || (a.allowed_next ?? []).includes(s) ? s : `${s} (correction)`}
+                </option>
+              ))}
+            </select>
+          </span>
+        </div>
+      ))}
+      {apps.length === 0 && (
+        <div class="muted" style="padding:32px;text-align:center;font-size:13px">
+          No applications yet — draft one from a job, or use /apply in the bot.
+        </div>
+      )}
+    </div>
+  )}
+  <div class="mono faint" style="font-size:11.5px;margin-top:10px">
+    status writes back on change · out-of-process moves are confirmed and logged as corrections
+  </div>
+
+  <script is:inline define:vars={{ publicUrl, STATUS_COLOR }}>
+    const toggle = document.getElementById("nudge-toggle");
+    if (toggle) toggle.addEventListener("click", () => {
+      const body = document.getElementById("nudge-body");
+      body.hidden = !body.hidden;
+    });
+
     document.querySelectorAll(".nudge-btn").forEach((btn) => {
       btn.addEventListener("click", async () => {
         const out = document.getElementById("nudge-out");
@@ -91,8 +133,8 @@ const fmt = (s: string | null) => (s ? new Date(s).toLocaleString() : "—");
           const d = await r.json();
           // Deliberately no send control: the draft is text you copy and send.
           out.innerHTML =
-            `<div class="draft"><div class="muted">To: ${d.to || "—"} · not sent</div>` +
-            `<input class="draft-subject" value="" /><textarea class="draft-body" rows="9"></textarea></div>`;
+            `<div class="draft"><div class="muted mono" style="font-size:11.5px">To: ${d.to || "—"} · not sent</div>` +
+            `<input class="draft-subject" /><textarea class="draft-body" rows="8"></textarea></div>`;
           out.querySelector(".draft-subject").value = d.subject || "";
           out.querySelector(".draft-body").value = d.body || "";
         } catch (err) {
@@ -130,9 +172,11 @@ const fmt = (s: string | null) => (s ? new Date(s).toLocaleString() : "—");
                              : window.JA.explain(r.status));
           }
           sel.dataset.prev = sel.value;
-          // Refresh the legal set for the new status so the next edit is accurate.
           const next = await r.json();
           sel.dataset.allowed = (next.allowed_next || []).join(",");
+          sel.style.color = STATUS_COLOR[sel.value] || "var(--text)";
+          const dot = sel.parentElement.querySelector(".st-dot");
+          if (dot) dot.style.background = STATUS_COLOR[sel.value] || "#737373";
         } catch (err) {
           alert(`Update failed: ${err.message}`);
           sel.value = prev;
@@ -141,3 +185,50 @@ const fmt = (s: string | null) => (s ? new Date(s).toLocaleString() : "—");
     });
   </script>
 </Layout>
+
+<style is:global>
+  .nudge-banner {
+    border: 1px solid rgba(251, 191, 36, 0.22); background: rgba(251, 191, 36, 0.05);
+    border-radius: var(--radius); padding: 12px 16px; margin-bottom: 18px;
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  }
+  .n-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--warn); display: block; }
+  .n-btn {
+    border: 1px solid rgba(251, 191, 36, 0.3); background: transparent; color: var(--warn);
+    border-radius: 7px; padding: 4px 11px; font-size: 12px; cursor: pointer; margin-left: auto;
+  }
+  .n-btn:hover { background: rgba(251, 191, 36, 0.12); }
+  .nudge-body { flex-basis: 100%; border-top: 1px solid rgba(251, 191, 36, 0.15); margin-top: 8px; padding-top: 8px; }
+  .nudge-body[hidden] { display: none; }
+  .nudge-row { display: flex; align-items: center; gap: 12px; padding: 6px 0; font-size: 13px; }
+  .draft { margin-top: 12px; }
+  .draft input, .draft textarea {
+    width: 100%; margin-top: 6px; font: inherit; background: #0d0d0d; color: var(--text);
+    border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px 10px;
+  }
+  .draft textarea { font-family: var(--mono); font-size: 12.5px; resize: vertical; }
+
+  .apps-panel { border: 1px solid var(--border); background: var(--panel); border-radius: var(--radius); overflow: hidden; }
+  .apps-head {
+    display: grid; grid-template-columns: 1fr 84px 74px 74px 190px; gap: 10px; padding: 9px 16px;
+    font-size: 10px; letter-spacing: 0.09em; text-transform: uppercase; color: var(--faint);
+  }
+  .app-row {
+    display: grid; grid-template-columns: 1fr 84px 74px 74px 190px; gap: 10px;
+    align-items: center; padding: 11px 16px; border-top: 1px solid var(--border);
+  }
+  @media (max-width: 820px) {
+    .apps-head { display: none; }
+    .app-row { grid-template-columns: 1fr auto; }
+    .app-row .cell { display: none; }
+  }
+  .a-title { display: block; font-size: 13.5px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .a-sub { display: block; font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .cell { font-size: 11.5px; color: var(--muted); }
+  .st-dot { width: 5px; height: 5px; border-radius: 50%; display: block; flex: none; }
+  .status-select {
+    background: transparent; border: 1px solid var(--border); border-radius: 6px;
+    padding: 3px 6px; font-size: 11.5px; cursor: pointer; max-width: 165px;
+  }
+  .status-select option { background: var(--panel); color: var(--text); }
+</style>

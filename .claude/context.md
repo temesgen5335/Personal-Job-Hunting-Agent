@@ -72,15 +72,15 @@ Two interfaces, one backend:
 | Architecture doc | Done (Tier 3) — rewritten around the real system; legacy Hermes diagram gone |
 | Ingest lock (M5) | Done — SQLite advisory lock w/ 2h TTL; second pass exits, API returns 409 |
 | CI | Done — tests.yml runs the offline suite + F821 gate on every push/PR |
-| Test suite | 206 tests, 26 test files, zero network, injectable fakes throughout |
+| Triage | Done — dismiss/snooze/note per job (triage table, POST /triage, queue count) |
+| Dashboard v3 | Done — sidebar shell, health-first Overview, triage queue + focus mode, fit-check states, nudge banner, locked Settings (from the Claude Design project) |
+| Test suite | 214 tests, 27 test files, zero network, injectable fakes throughout |
 
 ## Known Gaps (from the July 2026 audit)
 
 Tier 1 of the remediation roadmap is complete (API auth, PII split, browser API URL,
 pipeline health, retry/backoff, docs truth-pass). Still open:
 
-- **No triage actions** — jobs cannot be dismissed, snoozed, or annotated; the store
-  has no column for it. This is the top dashboard gap.
 - **Dedup is weak for Telegram** — the hash is company+title+location and the
   Telegram parser never sets a company, so those postings dedup on the title line only.
 - **Heuristic scores overwrite LLM scores** each run; no score provenance is kept.
@@ -102,12 +102,11 @@ pipeline health, retry/backoff, docs truth-pass). Still open:
 - **Aggregator adapter** (JSearch/SerpApi for Indeed/LinkedIn/Glassdoor) — toggle ready, no adapter code
 - **Profile/watchlist editing** in dashboard Settings (currently file-based)
 - **Bot outcome-marking** (interview/offer/rejected from Telegram — currently dashboard-only)
-- **Fit-checker on job list** (currently only on detail page)
 - **Deployment to a live VPS** — systemd units + scripts are ready, needs a provisioned box
 
 ## Key Numbers
 
 - **11,700+** jobs scored in a live run (8,253 fetched in a single pass across 6 adapters)
 - **40** companies in the ATS watchlist (Greenhouse/Lever/Ashby)
-- **206** tests across 26 files — all run offline, no network, no credentials
+- **214** tests across 27 files — all run offline, no network, no credentials
 - **6** LLM providers with automatic failover (3 free, 3 paid)

@@ -1,4 +1,7 @@
 ---
+// Job detail (design: Job Agent.dc.html). Description on the left; on-demand fit
+// check on the right with explicit idle → loading → done / error states. The fit
+// check spends an LLM call, so it never runs without being asked.
 import Layout from "../../layouts/Layout.astro";
 import { getJob, apiBase, publicApiBase, type JobDetail } from "../../lib/api";
 
@@ -10,89 +13,179 @@ try {
 } catch (e) {
   error = (e as Error).message;
 }
-const apiUrl = apiBase();
-const publicUrl = publicApiBase();   // browser-side fit-check target
-const link = job?.apply_url || job?.url || null;
+const publicUrl = publicApiBase();
 const pct = job ? Math.round(job.score * 100) : 0;
+const ago = (() => {
+  const ts = job?.posted_at ?? (job as any)?.first_seen_at;
+  if (!ts) return "—";
+  const h = Math.max(0, (Date.now() - new Date(ts).getTime()) / 36e5);
+  return h < 1 ? "<1h ago" : h < 24 ? `${Math.round(h)}h ago` : `${Math.floor(h / 24)}d ago`;
+})();
+const paragraphs = (job?.description ?? "").split(/\n{2,}|\r\n{2,}/).map((p) => p.trim()).filter(Boolean).slice(0, 40);
 ---
 
 <Layout title={job ? job.title : "Job"}>
-  <p><a href="/jobs" class="muted">← back to jobs</a></p>
-  {error && <div class="panel">⚠️ {error}</div>}
+  <button type="button" class="linkish" onclick="history.length > 1 ? history.back() : (location.href='/jobs')" style="margin-bottom:14px">&larr; Back to jobs</button>
+
+  {error && <div class="panel">⚠️ Can’t reach the API at <span class="mono">{apiBase()}</span> — {error}</div>}
+  {!error && !job && <div class="panel">Job not found.</div>}
 
   {job && (
-    <>
-      <h1>{job.title}</h1>
-      <div class="panel">
-        <div style="display:flex; gap:16px; align-items:center; flex-wrap:wrap">
-          <span class="score" style="font-size:22px">{pct}%</span>
-          <span>{job.company}</span>
-          <span class="muted">{job.location || (job.is_remote ? "Remote" : "—")}</span>
-          <span class="badge">{job.source}</span>
-          {link && <a href={link} target="_blank">apply ↗</a>}
+    <div class="detail-grid">
+      <div style="min-width:0">
+        <h1 class="page" style="font-size:22px">{job.title}</h1>
+        <div style="font-size:14px;color:var(--muted);margin-top:5px">{job.company} · {job.location || "—"}</div>
+        <div class="mono faint" style="font-size:11.5px;margin-top:8px">{job.source} · posted {ago} · match {pct}%</div>
+        <div style="display:flex;gap:8px;margin-top:16px;flex-wrap:wrap">
+          <button type="button" class="btn primary" id="draft-btn" data-id={job.id}>Draft application</button>
+          {job.url && <a class="btn" href={job.url} target="_blank" rel="noopener">Open posting &#8599;</a>}
+          {job.apply_url && job.apply_url !== job.url && (
+            <a class="btn quiet" href={job.apply_url} target="_blank" rel="noopener">Apply page &#8599;</a>
+          )}
         </div>
-        {job.rationale && <p class="muted" style="margin:12px 0 0">{job.rationale}</p>}
+        <div style="margin-top:26px;border-top:1px solid var(--border);padding-top:18px">
+          <div class="k" style="margin-bottom:10px">Description</div>
+          {paragraphs.length > 0
+            ? paragraphs.map((p) => <p class="desc-p">{p}</p>)
+            : <p class="desc-p muted">No description captured for this posting.</p>}
+        </div>
       </div>
 
-      <div class="panel">
-        <div style="display:flex; justify-content:space-between; align-items:center">
-          <strong>Fit check</strong>
-          <button id="fit-btn" data-job={job.id}>Check fit</button>
+      <aside class="panel fit" data-job={job.id}>
+        <div style="display:flex;align-items:baseline;justify-content:space-between">
+          <span style="font-size:12px;color:var(--strong)">Fit check</span>
+          <span class="mono faint" style="font-size:11px">on demand</span>
         </div>
-        <div id="fit-out" class="muted" style="margin-top:10px">Run a fit check against your CV.</div>
-      </div>
 
-      <div class="panel">
-        <strong>Description</strong>
-        <pre style="white-space:pre-wrap; font:inherit; margin:10px 0 0">{job.description || "—"}</pre>
-      </div>
-    </>
+        <div id="fit-idle">
+          <p style="font-size:12.5px;color:var(--muted);line-height:1.6;margin:10px 0 14px">
+            Runs your CV against the full description. Takes a few seconds and one LLM call.
+          </p>
+          <button type="button" class="btn primary" id="fit-run" style="width:100%">Run fit check</button>
+        </div>
+
+        <div id="fit-loading" hidden style="padding:22px 0;display:flex;align-items:center;gap:10px">
+          <span class="spinner"></span>
+          <span class="mono" style="font-size:12.5px;color:var(--muted)">analysing…</span>
+        </div>
+
+        <div id="fit-error" hidden>
+          <div class="fit-err-box">
+            <div style="font-size:12.5px;color:var(--danger)" id="fit-err-title">Fit check failed</div>
+            <div style="font-size:12px;color:var(--muted);margin-top:4px;line-height:1.55" id="fit-err-body"></div>
+          </div>
+          <button type="button" class="btn" id="fit-retry" style="width:100%;margin-top:10px">Try again</button>
+        </div>
+
+        <div id="fit-done" hidden></div>
+      </aside>
+    </div>
   )}
 
-  <style>
-    .fit-head { display: flex; gap: 16px; align-items: center; margin-bottom: 14px; }
-    .fit-ring { width: 64px; height: 64px; border-radius: 50%; flex: none;
-      display: grid; place-items: center; font: 700 20px var(--mono); color: var(--accent-2);
-      background: radial-gradient(circle at 50% 50%, var(--accent-dim), transparent 70%);
-      border: 2px solid var(--accent); }
-    .fit-ring span { font-size: 11px; }
-    .fit-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; }
-    .fit-sec h4 { margin: 0 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 600; }
-    .chip { display: inline-block; margin: 0 4px 4px 0; padding: 3px 9px; border-radius: 8px; font-size: 12.5px;
-      background: var(--panel-2); border: 1px solid var(--border-2); }
-    .chip.ok { background: rgba(63,185,80,.12); color: #5ad16b; border-color: rgba(63,185,80,.28); }
-    .chip.gap { background: rgba(227,160,8,.12); color: #e3a008; border-color: rgba(227,160,8,.28); }
-  </style>
+  <script is:inline define:vars={{ publicUrl }}>
+    const aside = document.querySelector(".fit");
+    if (aside) {
+      const jobId = aside.dataset.job;
+      const show = (which) => {
+        for (const s of ["idle", "loading", "error", "done"])
+          document.getElementById("fit-" + s).hidden = s !== which;
+      };
+      const esc = (t) => { const d = document.createElement("span"); d.textContent = t ?? ""; return d.innerHTML; };
 
-  <script define:vars={{ publicUrl }}>
-    const btn = document.getElementById("fit-btn");
-    btn?.addEventListener("click", async () => {
-      const out = document.getElementById("fit-out");
-      out.textContent = "Checking…";
-      try {
-        const r = await fetch(`${publicUrl}/fit`, {
-          method: "POST", headers: window.JA.headers(),
-          body: JSON.stringify({ job_id: btn.dataset.job }),
-        });
-        if (!r.ok) throw new Error(window.JA.explain(r.status));
-        const f = await r.json();
-        const chips = (arr, cls) => (arr || []).map((x) => `<span class="chip ${cls || ""}">${x}</span>`).join(" ") || "<span class='muted'>—</span>";
-        const locOk = f.location_fit;
-        out.innerHTML = `
-          <div class="fit-head">
-            <div class="fit-ring">${Math.round(f.score * 100)}<span>%</span></div>
-            <div><div class="fit-src badge">${f.source} assessment</div>
-              ${f.summary ? `<p style="margin:6px 0 0">${f.summary}</p>` : ""}</div>
-          </div>
-          <div class="fit-grid">
-            <div class="fit-sec"><h4>🛠 Skills / keywords <span class="muted">(${Math.round((f.coverage||0)*100)}% coverage)</span></h4>${chips(f.matched, "ok")}</div>
-            <div class="fit-sec"><h4>⚠️ Requirement gaps</h4>${chips(f.missing, "gap")}</div>
-            <div class="fit-sec"><h4>📍 Location</h4><span class="chip ${locOk ? "ok" : "gap"}">${f.location_note || (locOk ? "fits" : "mismatch")}</span></div>
-            <div class="fit-sec"><h4>🧭 Experience</h4><span class="muted">${f.experience || "—"}</span></div>
-          </div>`;
-      } catch (e) {
-        out.textContent = `Fit check failed: ${e.message}`;
+      async function run() {
+        show("loading");
+        // No streaming on this call — a hung LLM should surface as a timeout,
+        // not an infinite spinner.
+        const ctl = new AbortController();
+        const timer = setTimeout(() => ctl.abort(), 30000);
+        try {
+          const r = await fetch(`${publicUrl}/fit`, {
+            method: "POST", headers: window.JA.headers(),
+            body: JSON.stringify({ job_id: jobId }), signal: ctl.signal,
+          });
+          clearTimeout(timer);
+          if (!r.ok) throw new Error(window.JA.explain(r.status));
+          render(await r.json());
+        } catch (err) {
+          clearTimeout(timer);
+          document.getElementById("fit-err-title").textContent =
+            err.name === "AbortError" ? "Fit check timed out" : "Fit check failed";
+          document.getElementById("fit-err-body").textContent =
+            err.name === "AbortError"
+              ? "The model didn’t answer in 30s. The rest of this page is unaffected."
+              : err.message;
+          show("error");
+        }
       }
-    });
+
+      function render(f) {
+        const pctv = Math.round((f.score ?? 0) * 100);
+        const color = pctv >= 70 ? "var(--good)" : pctv >= 50 ? "var(--text)" : "var(--muted)";
+        const chips = (arr, cls) =>
+          (arr || []).map((x) => `<span class="${cls}">${esc(x)}</span>`).join(" ") ||
+          `<span class="muted" style="font-size:11.5px">—</span>`;
+        const locDot = f.location_fit === false ? "var(--warn)" : "var(--good)";
+        const locLabel = f.location_fit === false ? "Location: check" : "Location: fits";
+        document.getElementById("fit-done").innerHTML = `
+          <div style="display:flex;align-items:baseline;gap:10px;margin:14px 0 4px">
+            <span class="mono" style="font-size:26px;color:${color};letter-spacing:-.02em">${pctv}%</span>
+            <span style="font-size:11.5px;color:var(--muted)">confidence</span>
+          </div>
+          <div class="mono faint" style="font-size:11.5px;margin-bottom:14px">
+            coverage ${(f.coverage ?? 0).toFixed(2)}${f.experience ? " · " + esc(f.experience) : ""} · ${esc(f.source)} assessment
+          </div>
+          <div class="k" style="margin-bottom:6px">Matched</div>
+          <div style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:14px">${chips(f.matched, "chip-ok")}</div>
+          <div class="k" style="margin-bottom:6px">Gaps</div>
+          <div style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:14px">${chips(f.missing, "chip-gap")}</div>
+          <div style="border-top:1px solid var(--border);padding-top:12px">
+            <div style="display:flex;align-items:center;gap:7px;margin-bottom:6px">
+              <span style="width:5px;height:5px;border-radius:50%;background:${locDot};display:block"></span>
+              <span style="font-size:12px">${locLabel}</span>
+            </div>
+            ${f.location_note ? `<div style="font-size:12px;color:var(--muted);line-height:1.55">${esc(f.location_note)}</div>` : ""}
+          </div>
+          ${f.summary ? `<p style="font-size:12.5px;line-height:1.6;margin:14px 0 0;padding-top:12px;border-top:1px solid var(--border)">${esc(f.summary)}</p>` : ""}`;
+        show("done");
+      }
+
+      document.getElementById("fit-run").addEventListener("click", run);
+      document.getElementById("fit-retry").addEventListener("click", run);
+    }
+
+    // Draft application: prepare assets, then hand off to Applications. Sending
+    // still requires explicit approval elsewhere — nothing is submitted here.
+    const draft = document.getElementById("draft-btn");
+    if (draft) {
+      draft.addEventListener("click", async () => {
+        draft.disabled = true; draft.textContent = "Drafting…";
+        try {
+          const r = await fetch(`${publicUrl}/apply/prepare`, {
+            method: "POST", headers: window.JA.headers(),
+            body: JSON.stringify({ job_id: draft.dataset.id }),
+          });
+          if (!r.ok) {
+            const d = await r.json().catch(() => null);
+            throw new Error((d && typeof d.detail === "string" && d.detail) || window.JA.explain(r.status));
+          }
+          location.href = "/applications";
+        } catch (err) {
+          alert(err.message);
+          draft.disabled = false; draft.textContent = "Draft application";
+        }
+      });
+    }
   </script>
 </Layout>
+
+<style>
+  .detail-grid { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 26px; }
+  @media (max-width: 820px) { .detail-grid { grid-template-columns: 1fr; } }
+  .desc-p { font-size: 13.5px; line-height: 1.7; color: var(--text); margin: 0 0 12px; white-space: pre-wrap; }
+  .fit { align-self: start; position: sticky; top: 20px; }
+  .fit-err-box {
+    border: 1px solid rgba(248, 113, 113, 0.3); background: rgba(248, 113, 113, 0.07);
+    border-radius: 8px; padding: 11px 12px; margin-top: 12px;
+  }
+  #fit-idle[hidden], #fit-loading[hidden], #fit-error[hidden], #fit-done[hidden] { display: none; }
+</style>

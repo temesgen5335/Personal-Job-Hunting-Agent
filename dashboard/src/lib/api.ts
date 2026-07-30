@@ -48,6 +48,7 @@ export interface Stats {
   totalJobs: number;
   matches: number;
   strong: number;
+  queue: number;              // strong ∧ untriaged — the morning number
   totalApps: number;
   lastIngest: string | null;
   bySource: { source: string; n: number }[];
@@ -61,6 +62,7 @@ export async function getStats(): Promise<Stats> {
     totalJobs: s.total_jobs ?? 0,
     matches: s.matches ?? 0,
     strong: s.strong_matches ?? 0,
+    queue: s.queue ?? 0,
     totalApps: s.total_apps ?? 0,
     lastIngest: s.last_ingest ?? null,
     bySource: Object.entries(s.by_source ?? {}).map(([source, n]) => ({ source, n: n as number })),
@@ -84,6 +86,10 @@ export interface MatchRow {
   // Why this might not fit: level mismatch, missing must-have, exclusion, not remote.
   // Surfaced in the list so triage does not need a click-through.
   gaps: string[];
+  // Per-job triage decision, joined by the store. null = live.
+  triage_state: "dismissed" | "snoozed" | null;
+  triage_snoozed_until: string | null;
+  triage_note: string | null;
 }
 
 export interface MatchFilter {

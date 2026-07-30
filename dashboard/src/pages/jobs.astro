@@ -1,126 +1,503 @@
 ---
+// Jobs (design: Job Agent.dc.html). Two zones: "Awaiting your call" — strong matches
+// with no decision, the reason this page gets opened — and "Everything else". Every
+// row can be dismissed, snoozed, or annotated without leaving the list; decisions
+// persist via POST /triage. Filters live in the URL (shareable) and are mirrored to
+// localStorage so a bare /jobs visit restores your last view.
 import Layout from "../layouts/Layout.astro";
-import { getMatches, apiBase, type MatchFilter, type MatchRow } from "../lib/api";
+import { getMatches, apiBase, publicApiBase, type MatchRow } from "../lib/api";
 
 const url = Astro.url;
-const sp = url.searchParams;
-const daysParam = sp.get("days") ?? "0";
-const location = (sp.get("location") ?? "any") as MatchFilter["location"];
-const q = sp.get("q") ?? "";
-const exclude = sp.get("exclude") ?? "";
-const include = sp.get("include") ?? "";
-const page = Math.max(1, Number(sp.get("page") || "1"));
-const LIMIT = 25;
+const q = url.searchParams.get("q") ?? "";
+const within = url.searchParams.get("within") ?? "7d";
+const remote = url.searchParams.get("remote") ?? "any";
+const exclude = url.searchParams.get("exclude") ?? "";
+const page = Math.max(1, parseInt(url.searchParams.get("page") ?? "1", 10) || 1);
+const PAGE = 25;
 
-const filter: MatchFilter = {
-  days: Number(daysParam) || 0, location, q: q.trim() || undefined,
-  exclude: exclude.trim() || undefined, include: include.trim() || undefined,
-  limit: LIMIT, offset: (page - 1) * LIMIT,
-};
+const days = within === "24h" ? 1 : within === "3d" ? 3 : within === "7d" ? 7 : 0;
+const excludeParam = exclude === "US-only" ? "US only" : exclude === "On-site" ? "on-site,onsite" : "";
 
 let rows: MatchRow[] = [];
 let error: string | null = null;
 try {
-  rows = await getMatches(filter);
+  rows = await getMatches({
+    days, location: remote as "any" | "remote" | "hybrid", q,
+    exclude: excludeParam, limit: 200, offset: 0,
+  });
 } catch (e) {
   error = (e as Error).message;
 }
 
-const dateOpts = [["0", "Any time"], ["1", "Today"], ["2", "2 days"], ["7", "Week"], ["30", "Month"]];
-const locOpts = ["any", "remote", "hybrid"];
-const fmtDate = (s: string | null) => (s ? new Date(s).toLocaleDateString() : "—");
+const live = (j: MatchRow) => !j.triage_state;
+const queue = rows.filter((j) => j.score >= 0.7 && live(j));
+const strongTotal = rows.filter((j) => j.score >= 0.7).length;
+const rest = rows.filter((j) => !(j.score >= 0.7 && live(j)));
+const pages = Math.max(1, Math.ceil(rest.length / PAGE));
+const restPage = rest.slice((page - 1) * PAGE, page * PAGE);
 
-// Build a page link preserving current filters.
-const pageHref = (p: number) => {
-  const u = new URLSearchParams(sp);
-  u.set("page", String(p));
-  return `/jobs?${u.toString()}`;
+const ago = (j: MatchRow) => {
+  const ts = j.posted_at ?? (j as any).first_seen_at;
+  if (!ts) return "—";
+  const h = Math.max(0, (Date.now() - new Date(ts).getTime()) / 36e5);
+  return h < 1 ? "<1h ago" : h < 24 ? `${Math.round(h)}h ago` : `${Math.floor(h / 24)}d ago`;
 };
-const hasNext = rows.length === LIMIT;
+const scoreClass = (s: number) => (s >= 0.7 ? "s-hi" : s >= 0.5 ? "s-mid" : "s-lo");
+const pctOf = (s: number) => `${Math.round(s * 100)}%`;
+// The rationale lists matched skills as "skills: a, b, c" — surface them as chips.
+const matchedChips = (j: MatchRow) => {
+  const m = /skills: ([^;]+)/.exec(j.rationale ?? "");
+  return m ? m[1].split(",").map((x) => x.trim()).slice(0, 4) : [];
+};
+const gapChips = (j: MatchRow) => (j.gaps ?? []).slice(0, 3);
+const remoteTag = (j: MatchRow) =>
+  j.is_remote ? "remote" : /hybrid/i.test(j.location ?? "") ? "hybrid" : "on-site";
+const metaLine = (j: MatchRow) => `${j.location || "—"} · ${j.source} · ${ago(j)}`;
+
+// Filter chips (each individually removable → link without that param).
+const linkWith = (patch: Record<string, string>) => {
+  const p = new URLSearchParams(url.searchParams);
+  for (const [k, v] of Object.entries(patch)) (v ? p.set(k, v) : p.delete(k));
+  p.delete("page");
+  const qs = p.toString();
+  return qs ? `/jobs?${qs}` : "/jobs";
+};
+const pageLink = (n: number) => {
+  const p = new URLSearchParams(url.searchParams);
+  p.set("page", String(n));
+  return `/jobs?${p.toString()}`;
+};
+const chips: { label: string; href: string }[] = [];
+if (q) chips.push({ label: `“${q}”`, href: linkWith({ q: "" }) });
+if (within !== "any") chips.push({ label: `posted < ${within === "24h" ? "24h" : within.replace("d", " days")}`, href: linkWith({ within: "any" }) });
+if (remote !== "any") chips.push({ label: remote, href: linkWith({ remote: "any" }) });
+if (exclude) chips.push({ label: `exclude ${exclude}`, href: linkWith({ exclude: "" }) });
+
+const publicUrl = publicApiBase();
+const queueData = queue.map((j) => ({
+  id: j.id, title: j.title, company: j.company, loc: j.location, score: j.score,
+  why: j.rationale, meta: metaLine(j), matched: matchedChips(j), gaps: gapChips(j),
+}));
 ---
 
 <Layout title="Jobs">
-  <div style="display:flex; align-items:baseline; justify-content:space-between; gap:12px">
-    <h1>Jobs</h1>
-    <span class="muted" style="font-size:13px">page {page} · showing {rows.length}</span>
+  <div class="page-head">
+    <div>
+      <h1 class="page">Jobs</h1>
+      <div class="page-sub">{error ? "" : `${rows.length} match your filters`}</div>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px">
+      <span class="faint" style="font-size:11px">Triage mode</span>
+      <div class="mode-toggle">
+        <button type="button" class="mode-btn on" data-mode="inline">A · Inline</button>
+        <button type="button" class="mode-btn" data-mode="focus">B · One-at-a-time</button>
+      </div>
+    </div>
   </div>
 
-  <form class="filter-bar panel" method="get">
-    <div class="fgrid">
-      <label class="fld">Posted within
-        <select name="days">
-          {dateOpts.map(([v, l]) => <option value={v} selected={v === daysParam}>{l}</option>)}
-        </select>
-      </label>
-      <label class="fld">Location
-        <select name="location">
-          {locOpts.map((l) => <option value={l} selected={l === location}>{l}</option>)}
-        </select>
-      </label>
-      <label class="fld">Keywords
-        <input type="search" name="q" placeholder="frontend ai agent" value={q} />
-      </label>
-      <label class="fld">Exclude locations
-        <input type="text" name="exclude" placeholder="US only, India" value={exclude} />
-      </label>
-      <label class="fld">Only locations
-        <input type="text" name="include" placeholder="remote, worldwide, EMEA" value={include} />
-      </label>
-    </div>
-    <div class="factions">
-      <button type="submit">Apply filters</button>
-      <a href="/jobs" class="muted">reset</a>
-    </div>
-  </form>
+  {error && (
+    <div class="panel">⚠️ Can’t reach the API at <span class="mono">{apiBase()}</span> — {error}</div>
+  )}
 
-  {error && <div class="panel">⚠️ Can't reach the API at <code>{apiBase()}</code> — {error}</div>}
+  {!error && (
+    <>
+      <form class="panel filters" method="get" action="/jobs" id="filter-form">
+        <div class="filter-row">
+          <input type="search" name="q" value={q} placeholder="Search title, company, rationale…" />
+          <select name="within">
+            <option value="24h" selected={within === "24h"}>Posted &lt; 24h</option>
+            <option value="3d" selected={within === "3d"}>Posted &lt; 3 days</option>
+            <option value="7d" selected={within === "7d"}>Posted &lt; 7 days</option>
+            <option value="any" selected={within === "any"}>Any date</option>
+          </select>
+          <select name="remote">
+            <option value="any" selected={remote === "any"}>Anywhere</option>
+            <option value="remote" selected={remote === "remote"}>Remote only</option>
+            <option value="hybrid" selected={remote === "hybrid"}>Hybrid</option>
+          </select>
+          <select name="exclude">
+            <option value="" selected={exclude === ""}>Exclude…</option>
+            <option value="US-only" selected={exclude === "US-only"}>US-only</option>
+            <option value="On-site" selected={exclude === "On-site"}>On-site</option>
+          </select>
+          <button class="btn" type="submit">Apply</button>
+        </div>
+        {chips.length > 0 && (
+          <div class="chip-row">
+            <span class="faint" style="font-size:11px;letter-spacing:.02em">Active</span>
+            {chips.map((c) => (
+              <a class="f-chip" href={c.href}>{c.label}<span class="f-x">&times;</span></a>
+            ))}
+            <a class="linkish" href="/jobs?within=any">Clear all</a>
+            <span class="mono faint" style="font-size:11px;margin-left:auto">saved to this browser</span>
+          </div>
+        )}
+      </form>
 
-  <div class="panel">
-    <table>
-      <thead><tr><th>#</th><th>Score</th><th>Role</th><th>Company</th><th>Location</th><th>Source</th><th>Posted</th><th></th></tr></thead>
-      <tbody>
-        {rows.map((m, i) => (
-          <tr>
-            <td class="muted">{(page - 1) * LIMIT + i + 1}</td>
-            <td class="score">{Math.round(m.score * 100)}%</td>
-            <td>
-              <a href={`/jobs/${m.id}`}>{m.title}</a><br />
-              <span class="muted" style="font-size:12px">{m.rationale}</span>
-              {(m.gaps ?? []).length > 0 && (
-                <div class="gaps">
-                  {(m.gaps ?? []).map((g) => <span class="chip gap">{g}</span>)}
+      {rows.length === 0 && (
+        <div class="panel empty">
+          <div style="font-size:15px;color:var(--strong)">Nothing matches</div>
+          <p>
+            {within !== "any"
+              ? "The sources answered, but no posting inside this date window matches your filters."
+              : "No stored posting matches these filters."}
+          </p>
+          {within === "24h" || within === "3d" ? (
+            <a class="btn" href={linkWith({ within: "7d" })}>Widen to 7 days</a>
+          ) : within === "7d" ? (
+            <a class="btn" href={linkWith({ within: "any" })}>Widen to any date</a>
+          ) : null}
+        </div>
+      )}
+
+      <div id="inline-view">
+        {queue.length > 0 && (
+          <section class="queue">
+            <div class="queue-head">
+              <span class="q-dot"></span>
+              <span style="font-size:12.5px;color:var(--strong);letter-spacing:-.01em">Awaiting your call</span>
+              <span class="mono" style="font-size:11.5px;color:var(--accent)">{queue.length}</span>
+              <span class="muted" style="font-size:11.5px;margin-left:auto">strong matches, untriaged</span>
+            </div>
+            {queue.map((j) => (
+              <div class="q-row trow" data-id={j.id}>
+                <div class="t-live">
+                  <div class="q-top">
+                    <span class:list={["mono", "q-score", scoreClass(j.score)]}>{pctOf(j.score)}</span>
+                    <a class="q-title" href={`/jobs/${j.id}`}>{j.title}</a>
+                    <span class="muted" style="font-size:13px">{j.company}</span>
+                    <span class="mono faint" style="font-size:11px;margin-left:auto">{metaLine(j)}</span>
+                  </div>
+                  <div class="q-why">{j.rationale}</div>
+                  <div class="q-chips">
+                    {matchedChips(j).map((c) => <span class="chip-ok">{c}</span>)}
+                    {gapChips(j).map((g) => <span class="chip-gap">{g}</span>)}
+                  </div>
+                  <div class="q-actions">
+                    <button type="button" class="btn primary sm-pad act-draft" data-id={j.id}>Draft application</button>
+                    <a class="btn sm-pad" href={`/jobs/${j.id}`}>Fit check</a>
+                    <button type="button" class="btn sm-pad quiet act-snooze" data-id={j.id}>Snooze 3d</button>
+                    <button type="button" class="btn sm-pad quiet danger-hover act-dismiss" data-id={j.id}>Dismiss</button>
+                  </div>
                 </div>
-              )}
-            </td>
-            <td>{m.company}</td>
-            <td class="muted">{m.location || (m.is_remote ? "Remote" : "—")}</td>
-            <td><span class="badge">{m.source}</span></td>
-            <td class="muted">{fmtDate(m.posted_at)}</td>
-            <td>{(m.apply_url || m.url) && <a href={m.apply_url || m.url} target="_blank">apply ↗</a>}</td>
-          </tr>
-        ))}
-        {rows.length === 0 && !error && <tr><td colspan="8" class="muted">No matches for these filters.</td></tr>}
-      </tbody>
-    </table>
-  </div>
+                <div class="t-gone" hidden>
+                  <span class="gone-label mono"></span>
+                  <span class="gone-title">{j.title} · {j.company}</span>
+                  <button type="button" class="linkish act-undo" data-id={j.id} style="margin-left:auto">Undo</button>
+                </div>
+              </div>
+            ))}
+          </section>
+        )}
 
-  <div class="pager">
-    {page > 1 ? <a class="pgbtn" href={pageHref(page - 1)}>← Prev</a> : <span class="pgbtn disabled">← Prev</span>}
-    <span class="muted">page {page}</span>
-    {hasNext ? <a class="pgbtn" href={pageHref(page + 1)}>Next →</a> : <span class="pgbtn disabled">Next →</span>}
-  </div>
+        {queue.length === 0 && strongTotal > 0 && rows.length > 0 && (
+          <section class="panel cleared">
+            <span class="q-dot good"></span>
+            <span style="font-size:13px">Queue cleared — every strong match has a decision.</span>
+          </section>
+        )}
 
-  <style>
-    .filter-bar { display: flex; flex-direction: column; gap: 14px; }
-    .fgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; }
-    .fld { flex-direction: column; align-items: stretch; gap: 6px; font-size: 12px; color: var(--faint);
-      text-transform: uppercase; letter-spacing: .05em; font-weight: 600; }
-    .fld select, .fld input { text-transform: none; letter-spacing: normal; font-weight: 400; color: var(--text); }
-    .factions { display: flex; gap: 14px; align-items: center; }
-    .pager { display: flex; gap: 16px; align-items: center; justify-content: center; }
-    .pgbtn { padding: 7px 14px; border: 1px solid var(--border-2); border-radius: 8px; background: var(--panel);
-      color: var(--text); text-decoration: none; }
-    .pgbtn:hover { background: var(--hover); text-decoration: none; }
-    .pgbtn.disabled { color: var(--faint); border-color: var(--border); pointer-events: none; }
-  </style>
+        {rest.length > 0 && (
+          <>
+            <div class="rest-head">
+              <span class="k">Everything else</span>
+              <span class="mono faint" style="font-size:11px">{rest.length}</span>
+            </div>
+            <div class="rest-list">
+              {restPage.map((j) => (
+                <div class="r-row trow" data-id={j.id} data-state={j.triage_state ?? ""}>
+                  <div class="t-live" hidden={!!j.triage_state}>
+                    <div class="r-grid">
+                      <span class:list={["mono", "r-score", scoreClass(j.score)]}>{pctOf(j.score)}</span>
+                      <span style="min-width:0">
+                        <span class="r-line1">
+                          <a class="r-title" href={`/jobs/${j.id}`}>{j.title}</a>
+                          <span class="muted" style="font-size:12.5px">{j.company}</span>
+                          <span class="r-tag mono">{remoteTag(j)}</span>
+                        </span>
+                        <span class="r-why">{j.rationale}</span>
+                        <span class="r-note mono" hidden={!j.triage_note}>↳ {j.triage_note}</span>
+                        <span class="r-noter" hidden>
+                          <input class="note-input" value={j.triage_note ?? ""} placeholder="Note to self…" />
+                          <button type="button" class="btn primary sm act-savenote" data-id={j.id}>Save</button>
+                        </span>
+                      </span>
+                      <span class="mono r-meta">{metaLine(j)}</span>
+                      <span class="r-actions">
+                        <button type="button" class="btn sm act-snooze" data-id={j.id}>Snooze</button>
+                        <button type="button" class="btn sm act-note" data-id={j.id}>Note</button>
+                        <button type="button" class="btn sm danger-hover act-dismiss" data-id={j.id}>Dismiss</button>
+                      </span>
+                    </div>
+                  </div>
+                  <div class="t-gone" hidden={!j.triage_state}>
+                    <span class="gone-label mono" data-kind={j.triage_state ?? ""}>
+                      {j.triage_state === "dismissed" ? "Dismissed" : j.triage_state === "snoozed" ? "Snoozed" : ""}
+                    </span>
+                    <span class="gone-title">{j.title} · {j.company}</span>
+                    <button type="button" class="linkish act-undo" data-id={j.id} style="margin-left:auto">Undo</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div class="pager">
+              <span class="mono faint" style="font-size:11.5px">showing {restPage.length} of {rest.length} · page {page} of {pages}</span>
+              <span style="display:flex;gap:6px">
+                {page > 1
+                  ? <a class="btn sm-pad" href={pageLink(page - 1)}>Previous</a>
+                  : <span class="btn sm-pad" style="color:var(--faint);cursor:not-allowed">Previous</span>}
+                {page < pages
+                  ? <a class="btn sm-pad" href={pageLink(page + 1)}>Next</a>
+                  : <span class="btn sm-pad" style="color:var(--faint);cursor:not-allowed">Next</span>}
+              </span>
+            </div>
+          </>
+        )}
+      </div>
+
+      <div id="focus-view" hidden>
+        <div class="focus-progress">
+          <span class="mono" style="font-size:11.5px;color:var(--muted)" id="focus-count"></span>
+          <span class="focus-track"><span class="focus-bar" id="focus-bar"></span></span>
+        </div>
+        <section class="panel" id="focus-card" hidden></section>
+        <section class="panel empty" id="focus-done" hidden>
+          <div style="font-size:15px;color:var(--strong)">Queue cleared</div>
+          <p>Every strong match got a decision.</p>
+        </section>
+        <div class="mono faint" style="font-size:11.5px;margin-top:10px">one decision per card · the list is never shown until the queue is empty</div>
+      </div>
+    </>
+  )}
+
+  <script type="application/json" id="queue-data" set:html={JSON.stringify(queueData)} />
+
+  <script is:inline define:vars={{ publicUrl }}>
+    // ---- filter persistence: the URL is the truth; localStorage restores a bare visit.
+    const FKEY = "jobagent.filters";
+    const params = new URLSearchParams(location.search);
+    if (![...params.keys()].length) {
+      try {
+        const saved = JSON.parse(localStorage.getItem(FKEY) || "null");
+        if (saved && Object.values(saved).some((v) => v && v !== "7d" && v !== "any")) {
+          location.replace("/jobs?" + new URLSearchParams(saved).toString());
+        }
+      } catch {}
+    } else {
+      try {
+        localStorage.setItem(FKEY, JSON.stringify({
+          q: params.get("q") || "", within: params.get("within") || "7d",
+          remote: params.get("remote") || "any", exclude: params.get("exclude") || "",
+        }));
+      } catch {}
+    }
+
+    // ---- triage actions -------------------------------------------------------
+    async function triage(id, body) {
+      const r = await fetch(`${publicUrl}/triage/${id}`, {
+        method: "POST", headers: window.JA.headers(), body: JSON.stringify(body),
+      });
+      if (!r.ok) throw new Error(window.JA.explain(r.status));
+      return r.json();
+    }
+    const row = (id) => document.querySelector(`.trow[data-id="${CSS.escape(id)}"]`);
+    function markGone(el, kind) {
+      if (!el) return;
+      const live = el.querySelector(".t-live");
+      const gone = el.querySelector(".t-gone");
+      if (live) live.hidden = true;
+      if (gone) {
+        gone.hidden = false;
+        const label = gone.querySelector(".gone-label");
+        if (label) { label.textContent = kind === "dismissed" ? "Dismissed" : "Snoozed 3d"; label.dataset.kind = kind; }
+      }
+      el.dataset.state = kind;
+    }
+    function markLive(el) {
+      if (!el) return;
+      const live = el.querySelector(".t-live");
+      const gone = el.querySelector(".t-gone");
+      if (live) live.hidden = false;
+      if (gone) gone.hidden = true;
+      el.dataset.state = "";
+    }
+
+    document.addEventListener("click", async (e) => {
+      const b = e.target.closest("button");
+      if (!b || !b.dataset.id) return;
+      const id = b.dataset.id;
+      try {
+        if (b.classList.contains("act-dismiss")) {
+          await triage(id, { action: "dismiss" });
+          decided[id] = "dismissed"; markGone(row(id), "dismissed"); refreshFocus();
+        } else if (b.classList.contains("act-snooze")) {
+          await triage(id, { action: "snooze", days: 3 });
+          decided[id] = "snoozed"; markGone(row(id), "snoozed"); refreshFocus();
+        } else if (b.classList.contains("act-undo")) {
+          await triage(id, { action: "clear" });
+          delete decided[id]; markLive(row(id)); refreshFocus();
+        } else if (b.classList.contains("act-note")) {
+          const el = row(id);
+          el.querySelector(".r-noter").hidden = false;
+          el.querySelector(".note-input").focus();
+        } else if (b.classList.contains("act-savenote")) {
+          const el = row(id);
+          const note = el.querySelector(".note-input").value;
+          await triage(id, { action: "note", note });
+          el.querySelector(".r-noter").hidden = true;
+          const line = el.querySelector(".r-note");
+          line.textContent = note ? "↳ " + note : "";
+          line.hidden = !note;
+        } else if (b.classList.contains("act-draft")) {
+          b.disabled = true; b.textContent = "Drafting…";
+          const r = await fetch(`${publicUrl}/apply/prepare`, {
+            method: "POST", headers: window.JA.headers(), body: JSON.stringify({ job_id: id }),
+          });
+          if (!r.ok) {
+            const d = await r.json().catch(() => null);
+            throw new Error((d && typeof d.detail === "string" && d.detail) || window.JA.explain(r.status));
+          }
+          // Drafted → the job leaves the queue. Sending still needs your explicit
+          // approval (Telegram bot or API) — nothing was submitted here.
+          await triage(id, { action: "snooze", days: 3 });
+          location.href = "/applications";
+        }
+      } catch (err) {
+        alert(err.message);
+        if (b.classList.contains("act-draft")) { b.disabled = false; b.textContent = "Draft application"; }
+      }
+    });
+
+    // ---- one-at-a-time mode -----------------------------------------------------
+    const MKEY = "jobagent.triagemode";
+    const queueData = JSON.parse(document.getElementById("queue-data")?.textContent || "[]");
+    const decided = {};   // this page-load's decisions, for focus-mode stepping
+    const inlineView = document.getElementById("inline-view");
+    const focusView = document.getElementById("focus-view");
+
+    function setMode(mode) {
+      try { localStorage.setItem(MKEY, mode); } catch {}
+      document.querySelectorAll(".mode-btn").forEach((x) => x.classList.toggle("on", x.dataset.mode === mode));
+      if (inlineView) inlineView.hidden = mode === "focus";
+      if (focusView) focusView.hidden = mode !== "focus";
+      if (mode === "focus") refreshFocus();
+    }
+    document.querySelectorAll(".mode-btn").forEach((x) =>
+      x.addEventListener("click", () => setMode(x.dataset.mode)));
+
+    function refreshFocus() {
+      if (!focusView || focusView.hidden) return;
+      const pending = queueData.filter((j) => !decided[j.id]);
+      const total = queueData.length;
+      const done = total - pending.length;
+      document.getElementById("focus-count").textContent = `${done} of ${total || 1} decided`;
+      document.getElementById("focus-bar").style.width = (total ? (done / total) * 100 : 100) + "%";
+      const card = document.getElementById("focus-card");
+      const doneEl = document.getElementById("focus-done");
+      const j = pending[0];
+      card.hidden = !j; doneEl.hidden = !!j;
+      if (!j) return;
+      const esc = (t) => { const d = document.createElement("span"); d.textContent = t ?? ""; return d.innerHTML; };
+      card.innerHTML = `
+        <div style="display:flex;align-items:flex-start;gap:18px;flex-wrap:wrap">
+          <div style="flex:1;min-width:220px">
+            <div style="font-size:18px;color:var(--strong);letter-spacing:-.015em">${esc(j.title)}</div>
+            <div style="font-size:13.5px;color:var(--muted);margin-top:3px">${esc(j.company)} · ${esc(j.loc || "—")}</div>
+            <div class="mono" style="font-size:11.5px;color:var(--faint);margin-top:6px">${esc(j.meta)}</div>
+          </div>
+          <div style="text-align:right">
+            <div class="mono" style="font-size:30px;letter-spacing:-.03em;color:var(--good)">${Math.round(j.score * 100)}%</div>
+            <div class="k">match</div>
+          </div>
+        </div>
+        <p style="font-size:13.5px;line-height:1.6;margin:16px 0 0">${esc(j.why)}</p>
+        <div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:12px">
+          ${j.matched.map((c) => `<span class="chip-ok">${esc(c)}</span>`).join("")}
+          ${j.gaps.map((g) => `<span class="chip-gap">${esc(g)}</span>`).join("")}
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:22px;padding-top:18px;border-top:1px solid var(--border)">
+          <button type="button" class="btn primary act-draft" data-id="${esc(j.id)}" style="padding:9px 18px">Draft application</button>
+          <button type="button" class="btn act-snooze" data-id="${esc(j.id)}" style="padding:9px 16px">Snooze 3d</button>
+          <button type="button" class="btn quiet danger-hover act-dismiss" data-id="${esc(j.id)}" style="padding:9px 16px">Dismiss</button>
+          <a class="linkish" href="/jobs/${esc(j.id)}" style="margin-left:auto;align-self:center;font-size:13px">Full detail</a>
+        </div>`;
+    }
+
+    setMode(localStorage.getItem(MKEY) === "focus" ? "focus" : "inline");
+  </script>
 </Layout>
+
+<style>
+  .mode-toggle { display: flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--panel); }
+  .mode-btn { border: 0; background: transparent; color: var(--muted); padding: 5px 11px; font-size: 12px; cursor: pointer; font-family: var(--mono); }
+  .mode-btn.on { background: var(--hover); color: var(--strong); }
+
+  .filters { padding: 12px 14px; margin-bottom: 16px; }
+  .filter-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .filter-row input[type="search"] { flex: 1; min-width: 180px; background: #0d0d0d; border: 1px solid var(--border); border-radius: 8px; padding: 7px 11px; font-size: 13px; color: var(--text); }
+  .filter-row select { background: #0d0d0d; border: 1px solid var(--border); border-radius: 8px; padding: 7px 9px; font-size: 13px; color: var(--text); cursor: pointer; }
+  .chip-row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
+  .f-chip {
+    display: inline-flex; align-items: center; gap: 6px; border: 1px solid rgba(125, 211, 252, 0.28);
+    background: var(--accent-dim); color: var(--accent); border-radius: 999px;
+    padding: 3px 8px 3px 10px; font-size: 11.5px; font-family: var(--mono);
+  }
+  .f-chip:hover { text-decoration: none; background: rgba(125, 211, 252, 0.2); }
+  .f-x { opacity: 0.7; font-size: 13px; line-height: 1; }
+
+  .empty { padding: 56px 24px; text-align: center; }
+  .empty p { color: var(--muted); font-size: 13px; margin: 8px auto 18px; max-width: 380px; }
+
+  .queue {
+    border: 1px solid rgba(125, 211, 252, 0.22); border-radius: var(--radius);
+    background: linear-gradient(180deg, rgba(125, 211, 252, 0.05), rgba(125, 211, 252, 0) 70%);
+    margin-bottom: 22px; overflow: hidden;
+  }
+  .queue-head { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid rgba(125, 211, 252, 0.14); }
+  .q-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); display: block; }
+  .q-dot.good { background: var(--good); }
+  .q-row { padding: 13px 16px; border-bottom: 1px solid rgba(38, 38, 38, 0.7); }
+  .q-row:last-child { border-bottom: 0; }
+  .q-top { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+  .q-score { font-size: 17px; letter-spacing: -0.02em; }
+  .s-hi { color: var(--good); } .s-mid { color: var(--text); } .s-lo { color: var(--muted); }
+  .q-title { font-size: 14.5px; color: var(--strong); letter-spacing: -0.01em; }
+  .q-title:hover { color: var(--accent); text-decoration: none; }
+  .q-why { font-size: 12.5px; color: var(--muted); margin-top: 5px; }
+  .q-chips { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
+  .q-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 11px; }
+  .sm-pad { padding: 5px 11px; font-size: 12.5px; border-radius: 7px; }
+  .t-gone { display: flex; align-items: center; gap: 10px; font-size: 12.5px; color: var(--faint); }
+  .t-gone[hidden], .t-live[hidden], .r-noter[hidden], .r-note[hidden] { display: none; }
+  .gone-label { font-size: 11px; border: 1px solid var(--border); border-radius: 5px; padding: 1px 6px; color: var(--faint); }
+  .gone-label[data-kind="snoozed"] { color: var(--warn); }
+  .gone-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  .cleared { display: flex; align-items: center; gap: 10px; padding: 18px; margin-bottom: 22px; }
+  .rest-head { display: flex; align-items: center; gap: 10px; padding: 0 4px 8px; }
+  .rest-list { border-top: 1px solid var(--border); }
+  .r-row { padding: 11px 8px; border-bottom: 1px solid var(--border); transition: background 0.12s; }
+  .r-row:hover { background: #141414; }
+  .r-grid { display: grid; grid-template-columns: 48px 1fr auto; gap: 0 12px; align-items: start; }
+  @media (max-width: 820px) { .r-grid { grid-template-columns: 44px 1fr; } }
+  .r-score { font-size: 13.5px; padding-top: 1px; }
+  .r-line1 { display: flex; align-items: baseline; gap: 9px; flex-wrap: wrap; }
+  .r-title { font-size: 13.5px; color: var(--text); }
+  .r-title:hover { color: var(--accent); text-decoration: none; }
+  .r-tag { font-size: 10.5px; color: var(--faint); border: 1px solid var(--border); border-radius: 4px; padding: 0 5px; }
+  .r-why { display: block; font-size: 12px; color: var(--faint); margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .r-note { display: block; font-size: 11.5px; color: var(--accent); margin-top: 3px; }
+  .r-noter { display: flex; gap: 8px; margin-top: 6px; }
+  .note-input { flex: 1; background: #0d0d0d; border: 1px solid var(--border); border-radius: 7px; padding: 5px 10px; font-size: 12.5px; color: var(--text); }
+  .r-meta { font-size: 11px; color: var(--faint); white-space: nowrap; padding-top: 2px; }
+  @media (max-width: 820px) { .r-meta { display: none; } }
+  .r-actions { display: flex; gap: 5px; opacity: 0.22; transition: opacity 0.12s; }
+  .r-row:hover .r-actions { opacity: 1; }
+  @media (max-width: 820px) { .r-actions { grid-column: 1 / -1; margin-top: 8px; opacity: 1; } }
+  .pager { display: flex; align-items: center; justify-content: space-between; padding: 14px 4px; font-size: 12px; color: var(--muted); }
+
+  .focus-progress { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+  .focus-track { flex: 1; height: 2px; background: #1a1a1a; border-radius: 2px; overflow: hidden; }
+  .focus-bar { display: block; height: 100%; width: 0; background: var(--accent); transition: width 0.2s; }
+  #focus-card { padding: 22px 24px; }
+</style>

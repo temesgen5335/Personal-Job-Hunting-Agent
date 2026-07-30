@@ -4,8 +4,9 @@ A self-hosted, personal job-hunting agent. It ingests job postings from Telegram
 channels and job boards, scores them against **your** CV and preferences, and helps
 you apply — drafting tailored CVs, cover letters, and emails, and (with your
 approval) filling ATS application forms. You drive it through a **Telegram bot**; an
-**Astro dashboard** shows analytics, pipeline health, and application status, and edits
-credentials. It runs scheduled and autonomous on a VPS, or as a free daily digest on
+**Astro dashboard** is a triage cockpit: a queue of strong untriaged matches with
+dismiss/snooze/note (or a one-at-a-time mode), pipeline health per source, on-demand
+fit checks, application tracking with follow-up nudges, and credential editing. It runs scheduled and autonomous on a VPS, or as a free daily digest on
 GitHub Actions.
 
 **Reusable by anyone:** clone it, add your own credentials, and run your own private
@@ -30,7 +31,7 @@ Anthropic, or any OpenAI-compatible endpoint). See [docs/ARCHITECTURE.md](docs/A
 A **FastAPI orchestrator** sits between the interfaces and the data: the dashboard
 calls it over REST, and the bot calls the same service layer in-process.
 
-## Status: v3 (206 tests passing, CI on every push)
+## Status: v3 (214 tests passing, CI on every push)
 Ingestion · matching · Telegram bot (menu + filters) · Tier-1 email apply · Tier-2
 ATS form-fill · multi-LLM failover · FastAPI orchestrator · Astro dashboard with
 config UI, fit-checker, analytics, and pipeline health · VPS + GitHub Actions deploy.

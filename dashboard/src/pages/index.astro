@@ -1,174 +1,252 @@
 ---
+// Overview (design: Job Agent.dc.html). Health first — a degraded pipeline must be
+// the first thing on screen, not a footnote — then the morning numbers, then the
+// funnel and the 30-day rhythm. Every figure traces to a real API field.
 import Layout from "../layouts/Layout.astro";
-import { getStats, getMatches, getAnalytics, apiBase, type Stats, type MatchRow, type Analytics } from "../lib/api";
+import { getStats, getAnalytics, apiBase, type Stats, type Analytics } from "../lib/api";
 
 let stats: Stats | null = null;
-let top: MatchRow[] = [];
 let analytics: Analytics | null = null;
 let error: string | null = null;
 try {
   stats = await getStats();
-  top = await getMatches({ limit: 10 });
   analytics = await getAnalytics();
 } catch (e) {
   error = (e as Error).message;
 }
-const pctRate = (r: number) => `${Math.round(r * 100)}%`;
-// Applications-per-day, oldest→newest, for the inline SVG chart.
-const timeline = (analytics?.timeline ?? []).slice().reverse();
-const tlMax = Math.max(1, ...timeline.map((t) => t.n));
-const BW = 26, GAP = 6, H = 90;
-const maxSource = stats ? Math.max(1, ...stats.bySource.map((s) => s.n)) : 1;
-const fmt = (s: string | null) => (s ? new Date(s).toLocaleString() : "—");
-// Per-source freshness. A source that has gone quiet is the early warning that a
-// credential expired or a board changed its API — long before the totals look wrong.
-const srcHealth = stats?.health?.sources ?? [];
-const quiet = (h: number | null) => h === null || h > 48;
+
+const hour = new Date().getHours();
+const greeting = hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
+const today = new Date().toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" });
+
+const health = stats?.health ?? null;
+const sources = health?.sources ?? [];
+const staleSources = sources.filter((s) => (s.hours_since ?? Infinity) > 48);
+const degraded = !!health && (health.is_stale || health.recent_errors > 0 || staleSources.length > 0);
+
+const newLastRun = sources.reduce((n, s) => n + (s.new ?? 0), 0);
+const overnightLine = stats
+  ? `${newLastRun} new in the last run · ${stats.queue} worth your time`
+  : "";
+
+let healthTitle = "Pipeline healthy";
+let healthBody = `All ${sources.length || "—"} sources answered on the last run.`;
+if (health?.is_stale) {
+  healthTitle = "Pipeline looks stale";
+  healthBody = health.last_ingest
+    ? `Last successful ingestion was ${Math.round(health.hours_since_ingest ?? 0)}h ago (threshold ${health.stale_after_hours}h). Run \`make pipeline\` or check the ingest timer.`
+    : "No ingestion has ever completed on this store.";
+} else if (staleSources.length > 0) {
+  healthTitle = `${staleSources.map((s) => s.source).join(", ")} ${staleSources.length === 1 ? "has" : "have"} gone quiet`;
+  healthBody = `No data for 48h+ from ${staleSources.length === 1 ? "this source" : "these sources"} — the usual cause is an expired credential or a changed board API. Everything below is missing ${staleSources.length === 1 ? "it" : "them"}, including your match counts.`;
+} else if ((health?.recent_errors ?? 0) > 0 && health?.last_error) {
+  healthTitle = `${health.recent_errors} error(s) in the last 24h`;
+  healthBody = `Most recent — ${health.last_error.source ?? "unknown"}: ${health.last_error.error ?? ""}`;
+}
+
+const fmtAgo = (h: number | null) =>
+  h === null ? "never" : h < 1 ? "<1h ago" : h < 24 ? `${Math.round(h)}h ago` : `${Math.floor(h / 24)}d ago`;
+const lastIngestLine = health?.last_ingest
+  ? `${new Date(health.last_ingest).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} · ${fmtAgo(health.hours_since_ingest)}`
+  : "never";
+
+const bySourceTotals = new Map((stats?.bySource ?? []).map((s) => [s.source, s.n]));
+
+// Applications by status — full lifecycle order, zero-filled so the shape is stable.
+const STATUS_ORDER = ["matched", "drafting", "awaiting_approval", "submitted", "rejected", "interview", "offer", "skipped", "failed"];
+const STATUS_COLOR: Record<string, string> = {
+  matched: "#737373", drafting: "#60a5fa", awaiting_approval: "#fbbf24",
+  submitted: "#7dd3fc", rejected: "#f87171", interview: "#4ade80",
+  offer: "#4ade80", skipped: "#585858", failed: "#f87171",
+};
+const appCounts = new Map((stats?.apps ?? []).map((a) => [a.status, a.n]));
+const statusRows = STATUS_ORDER.map((label) => ({ label, count: appCounts.get(label) ?? 0 }));
+const maxStatus = Math.max(1, ...statusRows.map((r) => r.count));
+const submitted = (appCounts.get("submitted") ?? 0) + (appCounts.get("interview") ?? 0) + (appCounts.get("offer") ?? 0) + (appCounts.get("rejected") ?? 0);
+
+// 30-day series from the analytics timeline (sparse day buckets → dense 30 days).
+const byDay = new Map((analytics?.timeline ?? []).map((t) => [t.day, t.n]));
+const days: { label: string; n: number }[] = [];
+for (let i = 29; i >= 0; i--) {
+  const d = new Date(Date.now() - i * 86400000);
+  const key = d.toISOString().slice(0, 10);
+  days.push({ label: d.toLocaleDateString(undefined, { day: "numeric", month: "short" }), n: byDay.get(key) ?? 0 });
+}
+const maxDaily = Math.max(1, ...days.map((d) => d.n));
+const monthTotal = days.reduce((n, d) => n + d.n, 0);
+const pct = (r: number | undefined) => `${Math.round((r ?? 0) * 100)}%`;
 ---
 
 <Layout title="Overview">
-  <h1>Overview</h1>
-
   {error && (
-    <div class="panel">
-      ⚠️ Can't reach the API at <code>{apiBase()}</code> — {error}.<br />
-      Start it: <code>PORT=8077 .venv/bin/python scripts/run_api.py</code> and set
-      <code>JOBAGENT_API_URL</code> to match.
-    </div>
-  )}
-
-  {stats?.health?.is_stale && (
-    <div class="panel stale">
-      <strong>⚠️ Pipeline looks stale.</strong>
-      {stats.health.last_ingest
-        ? ` Last successful ingestion was ${fmt(stats.health.last_ingest)} (${Math.round(stats.health.hours_since_ingest ?? 0)}h ago, threshold ${stats.health.stale_after_hours}h).`
-        : " No ingestion has ever completed."}
-      {stats.health.last_error && (
-        <div class="muted" style="margin-top:6px">
-          Last error — <code>{stats.health.last_error.source ?? "unknown"}</code>: {stats.health.last_error.error}
-        </div>
-      )}
-      <div class="muted" style="margin-top:6px">Run <code>make pipeline</code> or check the ingest timer.</div>
+    <div class="down">
+      <div class="down-mark">!</div>
+      <div class="down-title">Can’t reach the agent</div>
+      <p class="down-body">
+        The API at <span class="mono">{apiBase()}</span> didn’t respond — nothing on
+        this page is live. Start it with <span class="mono">make run_backend</span>.
+      </p>
+      <button class="btn primary" onclick="location.reload()">Retry</button>
     </div>
   )}
 
   {stats && (
     <>
-      <div class="cards">
-        <div class="card"><div class="n">{stats.totalJobs.toLocaleString()}</div><div class="l">Jobs ingested</div></div>
-        <div class="card"><div class="n">{stats.matches.toLocaleString()}</div><div class="l">Scored matches</div></div>
-        <div class="card"><div class="n">{stats.strong.toLocaleString()}</div><div class="l">Strong (≥70%)</div></div>
-        <div class="card"><div class="n">{stats.totalApps.toLocaleString()}</div><div class="l">Applications</div></div>
-      </div>
-
-      <div class="panel">
-        <strong>Jobs by source</strong>
-        <table>
-          <tbody>
-            {stats.bySource.map((s) => (
-              <tr>
-                <td style="width:120px">{s.source}</td>
-                <td style="width:70px" class="muted">{s.n}</td>
-                <td><div class="bar-track"><div class="bar" style={`width:${(s.n / maxSource) * 100}%`}></div></div></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        <p class="muted" style="margin:12px 0 0">Last ingest: {fmt(stats.lastIngest)}</p>
-      </div>
-
-      {srcHealth.length > 0 && (
-        <div class="panel">
-          <strong>Source freshness</strong>
-          <p class="muted" style="margin:4px 0 10px">
-            When each source last delivered. A source gone quiet is the early warning
-            that a credential expired or a board changed its API.
-          </p>
-          <table>
-            <thead><tr><th>Source</th><th>Last delivered</th><th>Fetched</th><th>New</th><th></th></tr></thead>
-            <tbody>
-              {srcHealth.map((s) => (
-                <tr>
-                  <td style="width:120px">{s.source}</td>
-                  <td class="muted">{s.hours_since === null ? "—" : `${Math.round(s.hours_since)}h ago`}</td>
-                  <td class="muted">{s.fetched ?? "—"}</td>
-                  <td class="muted">{s.new ?? "—"}</td>
-                  <td>
-                    <span class={`badge ${quiet(s.hours_since) ? "bad" : "ok"}`}>
-                      {quiet(s.hours_since) ? "quiet" : "fresh"}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {stats.health && stats.health.recent_errors > 0 && (
-            <p class="muted" style="margin:12px 0 0">
-              <span class="badge bad">{stats.health.recent_errors} error(s)</span> logged in the last 24h.
-            </p>
-          )}
+      <div class="page-head">
+        <div>
+          <h1 class="page">{greeting}</h1>
+          <div class="page-sub">{today} · {overnightLine}</div>
         </div>
-      )}
-
-      <div class="panel">
-        <strong>Application funnel</strong>
-        {!analytics || analytics.total === 0 ? (
-          <p class="muted">No applications yet. Use <code>/apply</code> in the bot.</p>
-        ) : (
-          <>
-            <p style="margin:10px 0">
-              {Object.entries(analytics.by_status).map(([s, n]) => (
-                <span class={`badge ${s}`} style="margin-right:8px">{s}: {n}</span>
-              ))}
-            </p>
-            <div class="cards" style="margin:0">
-              <div class="card"><div class="n">{analytics.submitted}</div><div class="l">Submitted</div></div>
-              <div class="card"><div class="n">{pctRate(analytics.response_rate)}</div><div class="l">Response rate</div></div>
-              <div class="card"><div class="n">{pctRate(analytics.interview_rate)}</div><div class="l">Interview rate</div></div>
-              <div class="card"><div class="n">{pctRate(analytics.offer_rate)}</div><div class="l">Offer rate</div></div>
-            </div>
-            {analytics.by_source.length > 0 && (
-              <p class="muted" style="margin-top:12px">
-                By source: {analytics.by_source.map((s) => `${s.source} ${s.n}`).join(" · ")}
-              </p>
-            )}
-            {timeline.length > 0 && (
-              <div style="margin-top:16px">
-                <span class="muted" style="font-size:13px">Applications per day</span>
-                <svg width={timeline.length * (BW + GAP)} height={H + 20} style="display:block; margin-top:6px">
-                  {timeline.map((t, i) => {
-                    const h = Math.round((t.n / tlMax) * H);
-                    return (
-                      <g transform={`translate(${i * (BW + GAP)},0)`}>
-                        <rect x="0" y={H - h} width={BW} height={h} rx="3" fill="var(--accent)"></rect>
-                        <text x={BW / 2} y={H + 14} text-anchor="middle" fill="var(--muted)" font-size="9">{t.day.slice(5)}</text>
-                      </g>
-                    );
-                  })}
-                </svg>
-              </div>
-            )}
-          </>
-        )}
+        <a class="btn primary" href="/jobs" style="white-space:nowrap">Start triage &rarr;</a>
       </div>
 
-      <div class="panel">
-        <strong>Top matches</strong> · <a href="/jobs">see all →</a>
-        <table style="margin-top:10px">
-          <thead><tr><th>#</th><th>Score</th><th>Role</th><th>Company</th><th>Location</th></tr></thead>
-          <tbody>
-            {top.map((m, i) => (
-              <tr>
-                <td class="muted">{i + 1}</td>
-                <td class="score">{Math.round(m.score * 100)}%</td>
-                <td>{m.apply_url || m.url ? <a href={m.apply_url || m.url} target="_blank">{m.title}</a> : m.title}</td>
-                <td>{m.company}</td>
-                <td class="muted">{m.location || (m.is_remote ? "Remote" : "—")}</td>
-              </tr>
+      <section class:list={["panel", "health", degraded && "degraded"]}>
+        <div class="health-top">
+          <div class="health-lead">
+            <span class:list={["big-dot", degraded && "bad"]}></span>
+            <div>
+              <div class:list={["health-title", degraded && "bad"]}>{healthTitle}</div>
+              <div class="page-sub" style="margin-top:2px">{healthBody}</div>
+            </div>
+          </div>
+          <div class="health-nums">
+            <div>
+              <div class="k" style="margin-bottom:3px">Last ingestion</div>
+              <div class="mono" style="font-size:13px">{lastIngestLine}</div>
+            </div>
+            <div>
+              <div class="k" style="margin-bottom:3px">Errors 24h</div>
+              <div class="mono" style={`font-size:13px;color:${(health?.recent_errors ?? 0) > 0 ? "var(--danger)" : "var(--muted)"}`}>
+                {health?.recent_errors ?? 0}
+              </div>
+            </div>
+          </div>
+        </div>
+        {sources.length > 0 && (
+          <div class="src-grid">
+            {sources.map((s) => {
+              const stale = (s.hours_since ?? Infinity) > 48;
+              return (
+                <div class="src-cell">
+                  <div style="display:flex;align-items:center;gap:6px">
+                    <span class:list={["src-dot", stale && "bad"]}></span>
+                    <span style="font-size:12.5px">{s.source}</span>
+                  </div>
+                  <div class="mono src-meta">
+                    <span style={stale ? "color:var(--danger)" : ""}>{fmtAgo(s.hours_since)}</span>
+                    {" · "}{bySourceTotals.get(s.source) ?? s.fetched ?? 0} jobs
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </section>
+
+      <div class="stat-row">
+        <div class="panel stat">
+          <div class="k">Jobs ingested</div>
+          <div class="stat-n">{stats.totalJobs.toLocaleString()}</div>
+          <div class="stat-sub">{newLastRun} new in the last run</div>
+        </div>
+        <div class="panel stat">
+          <div class="k">Scored</div>
+          <div class="stat-n">{stats.matches.toLocaleString()}</div>
+          <div class="stat-sub">{Math.max(0, stats.totalJobs - stats.matches)} awaiting scoring</div>
+        </div>
+        <div class="panel stat">
+          <div class="k">Strong &ge; 70%</div>
+          <div class="stat-n accent">{stats.strong.toLocaleString()}</div>
+          <div class="stat-sub">{stats.queue} not yet triaged</div>
+        </div>
+        <div class="panel stat">
+          <div class="k">Applications</div>
+          <div class="stat-n">{stats.totalApps.toLocaleString()}</div>
+          <div class="stat-sub">{submitted} submitted</div>
+        </div>
+      </div>
+
+      <div class="two-col">
+        <section class="panel">
+          <div style="font-size:12px;color:var(--strong);margin-bottom:14px">Applications by status</div>
+          {statusRows.map((r) => (
+            <div class="status-row">
+              <span class="mono status-label">{r.label}</span>
+              <span class="status-track"><span class="status-bar" style={`width:${(r.count / maxStatus) * 100}%;background:${STATUS_COLOR[r.label]};opacity:${r.label === "offer" || r.label === "interview" ? 0.9 : 0.45}`}></span></span>
+              <span class="mono status-n">{r.count}</span>
+            </div>
+          ))}
+          <div class="rates">
+            <div><div class="k">Response</div><div class="mono rate-n">{pct(analytics?.response_rate)}</div></div>
+            <div><div class="k">Interview</div><div class="mono rate-n">{pct(analytics?.interview_rate)}</div></div>
+            <div><div class="k">Offer</div><div class="mono rate-n" style="color:var(--good)">{pct(analytics?.offer_rate)}</div></div>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div style="display:flex;align-items:baseline;justify-content:space-between">
+            <div style="font-size:12px;color:var(--strong)">Applications per day</div>
+            <div class="mono faint" style="font-size:11px">30d</div>
+          </div>
+          <div class="bars">
+            {days.map((d) => (
+              <span title={`${d.label} · ${d.n}`} style={`flex:1;height:${Math.max(2, (d.n / maxDaily) * 88)}px;background:${d.n === 0 ? "#1a1a1a" : "#2f4b58"};border-radius:2px;display:block`}></span>
             ))}
-          </tbody>
-        </table>
+          </div>
+          <div class="bars-axis mono">
+            <span>{days[0].label}</span><span>{days[15].label}</span><span>{days[29].label}</span>
+          </div>
+          <div class="bars-note">{monthTotal} application{monthTotal === 1 ? "" : "s"} in the last 30 days.</div>
+        </section>
       </div>
     </>
   )}
 </Layout>
+
+<style>
+  .down { max-width: 520px; margin: 14vh auto; text-align: center; }
+  .down-mark {
+    width: 44px; height: 44px; margin: 0 auto 18px; border-radius: 50%;
+    border: 1px solid rgba(248, 113, 113, 0.35); background: rgba(248, 113, 113, 0.08);
+    display: flex; align-items: center; justify-content: center;
+    color: var(--danger); font-family: var(--mono); font-size: 18px;
+  }
+  .down-title { font-size: 19px; color: var(--strong); letter-spacing: -0.01em; }
+  .down-body { color: var(--muted); font-size: 13px; line-height: 1.6; margin: 10px 0 22px; }
+
+  .health { margin-bottom: 16px; }
+  .health.degraded { border-color: rgba(248, 113, 113, 0.35); background: rgba(248, 113, 113, 0.05); }
+  .health-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; flex-wrap: wrap; }
+  .health-lead { display: flex; gap: 12px; align-items: flex-start; }
+  .big-dot { width: 7px; height: 7px; border-radius: 50%; margin-top: 6px; flex: none; display: block; background: var(--good); }
+  .big-dot.bad { background: var(--danger); animation: pulsedot 1.6s ease-in-out infinite; }
+  .health-title { font-size: 14px; color: var(--strong); letter-spacing: -0.01em; }
+  .health-title.bad { color: var(--danger); }
+  .health-nums { display: flex; gap: 26px; align-items: flex-start; }
+  .src-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px 16px; margin-top: 16px; }
+  @media (max-width: 820px) { .src-grid { grid-template-columns: repeat(2, 1fr); } }
+  .src-cell { border-top: 1px solid var(--border); padding-top: 9px; }
+  .src-dot { width: 5px; height: 5px; border-radius: 50%; display: block; background: var(--good); }
+  .src-dot.bad { background: var(--danger); animation: pulsedot 1.6s ease-in-out infinite; }
+  .src-meta { font-size: 11px; margin-top: 4px; color: var(--muted); }
+
+  .stat-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 16px; }
+  @media (max-width: 820px) { .stat-row { grid-template-columns: repeat(2, 1fr); } }
+  .stat { padding: 14px 16px; }
+  .stat-n { font-family: var(--mono); font-size: 24px; color: var(--strong); letter-spacing: -0.02em; margin-top: 6px; }
+  .stat-n.accent { color: var(--accent); }
+  .stat-sub { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
+
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  @media (max-width: 820px) { .two-col { grid-template-columns: 1fr; } }
+  .status-row { display: grid; grid-template-columns: 112px 1fr 34px; align-items: center; gap: 10px; margin-bottom: 7px; }
+  .status-label { font-size: 11.5px; color: #a3a3a3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .status-track { height: 4px; background: #171717; border-radius: 2px; overflow: hidden; display: block; }
+  .status-bar { display: block; height: 100%; border-radius: 2px; }
+  .status-n { font-size: 12px; text-align: right; }
+  .rates { display: flex; gap: 22px; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); }
+  .rate-n { font-size: 16px; margin-top: 2px; }
+  .bars { display: flex; align-items: flex-end; gap: 3px; height: 92px; margin-top: 18px; }
+  .bars-axis { display: flex; justify-content: space-between; font-size: 10.5px; color: var(--faint); margin-top: 8px; }
+  .bars-note { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); font-size: 12.5px; color: var(--muted); }
+</style>
