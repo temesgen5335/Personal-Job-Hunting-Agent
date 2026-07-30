@@ -14,6 +14,7 @@ import httpx
 
 from jobagent.core.schemas import ApplyMethod, JobPosting, Source
 from jobagent.ingestion.base import BaseAdapter
+from jobagent.ingestion.util import get_with_retry
 
 _TAG_RE = re.compile(r"<[^>]+>")
 _USER_AGENT = "personal-job-agent/0.1 (+personal use)"
@@ -32,9 +33,7 @@ class RemoteOKAdapter(BaseAdapter):
             timeout=30, headers={"User-Agent": _USER_AGENT}
         )
         try:
-            resp = client.get(self.API_URL)
-            resp.raise_for_status()
-            data = resp.json()
+            data = get_with_retry(client, self.API_URL).json()
         finally:
             if self._client is None:
                 client.close()

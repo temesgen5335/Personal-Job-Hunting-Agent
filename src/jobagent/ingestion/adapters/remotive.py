@@ -14,7 +14,7 @@ import httpx
 
 from jobagent.core.schemas import ApplyMethod, JobPosting, Source
 from jobagent.ingestion.base import BaseAdapter
-from jobagent.ingestion.util import make_client, strip_html
+from jobagent.ingestion.util import get_with_retry, make_client, strip_html
 
 
 class RemotiveAdapter(BaseAdapter):
@@ -27,9 +27,7 @@ class RemotiveAdapter(BaseAdapter):
     def fetch(self) -> Iterable[JobPosting]:
         client, owns = make_client(self._client)
         try:
-            resp = client.get(self.API_URL)
-            resp.raise_for_status()
-            jobs = resp.json().get("jobs", [])
+            jobs = get_with_retry(client, self.API_URL).json().get("jobs", [])
         finally:
             if owns:
                 client.close()

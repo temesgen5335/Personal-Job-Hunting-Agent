@@ -14,7 +14,7 @@ import httpx
 
 from jobagent.core.schemas import ApplyMethod, JobPosting, Source
 from jobagent.ingestion.base import BaseAdapter
-from jobagent.ingestion.util import make_client, strip_html
+from jobagent.ingestion.util import get_with_retry, make_client, strip_html
 
 
 class AshbyAdapter(BaseAdapter):
@@ -34,9 +34,7 @@ class AshbyAdapter(BaseAdapter):
         try:
             for slug in self.slugs:
                 try:
-                    resp = client.get(self.BASE.format(slug=slug))
-                    resp.raise_for_status()
-                    jobs = resp.json().get("jobs", [])
+                    jobs = get_with_retry(client, self.BASE.format(slug=slug)).json().get("jobs", [])
                 except (httpx.HTTPError, ValueError):
                     continue
                 for item in jobs:
