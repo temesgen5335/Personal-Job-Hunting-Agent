@@ -56,6 +56,9 @@ so any developer or AI agent can navigate the codebase and contribute immediatel
 | Multi-LLM failover, free-first | `MultiLLM` chains providers: primary from `LLM_PROVIDER`, then free backups (Groq → Gemini → OpenRouter). Paid providers (OpenAI, Anthropic) only if configured. Falls through on any error. |
 | Heuristic + LLM matching | Heuristic runs on every job (zero cost). LLM only reranks the top candidates. Word-boundary regex avoids substring false-positives ("Go" ≠ "going"). |
 | Fernet encrypted secret store | Dashboard settings page writes to an encrypted file on disk. `.env` is the base; secret store overlays it. Config changes apply without restart via `reload_settings()`. |
+| Auth on writes, not reads | Write routes can send email and submit forms as the user, so they need a bearer token and fail closed without `DASHBOARD_PASSWORD`. Reads stay open because the dashboard renders them server-side with no token to offer. |
+| Two API base URLs | `JOBAGENT_API_URL` is what the *server* calls; `PUBLIC_JOBAGENT_API_URL` is what the *browser* calls. A server-side `127.0.0.1` means the visitor's own laptop once it reaches a browser — which is why the split exists. |
+| Identity overlay | `preferences.local.toml` (gitignored) overlays `preferences.toml` (committed placeholders) section-wise, so a clone carries a working search profile but nobody's contact details. |
 | Telethon + Bot API (two Telegrams) | Telethon (MTProto, user account) for reading channels. Bot API (BotFather token) for the interactive bot. Never conflate them. |
 | HITL gate for all submissions | R2. Both email (Tier 1) and ATS (Tier 2) stop and show the user what will be sent. `approved_at` stamped only on explicit action. |
 
@@ -114,6 +117,7 @@ src/jobagent/
 ├── secrets_store.py         # Fernet-encrypted config store, masked_view()
 ├── ingestion/
 │   ├── base.py              # BaseAdapter ABC (source, fetch, enabled)
+│   ├── util.py              # strip_html, make_client, split_slugs, get_with_retry (R21)
 │   ├── runner.py            # run_ingestion() — resilient per-adapter with RunReport
 │   ├── registry.py          # build_adapters() — watchlist + env slugs, filtered by Sources
 │   └── adapters/            # remoteok, remotive, greenhouse, lever, ashby, telegram
@@ -133,9 +137,10 @@ src/jobagent/
 │   ├── service.py           # Pure helpers: MatchFilter, ranked_matches, jobs_text, HELP_TEXT
 │   ├── app.py               # Telegram bot: /menu, /jobs, /apply, /status, callbacks
 │   └── notify.py            # send_message() with chunk_text() (4096-char limit)
-├── digest.py                # diversify() (per-company cap), format_matches()
-├── api/app.py               # FastAPI create_app() factory — all REST endpoints
-└── mcp_servers/             # (placeholder for future MCP tool servers)
+├── digest.py                # diversify() (per-company cap), format_matches(),
+│                            #   health_banner() — degraded-run warnings on the digest
+└── api/app.py               # FastAPI create_app() factory — all REST endpoints
+                             #   every non-GET route carries dependencies=auth (R19)
 
 dashboard/src/
 ├── lib/api.ts               # API client, types, fetch functions
@@ -187,3 +192,7 @@ config/preferences.toml      # User profile, watchlist, source toggles
 | CAPTCHA false positive | Scanning HTML string for "turnstile" matched shipped JS | Check rendered DOM elements via selectors |
 | Settings overlay int | UI stores numbers as strings; `model_copy` skips validation | Explicit int coercion before overlay |
 | `__future__ annotations` | Dep injection saw string "Request" not the class → 422 | Removed future-import from affected file |
+| Unauthenticated writes | `/apply/{id}/approve` returned **200** to an anonymous caller — it would have sent email as the user | `dependencies=auth` on every non-GET route + a route-table test that fails if one is missed |
+| Browser fetching `127.0.0.1` | `define:vars` baked the server-side URL into client JS; worked locally, broke any split deploy | `publicApiBase()` / `PUBLIC_JOBAGENT_API_URL` |
+| Retry claimed, never implemented | R8 promised backoff; adapters called `client.get` once, so a transient 429 lost the whole source | `get_with_retry` in `ingestion/util.py` |
+| Silent pipeline death | A three-day-dead pipeline rendered identically to a healthy one | `pipeline_health()` + dashboard stale banner + digest `health_banner()` |

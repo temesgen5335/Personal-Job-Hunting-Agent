@@ -3,9 +3,10 @@
 A self-hosted, personal job-hunting agent. It ingests job postings from Telegram
 channels and job boards, scores them against **your** CV and preferences, and helps
 you apply — drafting tailored CVs, cover letters, and emails, and (with your
-approval) filling ATS application forms. You drive it through a **Telegram bot**, and
-a read-only **Astro dashboard** shows analytics. It runs scheduled and autonomous on
-a VPS, or as a free daily digest on GitHub Actions.
+approval) filling ATS application forms. You drive it through a **Telegram bot**; an
+**Astro dashboard** shows analytics, pipeline health, and application status, and edits
+credentials. It runs scheduled and autonomous on a VPS, or as a free daily digest on
+GitHub Actions.
 
 **Reusable by anyone:** clone it, add your own credentials, and run your own private
 instance. Nothing is hard-coded to one person — all identity lives in config.
@@ -26,10 +27,18 @@ Ashby              ┤        (normalize+dedup)      │                     │
 Multi-provider LLM with automatic failover (Groq → Gemini → OpenRouter → OpenAI →
 Anthropic, or any OpenAI-compatible endpoint). See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-## Status: v1 complete (all phases, 72 tests passing)
+A **FastAPI orchestrator** sits between the interfaces and the data: the dashboard
+calls it over REST, and the bot calls the same service layer in-process.
+
+## Status: v2 complete (131 tests passing)
 Ingestion · matching · Telegram bot (menu + filters) · Tier-1 email apply · Tier-2
-ATS form-fill · multi-LLM failover · Astro dashboard · VPS + GitHub Actions deploy.
-Next: see [docs/V2_PLAN.md](docs/V2_PLAN.md).
+ATS form-fill · multi-LLM failover · FastAPI orchestrator · Astro dashboard with
+config UI, fit-checker, analytics, and pipeline health · VPS + GitHub Actions deploy.
+
+**Security note:** every state-changing API route requires a bearer token, so
+`DASHBOARD_PASSWORD` must be set for applying, status edits, fit checks, or config
+changes to work. Read-only endpoints stay open. Never expose the API publicly without
+it — those routes can send email as you.
 
 ---
 
@@ -62,9 +71,14 @@ Fill in what you'll use:
   (from [my.telegram.org](https://my.telegram.org)), `TELEGRAM_PHONE`, `TELEGRAM_CHANNELS`.
 - **Email apply (optional):** `SMTP_*`, `APPLY_FROM_EMAIL`.
 
-### 3. Configure your profile — `config/preferences.toml`
-- `[profile]` — your name, headline, target roles, skills, domains, must-haves,
-  exclude-keywords, email/phone, and links.
+### 3. Configure your profile
+Two files, same split as `.env.example` / `.env`:
+- **`config/preferences.local.toml`** (gitignored — create it) holds your identity:
+  `name`, `headline`, `cv_path`, `email`, `phone`, and `[profile.links]`. It is
+  overlaid section-by-section onto the committed file, so the repo never carries
+  anyone's contact details.
+- **`config/preferences.toml`** (committed) holds shareable search config:
+  target roles, skills, domains, must-haves, exclude-keywords.
 - `[sources]` — turn whole sources on/off (`remoteok`, `greenhouse`, `telegram`, …).
 - `[watchlist]` — Greenhouse/Lever/Ashby company slugs to track (add/remove freely).
 - Put your CV text in `config/cv_master.md` (and PDF at the `cv_path` you set) — used
@@ -79,9 +93,15 @@ Fill in what you'll use:
 
 ### 5. Use it
 ```bash
-.venv/bin/python scripts/run_bot.py            # interactive bot — then DM it /menu
-cd dashboard && npm install && npm run dev      # dashboard at http://localhost:4321
+make run                                        # API (:8077) + dashboard (:4321) together
+make run_bot                                    # the interactive bot — then DM it /menu
 ```
+Or without make: `.venv/bin/python scripts/run_api.py`, then
+`cd dashboard && npm install && npm run dev`, then `scripts/run_bot.py`. The dashboard
+needs the **API running** — it is a client of it, not a direct reader of the store.
+
+`make check` runs a preflight (missing env vars, occupied ports, absent store) and
+`make install` sets up both halves. See [Running](#running) for all targets.
 In Telegram: **`/menu`** → set Date/Location/keyword filters → **Show jobs** → tap **📨 N** to apply.
 
 ## LLM options (all OpenAI-compatible except Anthropic)
@@ -100,6 +120,23 @@ Set `LLM_PROVIDER` to your primary; the others become automatic failover backups
 - **Free daily digest (no server):** GitHub Actions — see [docs/DEPLOYMENT_ALTERNATIVES.md](docs/DEPLOYMENT_ALTERNATIVES.md).
 - **Full autonomous (bot + scheduled ingest):** VPS — see [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) (Oracle free-tier quickstart included).
 
+## Running
+```bash
+make install     # backend venv + dashboard node_modules (idempotent)
+make check       # preflight: .env, required vars, free ports, store presence
+make run         # API (:8077) + dashboard (:4321), prefixed logs, one Ctrl-C stops both
+make run_bot     # the Telegram bot (separate long-lived process)
+make pipeline    # one ingest → match pass, no Telegram push
+make test        # the offline test suite
+```
+Individual services: `make run_backend`, `make run_dashboard`. Override ports with
+`make run API_PORT=9000 DASH_PORT=4322`.
+
+**Deploying the dashboard away from the API** (e.g. dashboard on Vercel, API on a
+VPS): set `PUBLIC_JOBAGENT_API_URL` to the API's public address. Browser-side actions
+use it, while server-side rendering uses `JOBAGENT_API_URL`. Also add the dashboard's
+origin to `JOBAGENT_CORS_ORIGINS`, which defaults to localhost only.
+
 ## Commands
 ```bash
 .venv/bin/python scripts/pipeline.py            # ingest → match → send digest
@@ -110,5 +147,12 @@ Set `LLM_PROVIDER` to your primary; the others become automatic failover backups
 ```
 
 ## Hard rules
-See [.agent/rules.md](.agent/rules.md): never fabricate CVs · never submit without
-per-job approval · prefer APIs over scraping · secrets only in `.env` · don't fight CAPTCHA.
+See [.claude/rules.md](.claude/rules.md) (and the original [.agent/rules.md](.agent/rules.md)):
+never fabricate CVs · never submit without per-job approval · prefer APIs over scraping ·
+secrets only in `.env` / the encrypted store · don't fight CAPTCHA.
+
+## Contributing / onboarding an agent
+Start at [CLAUDE.md](CLAUDE.md) (or [AGENTS.md](AGENTS.md) for other tools), which
+points at `.claude/`: `context.md` (problem, vision, current state), `rules.md` (hard
+constraints), `agent.md` (architecture, stack, module map), `memory.md` (why the design
+is the way it is). Read those before changing anything.

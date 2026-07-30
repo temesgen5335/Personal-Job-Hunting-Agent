@@ -12,9 +12,12 @@ not just what it does.
 The original plan used NousResearch Hermes Agent as the orchestrator (cron, memory,
 LLM routing, MCP). In practice, every role Hermes would fill was covered more simply:
 systemd timers for scheduling, SQLite for persistence, `MultiLLM` for provider
-routing, and `preferences.toml` for profile. Hermes remains installable as an
-optional agentic brain for future interactive reasoning, but the v2 system runs
-without it.
+routing, and `preferences.toml` for profile.
+
+**No Hermes code was ever written, and none remains.** The `[mcp]` extra and the empty
+`mcp_servers/` placeholder were removed in Tier 1 because they advertised an
+integration that did not exist. If an agentic layer is ever wanted, add it
+deliberately — do not treat the old docs as a partially-built foundation.
 
 ### Why FastAPI + Astro, not a single full-stack framework?
 The Telegram bot is the primary interface — it existed before the dashboard. FastAPI
@@ -68,6 +71,28 @@ ethical constraint (R1), not just a preference.
 
 ---
 
+## The July 2026 audit
+
+A skeptical audit of the whole system found the core pipeline real and working, but
+three systemic problems worth remembering, because they are the shape of what goes
+wrong here:
+
+1. **Two auth models, one enforced.** The bot had a real owner-gate; the API — which
+   by v2 could do everything the bot could — had auth only on `/config`. Every
+   mutation finding traced to this. `/apply/{id}/approve` answered **200** to an
+   anonymous caller. Fixed in Tier 1 (R19), with a route-table test as the net.
+2. **Documentation lagged the code by a full major version.** README claimed v1 /
+   72 tests / "read-only dashboard"; `pyproject.toml` and `ARCHITECTURE.md` claimed
+   Hermes Agent orchestration and MCP tool servers that had never been written. The
+   lesson: aspirational docs age into lies. Fixed in Tier 1.
+3. **Failures were logged but never surfaced.** The `events` table captured errors
+   nothing ever read, and stdout was the only alert channel. Fixed in Tier 1 via
+   `pipeline_health()` + digest banner.
+
+A fourth, still open: **git history retains the PII and CV** that Tier 1 removed from
+tracking. That needs `git filter-repo` and a force-push — the owner's call, and it
+should happen before the repo is ever public.
+
 ## Known Limitations
 
 - **No LinkedIn/Indeed/Glassdoor adapter.** These sites are aggressively anti-bot with
@@ -95,6 +120,9 @@ ethical constraint (R1), not just a preference.
 | v2.3 | `e23de67` | Application tracker + analytics (funnel, rates, timeline) |
 | v2.4 | `8b86fa6` | Job detail pages, on-demand fit check, inline charts |
 | v2.4+ | `7da7aae` | Portfolio theme, header fix, location filters, fit breakdown, pagination |
+| gov | `e1d5a12` | `.claude/` governance dir + `CLAUDE.md`/`AGENTS.md` entrypoints |
+| gov | `f7556b4` | Makefile runner (install / check / run) |
+| Tier 1 | *(pending)* | Audit remediation: API auth on writes, CORS default, browser API URL, retry/backoff, pipeline health, PII split, docs truth-pass |
 
 ---
 

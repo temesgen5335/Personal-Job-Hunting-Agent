@@ -29,23 +29,17 @@ Full rules: `.claude/rules.md`
 ## 3. Key Commands
 
 ```bash
-# Backend
-cd ~/PersonalAgent
-pip install -e ".[dev,api,telegram,llm]"
-uvicorn jobagent.api.app:app --port 8077            # FastAPI
-python scripts/run_bot.py                            # Telegram bot
+make install        # backend venv + dashboard deps (idempotent)
+make check          # preflight: env vars, free ports, store presence
+make run            # API (:8077) + dashboard (:4321), one Ctrl-C stops both
+make run_bot        # Telegram bot (separate long-lived process)
+make pipeline       # one ingest → match pass, no Telegram push
+make test           # 131 offline tests, no credentials needed
 
-# Dashboard
-cd dashboard && npm install && npm run dev           # Astro on 4321
-
-# Tests (99 tests, all offline, no credentials needed)
-pytest tests/ -v --tb=short
-pytest tests/test_api.py -v                          # single file
-
-# Pipeline (ingest → match → digest)
-python scripts/pipeline.py --no-send                 # dry run
-python scripts/pipeline.py                           # with Telegram push
+# Single test file
+.venv/bin/python -m pytest tests/test_api.py -v
 ```
+Writes need `DASHBOARD_PASSWORD` set — the API gates every non-GET route (R19).
 
 ---
 
@@ -58,6 +52,8 @@ python scripts/pipeline.py                           # with Telegram push
 - **Store** (`src/jobagent/store/db.py`) — SQLite, per-request open/close for thread safety.
 - **MultiLLM** (`src/jobagent/llm_client.py`) — ordered failover: Groq → Gemini → OpenRouter → custom → OpenAI → Anthropic.
 - **Secret store** (`src/jobagent/secrets_store.py`) — Fernet-encrypted config on disk, overlays `.env`.
+- **Auth** — every non-GET API route requires a bearer token from `DASHBOARD_PASSWORD`; fails closed (R19).
+- **Health** (`store.pipeline_health()`) — staleness, error count, per-source freshness; bannered in the dashboard and the digest.
 
 Full architecture + module map: `.claude/agent.md`
 
@@ -76,6 +72,10 @@ Full architecture + module map: `.claude/agent.md`
 | Commit without explicit user approval | R12 |
 | Add `Co-Authored-By` to commits | R13 |
 | Commit `.env`, `.session`, or credential files | R9 |
+| Add a non-GET route without `dependencies=auth` | R19 |
+| Default `JOBAGENT_CORS_ORIGINS` to `*` | R20 |
+| Call `client.get` directly in an adapter (bypasses retry) | R21 |
+| Put real name/email/phone in the committed `preferences.toml` | R22 |
 | Scan HTML strings for CAPTCHA (use DOM selectors) | R3 |
 | Hit real APIs in tests | R17 |
 
@@ -94,7 +94,8 @@ Full architecture + module map: `.claude/agent.md`
 
 ## 7. Configuration
 
-- `config/preferences.toml` — user profile, target roles, skills, watchlist, source toggles.
+- `config/preferences.toml` — target roles, skills, watchlist, source toggles (committed, placeholders for identity).
+- `config/preferences.local.toml` — your name/email/phone/cv_path (gitignored, overlaid at load).
 - `.env` — secrets (API keys, Telegram tokens, SMTP). See `.env.example`.
 - Dashboard Settings page — auth-gated UI for LLM/Telegram/SMTP config (encrypted at rest).
 - `JOBAGENT_MASTER_KEY` — Fernet key for the secret store. Generate with `python scripts/genkey.py`.

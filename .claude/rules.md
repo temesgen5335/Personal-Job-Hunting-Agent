@@ -73,6 +73,42 @@ Already hit and fixed in `feature_flag.py` — don't reintroduce.
 
 ---
 
+## API Security
+
+**R19 — Every state-changing API route is auth-gated, and fails closed.**
+Any route that is not GET carries `dependencies=auth` (the `require_auth` bearer-token
+check derived from `DASHBOARD_PASSWORD`). With no password set, writes return 403
+rather than running unauthenticated. These routes send email and submit forms as the
+user, so port reachability must never equal authority. `/auth/login` is the sole
+exception. `tests/test_api.py::test_every_mutating_route_requires_auth` enumerates the
+route table and fails if a new write route forgets the gate — do not weaken it.
+
+**R20 — `JOBAGENT_CORS_ORIGINS` never defaults to `*`.**
+An open origin plus a reachable port is how a stranger drives the apply endpoints.
+Deployments name their dashboard origin explicitly.
+
+---
+
+## Source Hygiene (implementation)
+
+**R21 — All source HTTP goes through `get_with_retry`.**
+Bounded exponential backoff with full jitter; retries 429/5xx and transport errors;
+treats other 4xx as permanent (a wrong company slug must not burn three attempts);
+honors a capped `Retry-After`. Never call `client.get` directly in an adapter — that
+is what made R8 an unmet claim for the whole of v1/v2.
+
+---
+
+## Personal Data
+
+**R22 — The committed config carries placeholders only.**
+Identity (name, email, phone, cv_path, links) lives in `config/preferences.local.toml`,
+which is gitignored and overlaid section-wise at load time. The CV PDF is gitignored.
+`tests/test_preferences.py::test_committed_preferences_carry_no_personal_contact_details`
+guards against regression. This repo is also a portfolio piece.
+
+---
+
 ## Process
 
 **R12 — Never `git commit` without explicit user approval.**

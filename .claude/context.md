@@ -28,8 +28,10 @@ A self-hosted, single-user autonomous agent that:
 6. **Tracks** applications through a lifecycle (matched → drafted → submitted →
    interview → offer/rejected) on a self-hosted dashboard.
 
-The system is **reusable by anyone** — swap `config/preferences.toml` and `.env`,
-and it works for a different person with different target roles and source companies.
+The system is **reusable by anyone** — write your own `config/preferences.local.toml`
+(identity) and `.env` (credentials), adjust `config/preferences.toml` (target roles,
+skills, watchlist), and it works for a different person. No identity is hard-coded,
+and the committed config carries placeholders only.
 
 ## End Product
 
@@ -56,7 +58,35 @@ Two interfaces, one backend:
 | Dashboard | Done — overview analytics, filtered job list, job detail + fit, settings |
 | Multi-LLM failover | Done — Groq/OpenRouter/Gemini/OpenAI/Anthropic + custom endpoint |
 | Encrypted config UI | Done — Fernet secret store, auth-gated API, masked reads |
-| Test suite | 99 tests, 17 test files, zero network, injectable fakes throughout |
+| API auth on writes | Done (Tier 1) — bearer token on every non-GET route, fails closed |
+| Pipeline health | Done (Tier 1) — staleness + error count + per-source freshness, dashboard banner, digest warnings |
+| Source retry/backoff | Done (Tier 1) — bounded jittered backoff, capped Retry-After |
+| PII split | Done (Tier 1) — identity in gitignored overlay; committed config is placeholders |
+| Test suite | 131 tests, 21 test files, zero network, injectable fakes throughout |
+
+## Known Gaps (from the July 2026 audit)
+
+Tier 1 of the remediation roadmap is complete (API auth, PII split, browser API URL,
+pipeline health, retry/backoff, docs truth-pass). Still open:
+
+- **Git history still contains the PII and CV** that were removed from tracking.
+  Scrubbing needs `git filter-repo` plus a force-push — a deliberate, destructive
+  operation the owner must run. Do it before the repo is ever made public.
+- **No triage actions** — jobs cannot be dismissed, snoozed, or annotated; the store
+  has no column for it. This is the top dashboard gap.
+- **Application status transitions are unenforced** — `PATCH /applications/{id}`
+  accepts any valid enum value, including backward moves (offer → matched).
+- **Concurrent ingestion is unguarded** — two overlapping `/ingest` calls can run
+  simultaneously; there is no lock.
+- **Dedup is weak for Telegram** — the hash is company+title+location and the
+  Telegram parser never sets a company, so those postings dedup on the title line only.
+- **Heuristic scores overwrite LLM scores** each run; no score provenance is kept.
+- **The Telegram handlers have no runtime test coverage.** `tests/test_bot.py` covers
+  only the pure helpers in `bot/service.py`; the handlers in `bot/app.py` need live
+  `Update`/`Context` objects. This is how a call to an undefined `_llm()` shipped in
+  the `/apply` fit-check path and crashed it with `NameError`
+  (fixed in Tier 1). `tests/test_static_checks.py` now guards that class of bug, but
+  it is a static check, not real coverage — a handler harness is still missing.
 
 ## What's NOT Built Yet
 
@@ -68,7 +98,7 @@ Two interfaces, one backend:
 
 ## Key Numbers
 
-- **7,300+** jobs ingested in testing (across all 6 source adapters)
+- **11,700+** jobs scored in a live run (8,253 fetched in a single pass across 6 adapters)
 - **40** companies in the ATS watchlist (Greenhouse/Lever/Ashby)
-- **99** tests across 17 files — all run offline, no network, no credentials
+- **131** tests across 21 files — all run offline, no network, no credentials
 - **6** LLM providers with automatic failover (3 free, 3 paid)

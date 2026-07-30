@@ -1,7 +1,7 @@
 [project]
 name = "personal-job-agent"
 version = "0.1.0"
-description = "Personal autonomous job-hunting agent — ingests postings from Telegram + job boards, matches them to your CV, and assists/automates applications. Orchestrated by Hermes Agent, controlled via Telegram."
+description = "Personal autonomous job-hunting agent — ingests postings from Telegram + job boards, matches them to your CV, and assists with applications. FastAPI orchestrator, Telegram bot, Astro dashboard."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
@@ -16,7 +16,6 @@ dependencies = [
 
 [project.optional-dependencies]
 telegram = ["telethon>=1.36", "python-telegram-bot>=21.0"]
-mcp = ["fastmcp>=2.0"]
 apply = ["playwright>=1.44"]
 llm = ["openai>=1.30", "anthropic>=0.40"]  # openai SDK covers Groq/OpenRouter/OpenAI/Gemini
 api = ["fastapi>=0.110", "uvicorn>=0.29", "cryptography>=42.0"]  # v2 orchestrator + encrypted config store
