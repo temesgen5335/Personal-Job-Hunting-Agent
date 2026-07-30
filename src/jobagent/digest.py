@@ -50,3 +50,23 @@ def format_matches(matches: list[dict]) -> str:
 def format_digest(matches: list[dict], limit: int = 10, max_per_company: int = 2) -> str:
     """Convenience: diversify + limit + format in one call."""
     return format_matches(diversify(matches, limit, max_per_company))
+
+
+def health_banner(report, health: dict) -> str:
+    """Prefix for the digest describing anything degraded about this run.
+
+    A digest that never mentions failure is indistinguishable from a healthy one,
+    so the daily push doubles as the heartbeat: warnings ride along with it, and a
+    digest that never arrives is itself the signal that the pipeline is dead.
+    """
+    lines: list[str] = []
+    failed = [r for r in report.results if r.error]
+    if failed:
+        lines.append(f"⚠️ {len(failed)} source(s) failed this run:")
+        lines += [f"  • {r.source}: {r.error}" for r in failed]
+    if report.total_fetched == 0:
+        lines.append("⚠️ No postings fetched from any source — check credentials/network.")
+    stale = [s["source"] for s in health.get("sources", []) if (s.get("hours_since") or 0) > 48]
+    if stale:
+        lines.append(f"⚠️ No new data in 48h+ from: {', '.join(stale)}")
+    return "\n".join(lines) + "\n\n" if lines else ""

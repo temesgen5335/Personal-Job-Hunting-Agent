@@ -18,6 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from jobagent.bot.notify import send_message  # noqa: E402
 from jobagent.bot.service import jobs_text  # noqa: E402
 from jobagent.config import get_settings  # noqa: E402
+from jobagent.digest import health_banner  # noqa: E402
 from jobagent.ingestion.registry import build_adapters  # noqa: E402
 from jobagent.ingestion.runner import run_ingestion  # noqa: E402
 from jobagent.llm_client import build_llm  # noqa: E402
@@ -50,7 +51,11 @@ def main() -> None:
     mode = f"heuristic+LLM ({' → '.join(llm.chain)})" if mreport.used_llm else "heuristic"
     print(f"[match] scored {mreport.scored} ({mode}); LLM-reranked {mreport.llm_reranked}")
 
-    # 3) Digest
+    # 3) Digest — carries a health banner so a degraded run announces itself.
+    health = store.pipeline_health()
+    banner = health_banner(report, health)
+    if banner:
+        print("[health] " + banner.strip().replace("\n", "\n[health] "))
     if args.no_send:
         print("[digest] skipped (--no-send)")
     elif not (settings.telegram_bot_token and settings.telegram_destination):
@@ -58,7 +63,8 @@ def main() -> None:
     else:
         try:
             sent = send_message(
-                settings.telegram_bot_token, settings.telegram_destination, jobs_text(store, args.top)
+                settings.telegram_bot_token, settings.telegram_destination,
+                banner + jobs_text(store, args.top),
             )
             print(f"[digest] sent in {sent} message(s)")
         except Exception as exc:  # noqa: BLE001 — report, don't fail the whole run

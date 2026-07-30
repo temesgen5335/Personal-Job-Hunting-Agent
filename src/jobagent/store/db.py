@@ -118,6 +118,86 @@ class Store:
             "last_ingest": last_ingest["created_at"] if last_ingest else None,
             "apps": apps,
             "total_apps": sum(a["n"] for a in apps),
+            "health": self.pipeline_health(),
+        }
+
+    def pipeline_health(self, *, stale_after_hours: float = 24.0, error_window_hours: float = 24.0) -> dict:
+        """Is the agent actually still running?
+
+        Without this, a pipeline that has been failing for three days renders
+        identically to a healthy one — the store just stops growing and nothing says
+        so. Surfaces staleness, a recent-error count, the last error, and per-source
+        freshness, all derived from the append-only `events` trail.
+        """
+        now = datetime.now(timezone.utc)
+
+        def _age_hours(ts: str | None) -> float | None:
+            if not ts:
+                return None
+            try:
+                return max(0.0, (now - datetime.fromisoformat(ts)).total_seconds() / 3600.0)
+            except ValueError:
+                return None
+
+        last_ingest = self.conn.execute(
+            "SELECT created_at FROM events WHERE kind='ingest' ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        last_at = last_ingest["created_at"] if last_ingest else None
+        age = _age_hours(last_at)
+
+        cutoff = (now - timedelta(hours=error_window_hours)).isoformat()
+        recent_errors = self.conn.execute(
+            "SELECT COUNT(*) AS n FROM events WHERE kind='error' AND created_at >= ?", (cutoff,)
+        ).fetchone()["n"]
+
+        err = self.conn.execute(
+            "SELECT payload, created_at FROM events WHERE kind='error' ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        last_error = None
+        if err:
+            try:
+                payload = json.loads(err["payload"])
+            except (ValueError, TypeError):
+                payload = {}
+            last_error = {
+                "source": payload.get("source"),
+                "error": payload.get("error"),
+                "at": err["created_at"],
+            }
+
+        # Most recent ingest event per source — one row each, newest first.
+        sources = [
+            {
+                "source": r["source"],
+                "last_ingest": r["created_at"],
+                "hours_since": _age_hours(r["created_at"]),
+                "fetched": (json.loads(r["payload"]) or {}).get("fetched"),
+                "new": (json.loads(r["payload"]) or {}).get("new"),
+            }
+            for r in self.conn.execute(
+                """
+                SELECT source, payload, created_at FROM (
+                    SELECT json_extract(payload, '$.source') AS source, payload, created_at,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY json_extract(payload, '$.source') ORDER BY id DESC
+                           ) AS rn
+                    FROM events WHERE kind='ingest'
+                ) WHERE rn = 1 ORDER BY source
+                """
+            )
+            if r["source"]
+        ]
+
+        return {
+            "last_ingest": last_at,
+            "hours_since_ingest": age,
+            # No ingest ever recorded also counts as stale — a fresh install and a
+            # three-day-dead pipeline should both read as "not currently working".
+            "is_stale": age is None or age > stale_after_hours,
+            "stale_after_hours": stale_after_hours,
+            "recent_errors": recent_errors,
+            "last_error": last_error,
+            "sources": sources,
         }
 
     # --- matches ----------------------------------------------------------
