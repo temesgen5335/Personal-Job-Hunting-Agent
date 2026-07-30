@@ -3,7 +3,7 @@
 import types
 
 from jobagent.ingestion.registry import build_adapters
-from jobagent.preferences import Preferences, Sources, Watchlist
+from jobagent.preferences import Preferences, Sources
 
 
 def _settings():

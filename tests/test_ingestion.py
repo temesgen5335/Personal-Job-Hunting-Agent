@@ -3,7 +3,6 @@
 Uses httpx.MockTransport so no network and no extra deps."""
 
 import httpx
-import pytest
 
 from jobagent.core.schemas import ApplyMethod, Source
 from jobagent.ingestion.adapters.remoteok import RemoteOKAdapter

@@ -2,7 +2,6 @@
 
 import types
 
-import pytest
 
 from jobagent.secrets_store import SecretStore, masked_view
 
