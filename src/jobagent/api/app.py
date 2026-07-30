@@ -88,6 +88,8 @@ def _ingest_task(db_path: str, settings, profile, llm, run_id: str) -> None:
         run_ingestion(build_adapters(settings), store, run_id=run_id)
         run_matching(store, profile, llm=llm, run_id=run_id)
     finally:
+        # The endpoint acquired the lock under this run_id before scheduling us.
+        store.release_lock("pipeline", run_id)
         store.close()
 
 
@@ -316,6 +318,14 @@ def create_app(settings=None, profile=None, llm: Any = _UNSET, cv_master: str | 
         # The id is returned immediately so the caller can watch /runs/{id} while
         # the background task is still going.
         run_id = uuid.uuid4().hex[:12]
+        s = store()
+        try:
+            # Same lock the pipeline takes (M5) — acquired HERE, not in the task, so
+            # the caller learns synchronously that a pass is already running.
+            if not s.try_acquire_lock("pipeline", run_id):
+                raise HTTPException(409, "An ingestion pass is already running.")
+        finally:
+            s.close()
         bg.add_task(_ingest_task, settings.db_path, settings, profile, _llm(), run_id)
         return {"status": "started", "run_id": run_id}
 

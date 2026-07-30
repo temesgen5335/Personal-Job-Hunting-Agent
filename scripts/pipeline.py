@@ -45,57 +45,69 @@ def main() -> None:
     # run is reconstructable from the events table (store.events_for_run).
     run_id = uuid.uuid4().hex[:12]
     started = time.monotonic()
+
+    # One pass at a time (M5): a timer firing during a manual run would double-fetch
+    # sources and interleave the ledger. The TTL frees a crashed holder's lock.
+    if not store.try_acquire_lock("pipeline", run_id):
+        print("[run] another pipeline pass holds the lock — exiting (stale locks expire after 2h)")
+        store.close()
+        return
     print(f"[run] {run_id}")
+    try:
 
-    # 1) Ingest
-    report = run_ingestion(build_adapters(settings), store, run_id=run_id)
-    print(f"[ingest] {report.total_new} new / {report.total_fetched} fetched")
-    for r in report.results:
-        if r.error:
-            print(f"[ingest]   {r.source}: ERROR {r.error}")
+        # 1) Ingest
+        report = run_ingestion(build_adapters(settings), store, run_id=run_id)
+        print(f"[ingest] {report.total_new} new / {report.total_fetched} fetched")
+        for r in report.results:
+            if r.error:
+                print(f"[ingest]   {r.source}: ERROR {r.error}")
 
-    # 2) Match
-    llm = build_llm(settings)
-    mreport = run_matching(store, profile, llm=llm, run_id=run_id)
-    mode = f"heuristic+LLM ({' → '.join(llm.chain)})" if mreport.used_llm else "heuristic"
-    print(f"[match] scored {mreport.scored} ({mode}); LLM-reranked {mreport.llm_reranked}")
+        # 2) Match
+        llm = build_llm(settings)
+        mreport = run_matching(store, profile, llm=llm, run_id=run_id)
+        mode = f"heuristic+LLM ({' → '.join(llm.chain)})" if mreport.used_llm else "heuristic"
+        print(f"[match] scored {mreport.scored} ({mode}); LLM-reranked {mreport.llm_reranked}")
 
-    # 3) Digest — carries a health banner so a degraded run announces itself.
-    health = store.pipeline_health()
-    banner = health_banner(report, health)
-    # Quiet applications ride along with the digest rather than needing their own run.
-    followups = format_followups(store.applications_needing_followup())
-    if banner:
-        print("[health] " + banner.strip().replace("\n", "\n[health] "))
-    if args.no_send:
-        digest_status = "skipped (--no-send)"
-        print("[digest] skipped (--no-send)")
-    elif not (settings.telegram_bot_token and settings.telegram_destination):
-        digest_status = "skipped (no bot creds)"
-        print("[digest] skipped (no TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID)")
-    else:
-        try:
-            sent = send_message(
-                settings.telegram_bot_token, settings.telegram_destination,
-                banner + jobs_text(store, args.top) + followups,
-            )
-            digest_status = f"sent ({sent} message(s))"
-            print(f"[digest] sent in {sent} message(s)")
-        except Exception as exc:  # noqa: BLE001 — report, don't fail the whole run
-            digest_status = f"failed: {exc}"
-            print(f"[digest] send failed: {exc}")
+        # 3) Digest — carries a health banner so a degraded run announces itself.
+        health = store.pipeline_health()
+        banner = health_banner(report, health)
+        # Quiet applications ride along with the digest rather than needing their own run.
+        followups = format_followups(store.applications_needing_followup())
+        if banner:
+            print("[health] " + banner.strip().replace("\n", "\n[health] "))
+        if args.no_send:
+            digest_status = "skipped (--no-send)"
+            print("[digest] skipped (--no-send)")
+        elif not (settings.telegram_bot_token and settings.telegram_destination):
+            digest_status = "skipped (no bot creds)"
+            print("[digest] skipped (no TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID)")
+        else:
+            try:
+                sent = send_message(
+                    settings.telegram_bot_token, settings.telegram_destination,
+                    banner + jobs_text(store, args.top) + followups,
+                )
+                digest_status = f"sent ({sent} message(s))"
+                print(f"[digest] sent in {sent} message(s)")
+            except Exception as exc:  # noqa: BLE001 — report, don't fail the whole run
+                digest_status = f"failed: {exc}"
+                print(f"[digest] send failed: {exc}")
 
-    # 4) Run summary — the ledger row `store.list_runs()` and GET /runs read.
-    store.log_event(Event(kind="run", payload={
-        "run_id": run_id,
-        "duration_s": round(time.monotonic() - started, 1),
-        "ingest": {"fetched": report.total_fetched, "new": report.total_new,
-                   "errors": [r.source for r in report.results if r.error]},
-        "match": {"scored": mreport.scored, "llm_reranked": mreport.llm_reranked},
-        "digest": digest_status,
-    }))
-    print(f"[run] {run_id} done in {round(time.monotonic() - started, 1)}s")
-    store.close()
+        # 4) Run summary — the ledger row `store.list_runs()` and GET /runs read.
+        store.log_event(Event(kind="run", payload={
+            "run_id": run_id,
+            "duration_s": round(time.monotonic() - started, 1),
+            "ingest": {"fetched": report.total_fetched, "new": report.total_new,
+                       "errors": [r.source for r in report.results if r.error]},
+            "match": {"scored": mreport.scored, "llm_reranked": mreport.llm_reranked},
+            "digest": digest_status,
+        }))
+        print(f"[run] {run_id} done in {round(time.monotonic() - started, 1)}s")
+    finally:
+        # An exception in any stage must still free the lock — the TTL is the
+        # crash backstop, not the normal path.
+        store.release_lock("pipeline", run_id)
+        store.close()
 
 
 if __name__ == "__main__":

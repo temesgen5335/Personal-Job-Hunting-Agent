@@ -424,6 +424,39 @@ class Store:
             out.append(row)
         return out
 
+    # --- advisory locks ----------------------------------------------------
+    # Guards against two pipeline passes interleaving on one store (audit M5):
+    # a timer firing while a manual `make pipeline` or POST /ingest is mid-run
+    # would double-fetch sources and interleave ledger events. SQLite's PRIMARY
+    # KEY makes acquisition atomic; the TTL means a crashed holder expires
+    # instead of wedging the pipeline until someone notices.
+
+    def try_acquire_lock(self, name: str, holder: str, *, ttl_minutes: float = 120.0) -> bool:
+        """Atomically acquire a named lock. False if a live holder already has it."""
+        self.conn.execute(
+            "CREATE TABLE IF NOT EXISTS locks (name TEXT PRIMARY KEY, holder TEXT NOT NULL, acquired_at TEXT NOT NULL)"
+        )
+        cutoff = (datetime.now(timezone.utc) - timedelta(minutes=ttl_minutes)).isoformat()
+        self.conn.execute("DELETE FROM locks WHERE name=? AND acquired_at < ?", (name, cutoff))
+        try:
+            self.conn.execute(
+                "INSERT INTO locks (name, holder, acquired_at) VALUES (?,?,?)",
+                (name, holder, _now()),
+            )
+            self.conn.commit()
+            return True
+        except sqlite3.IntegrityError:
+            self.conn.commit()
+            return False
+
+    def release_lock(self, name: str, holder: str) -> None:
+        """Release only your own lock — a stale holder must not free a newer one's."""
+        self.conn.execute(
+            "CREATE TABLE IF NOT EXISTS locks (name TEXT PRIMARY KEY, holder TEXT NOT NULL, acquired_at TEXT NOT NULL)"
+        )
+        self.conn.execute("DELETE FROM locks WHERE name=? AND holder=?", (name, holder))
+        self.conn.commit()
+
     def list_runs(self, limit: int = 20) -> list[dict]:
         """The run ledger: one row per pipeline pass, newest first.
 

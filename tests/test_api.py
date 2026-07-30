@@ -378,3 +378,33 @@ def test_ingest_returns_a_run_id_and_runs_lists_ledger(client, monkeypatch):
     ev = client.get("/runs/abc123").json()
     assert {e["kind"] for e in ev["events"]} == {"run", "ingest"}
     assert client.get("/runs/never-happened").status_code == 404
+
+
+def test_second_ingest_while_running_is_409(client, monkeypatch):
+    """M5 over HTTP: the endpoint acquires the pipeline lock synchronously, so the
+    caller learns a pass is already running instead of silently double-running."""
+    import os
+
+    import jobagent.api.app as api_mod
+    from jobagent.store import Store
+
+    # Stub the task so the lock is NOT released (simulates a pass still in flight).
+    monkeypatch.setattr(api_mod, "_ingest_task", lambda *a, **k: None)
+    assert client.post("/ingest").status_code == 202
+    r = client.post("/ingest")
+    assert r.status_code == 409 and "already running" in r.json()["detail"]
+
+    # When the task DOES run, its finally-release frees the lock for the next pass.
+    st = Store(os.environ["JOBAGENT_DB_PATH"])
+    st.conn.execute("DELETE FROM locks")
+    st.conn.commit()
+    st.close()
+    released = {}
+    def fake_task(db, settings, profile, llm, run_id):
+        s = Store(db)
+        s.release_lock("pipeline", run_id)   # what the real task's finally does
+        s.close()
+        released["run_id"] = run_id
+    monkeypatch.setattr(api_mod, "_ingest_task", fake_task)
+    assert client.post("/ingest").status_code == 202     # runs + releases (sync in tests)
+    assert client.post("/ingest").status_code == 202     # so the next one acquires again

@@ -1,5 +1,11 @@
 # Build Plan
 
+> **HISTORICAL DOCUMENT** — the v1 build plan, kept for the record. Unchecked items
+> referencing *Hermes Agent* / MCP were superseded, not completed: no Hermes code was
+> ever written, and its roles are covered by systemd timers, `MultiLLM` failover, and
+> the FastAPI orchestrator. Current truth lives in `docs/ARCHITECTURE.md` and
+> `.claude/context.md`.
+
 Each phase is independently shippable. You get real value at Phase 2 (daily ranked
 digest in Telegram) before any auto-apply exists.
 

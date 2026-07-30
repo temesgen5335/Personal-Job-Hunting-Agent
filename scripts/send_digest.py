@@ -1,5 +1,7 @@
-"""Push the current top-matches digest to your Telegram. Hermes cron calls this
-(e.g. every morning). One-shot — does not run the interactive bot.
+"""Push the current top-matches digest to your Telegram. A scheduler calls this
+(systemd timer, cron, or GitHub Actions — e.g. every morning). One-shot — does not
+run the interactive bot. The full pipeline (ingest+match+digest) is pipeline.py;
+this only formats and sends what is already in the store.
 
 Usage: .venv/bin/python scripts/send_digest.py [N]
 """

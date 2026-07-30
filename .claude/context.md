@@ -70,7 +70,9 @@ Two interfaces, one backend:
 | Run-ID spine | Done (Tier 3) — one id ingest→match→digest, run ledger, GET /runs + /runs/{id} |
 | Matching eval harness | Done (Tier 3) — 24 labeled traps, P@5=1.0 / P@10≥0.9 floors, tuning CLI |
 | Architecture doc | Done (Tier 3) — rewritten around the real system; legacy Hermes diagram gone |
-| Test suite | 199 tests, 25 test files, zero network, injectable fakes throughout |
+| Ingest lock (M5) | Done — SQLite advisory lock w/ 2h TTL; second pass exits, API returns 409 |
+| CI | Done — tests.yml runs the offline suite + F821 gate on every push/PR |
+| Test suite | 206 tests, 26 test files, zero network, injectable fakes throughout |
 
 ## Known Gaps (from the July 2026 audit)
 
@@ -79,8 +81,6 @@ pipeline health, retry/backoff, docs truth-pass). Still open:
 
 - **No triage actions** — jobs cannot be dismissed, snoozed, or annotated; the store
   has no column for it. This is the top dashboard gap.
-- **Concurrent ingestion is unguarded** — two overlapping `/ingest` calls can run
-  simultaneously; there is no lock.
 - **Dedup is weak for Telegram** — the hash is company+title+location and the
   Telegram parser never sets a company, so those postings dedup on the title line only.
 - **Heuristic scores overwrite LLM scores** each run; no score provenance is kept.
@@ -109,5 +109,5 @@ pipeline health, retry/backoff, docs truth-pass). Still open:
 
 - **11,700+** jobs scored in a live run (8,253 fetched in a single pass across 6 adapters)
 - **40** companies in the ATS watchlist (Greenhouse/Lever/Ashby)
-- **199** tests across 25 files — all run offline, no network, no credentials
+- **206** tests across 26 files — all run offline, no network, no credentials
 - **6** LLM providers with automatic failover (3 free, 3 paid)

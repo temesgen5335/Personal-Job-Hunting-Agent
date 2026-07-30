@@ -32,7 +32,4 @@ Bootstrap done. Remaining manual steps (see docs/DEPLOYMENT.md):
   5. (Optional) Set server timezone so the 07:00 digest is your local time:
        sudo timedatectl set-timezone Africa/Addis_Ababa
 
-  Hermes Agent (the agentic brain for Phase 3 cv_tailor etc.) is independent of
-  the systemd pipeline above. Install it when you reach Phase 3:
-       curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash
 NOTE

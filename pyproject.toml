@@ -1,6 +1,6 @@
 [project]
 name = "personal-job-agent"
-version = "0.1.0"
+version = "3.0.0"
 description = "Personal autonomous job-hunting agent — ingests postings from Telegram + job boards, matches them to your CV, and assists with applications. FastAPI orchestrator, Telegram bot, Astro dashboard."
 readme = "README.md"
 requires-python = ">=3.11"

@@ -3,12 +3,11 @@
 Runs the agent autonomously on a Linux VPS: the **Telegram bot** as a persistent
 service, an **ingest+match** pass every 4 hours, and a **daily digest** push.
 
-## Why systemd (not Hermes cron) for the pipeline
+## Why systemd for the pipeline
 The ingest→match→digest pipeline is deterministic plumbing, so it runs on **systemd
 timers** — universally reliable, observable via `journalctl`, restart-on-failure.
-**Hermes Agent** stays installed as the *agentic brain* for Phase 3+ (CV tailoring,
-cover letters, application reasoning) where LLM autonomy actually helps. The two are
-independent; you can drive the systemd pipeline from a Hermes skill later if desired.
+(CV tailoring, cover letters, and fit checks are plain LLM calls inside the service
+layer — see `docs/ARCHITECTURE.md`; there is no separate agent process to run.)
 
 ## Process model
 | Unit | Type | Schedule | What |

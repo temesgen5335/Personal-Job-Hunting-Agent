@@ -1,0 +1,30 @@
+# CI for the offline test suite. Every test runs without network, credentials, or a
+# browser (R17), so this needs nothing but Python — no secrets are configured here,
+# and a test that starts requiring one should fail loudly in this environment.
+name: Tests
+
+on:
+  push:
+    branches: [main, v2]
+  pull_request:
+  workflow_dispatch: {}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: pip install -e ".[dev,api,llm,telegram]"
+
+      - name: Lint (undefined names are runtime NameErrors)
+        run: ruff check --select F821 src/ scripts/
+
+      - name: Test
+        run: pytest tests/ -q
