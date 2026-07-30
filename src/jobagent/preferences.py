@@ -28,6 +28,11 @@ class Profile(BaseModel):
     location: str = ""
     timezone: str = ""
     core_skills: list[str] = Field(default_factory=list)
+    # Optional per-skill importance, keyed by the same string used in core_skills
+    # (case-insensitive). Unlisted skills weigh 1.0. Weighting is what separates
+    # "matched four of my differentiators" from "matched four generic infra tools" —
+    # without it every skill counts the same and generic postings score like strong ones.
+    skill_weights: dict[str, float] = Field(default_factory=dict)
     domains: list[str] = Field(default_factory=list)
     must_haves: list[str] = Field(default_factory=list)
     nice_to_haves: list[str] = Field(default_factory=list)

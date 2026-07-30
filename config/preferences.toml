@@ -74,6 +74,38 @@ keywords = [
     "machine learning", "applied AI", "forward deployed",
 ]
 
+# Per-skill importance for scoring. Unlisted skills weigh 1.0. This is what stops a
+# posting that merely mentions Docker + AWS + Postgres from scoring like one built on
+# your actual differentiators. STARTING POINT derived from the headline above — tune it:
+# raise what you want to be hired for, lower what you can do but don't want to lead with.
+[profile.skill_weights]
+# Differentiators — the work you're targeting.
+"LangChain" = 2.0
+"LangGraph" = 2.0
+"LlamaIndex" = 2.0
+"RAG" = 2.0
+"agentic systems" = 2.0
+"multi-agent orchestration" = 2.0
+"MCP" = 2.0
+"LLM fine-tuning" = 2.0
+"prompt engineering" = 1.5
+"Python" = 2.0
+"FastAPI" = 1.5
+"TypeScript" = 1.5
+"Next.js" = 1.5
+"React" = 1.5
+# Generic infrastructure — real skills, weak signal about role fit.
+"Docker" = 0.5
+"CI/CD" = 0.5
+"Airflow" = 0.5
+"Kafka" = 0.5
+"AWS" = 0.5
+"GCP" = 0.5
+"Azure" = 0.5
+"MongoDB" = 0.5
+"shadcn/ui" = 0.5
+"design systems" = 0.5
+
 [profile.links]
 # Also override these in preferences.local.toml.
 portfolio = "https://example.com"
