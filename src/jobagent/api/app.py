@@ -93,17 +93,26 @@ def create_app(settings=None, profile=None, llm: Any = _UNSET, cv_master: str | 
     def _llm():
         return llm if llm_injected else build_llm(get_settings())
 
-    # --- auth (gates /config) -------------------------------------------------
+    # --- auth -----------------------------------------------------------------
+    # Gates EVERY state-changing or cost-incurring route, not just /config. These
+    # endpoints can send email as you, submit ATS forms, and spend LLM quota, so an
+    # unauthenticated caller who can reach the port must not be able to drive them.
+    # GETs stay open: they are read-only and the dashboard renders them server-side
+    # without a token. tests/test_api.py asserts this gate covers every non-GET route.
     def _expected_token() -> str | None:
         return _token_for(settings.dashboard_password, settings.master_key) if settings.dashboard_password else None
 
     def require_auth(authorization: str | None = Header(None)) -> None:
         expected = _expected_token()
         if expected is None:
-            raise HTTPException(403, "Config UI disabled — set DASHBOARD_PASSWORD.")
+            # Fail closed: with no password there is no way to authenticate, so
+            # refuse outright rather than leaving writes open.
+            raise HTTPException(403, "Writes disabled — set DASHBOARD_PASSWORD to enable authenticated access.")
         token = (authorization or "").removeprefix("Bearer ").strip()
         if token != expected:
             raise HTTPException(401, "Unauthorized.")
+
+    auth = [Depends(require_auth)]
 
     @app.post("/auth/login")
     def login(body: LoginReq):
@@ -122,11 +131,11 @@ def create_app(settings=None, profile=None, llm: Any = _UNSET, cv_master: str | 
             pass
         return base
 
-    @app.get("/config", dependencies=[Depends(require_auth)])
+    @app.get("/config", dependencies=auth)
     def get_config():
         return {"config": masked_view(_effective_managed())}
 
-    @app.put("/config", dependencies=[Depends(require_auth)])
+    @app.put("/config", dependencies=auth)
     def put_config(patch: ConfigPatch):
         try:
             SecretStore().update(patch.values)
@@ -189,7 +198,7 @@ def create_app(settings=None, profile=None, llm: Any = _UNSET, cv_master: str | 
             s.close()
         return {**job, **match}
 
-    @app.patch("/applications/{app_id}")
+    @app.patch("/applications/{app_id}", dependencies=auth)
     def update_application(app_id: str, body: StatusReq):
         if body.status not in _VALID_STATUSES:
             raise HTTPException(400, f"Invalid status. One of: {sorted(_VALID_STATUSES)}")
@@ -210,7 +219,7 @@ def create_app(settings=None, profile=None, llm: Any = _UNSET, cv_master: str | 
         finally:
             s.close()
 
-    @app.post("/match")
+    @app.post("/match", dependencies=auth)
     def match():
         s = store()
         try:
@@ -219,12 +228,12 @@ def create_app(settings=None, profile=None, llm: Any = _UNSET, cv_master: str | 
         finally:
             s.close()
 
-    @app.post("/ingest", status_code=202)
+    @app.post("/ingest", status_code=202, dependencies=auth)
     def ingest(bg: BackgroundTasks):
         bg.add_task(_ingest_task, settings.db_path, settings, profile, _llm())
         return {"status": "started"}
 
-    @app.post("/fit")
+    @app.post("/fit", dependencies=auth)
     def fit(req: JobIdReq):
         s = store()
         try:
@@ -235,7 +244,7 @@ def create_app(settings=None, profile=None, llm: Any = _UNSET, cv_master: str | 
             s.close()
         return assess_fit(job, profile, cv_master, _llm()).to_dict()
 
-    @app.post("/apply/prepare")
+    @app.post("/apply/prepare", dependencies=auth)
     def apply_prepare(req: JobIdReq):
         current_llm = _llm()
         if current_llm is None:
@@ -256,7 +265,7 @@ def create_app(settings=None, profile=None, llm: Any = _UNSET, cv_master: str | 
         finally:
             s.close()
 
-    @app.post("/apply/{app_id}/approve")
+    @app.post("/apply/{app_id}/approve", dependencies=auth)
     def apply_approve(app_id: str):
         s = store()
         try:
@@ -264,7 +273,7 @@ def create_app(settings=None, profile=None, llm: Any = _UNSET, cv_master: str | 
         finally:
             s.close()
 
-    @app.post("/ats/preview")
+    @app.post("/ats/preview", dependencies=auth)
     def ats_preview(req: JobIdReq):
         s = store()
         try:
@@ -281,7 +290,7 @@ def create_app(settings=None, profile=None, llm: Any = _UNSET, cv_master: str | 
             s.close()
         return _ats_response(app_id, res)
 
-    @app.post("/ats/{app_id}/submit")
+    @app.post("/ats/{app_id}/submit", dependencies=auth)
     def ats_submit(app_id: str):
         s = store()
         try:

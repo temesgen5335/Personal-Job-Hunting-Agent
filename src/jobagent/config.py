@@ -51,7 +51,13 @@ class Settings(BaseSettings):
     # v2.1 config UI: admin password (gates the config endpoints) + secret-store key.
     dashboard_password: str = Field("", alias="DASHBOARD_PASSWORD")
     master_key: str = Field("", alias="JOBAGENT_MASTER_KEY")
-    cors_origins: str = Field("*", alias="JOBAGENT_CORS_ORIGINS")  # comma-separated; * = any (token auth)
+    # Comma-separated browser origins allowed to call the API. Defaults to the local
+    # dashboard only; set explicitly when the dashboard is deployed elsewhere. "*" is
+    # honored if you set it deliberately, but is not the default — an open origin plus
+    # a reachable port is how a stranger drives your apply endpoints.
+    cors_origins: str = Field(
+        "http://localhost:4321,http://127.0.0.1:4321", alias="JOBAGENT_CORS_ORIGINS"
+    )
 
     # Telegram — channel reader (Telethon)
     telegram_api_id: int | None = Field(None, alias="TELEGRAM_API_ID")

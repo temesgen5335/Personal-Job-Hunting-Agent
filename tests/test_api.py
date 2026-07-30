@@ -23,6 +23,10 @@ class FakeLLM:
 def client(tmp_path, monkeypatch):
     db = str(tmp_path / "api.db")
     monkeypatch.setenv("JOBAGENT_DB_PATH", db)
+    # Writes are auth-gated, so the fixture logs in and carries the token. Reads
+    # need no token. See test_every_mutating_route_requires_auth for the invariant.
+    monkeypatch.setenv("DASHBOARD_PASSWORD", "test-pw")
+    monkeypatch.setenv("JOBAGENT_MASTER_KEY", "")
     settings = Settings(_env_file=None)
 
     # Seed one email job + one ATS job, both scored.
@@ -46,6 +50,7 @@ def client(tmp_path, monkeypatch):
         mailer=lambda *a, **k: mails.append((a, k)),
     )
     c = TestClient(app)
+    c.headers["Authorization"] = f"Bearer {c.post('/auth/login', json={'password': 'test-pw'}).json()['token']}"
     c._mails = mails  # type: ignore
     c._email_job_id = eid  # type: ignore
     return c
@@ -155,3 +160,63 @@ def test_config_disabled_without_password(tmp_path, monkeypatch):
     c = TestClient(app)
     assert c.post("/auth/login", json={"password": "x"}).status_code == 403   # fail closed
     assert c.get("/config").status_code == 403
+
+
+# --- C1: auth on every state-changing route ---------------------------------------
+
+def test_every_mutating_route_requires_auth(client):
+    """Invariant: no non-GET route is reachable without a token.
+
+    This is the regression net for the class of bug that left /apply/{id}/approve
+    open — an endpoint that can send email as you. A newly added write route that
+    forgets `dependencies=auth` fails here rather than in production.
+    """
+    anon = TestClient(client.app)          # deliberately no Authorization header
+    checked = []
+    for route in client.app.routes:
+        methods = getattr(route, "methods", set()) - {"GET", "HEAD", "OPTIONS"}
+        if not methods or route.path == "/auth/login":   # login must stay open
+            continue
+        for method in methods:
+            path = route.path.replace("{app_id}", "x").replace("{job_id}", "x")
+            r = anon.request(method, path, json={})
+            assert r.status_code in (401, 403), f"{method} {route.path} ungated → {r.status_code}"
+            checked.append(f"{method} {route.path}")
+    assert len(checked) >= 9, f"expected the 9 known write routes, saw {checked}"
+
+
+def test_reads_stay_open_without_token(client):
+    anon = TestClient(client.app)
+    for path in ("/health", "/stats", "/jobs", "/applications", "/analytics"):
+        assert anon.get(path).status_code == 200, path
+
+
+def test_bad_token_rejected(client):
+    anon = TestClient(client.app, headers={"Authorization": "Bearer not-the-token"})
+    assert anon.post("/fit", json={"job_id": client._email_job_id}).status_code == 401
+
+
+def test_unauthenticated_caller_cannot_send_an_application(client):
+    """R2 teeth: the HITL gate must not be bypassable over HTTP."""
+    app_id = client.post("/apply/prepare", json={"job_id": client._email_job_id}).json()["application_id"]
+    anon = TestClient(client.app)
+    assert anon.post(f"/apply/{app_id}/approve").status_code in (401, 403)
+    assert client._mails == []                      # nothing left the building
+
+
+def test_writes_fail_closed_without_password(tmp_path, monkeypatch):
+    """No DASHBOARD_PASSWORD → writes refused (403), reads still fine."""
+    monkeypatch.setenv("JOBAGENT_DB_PATH", str(tmp_path / "fc.db"))
+    monkeypatch.delenv("DASHBOARD_PASSWORD", raising=False)
+    settings = Settings(_env_file=None)
+    Store(settings.db_path).init_schema()
+    c = TestClient(create_app(settings=settings, profile=Profile(name="T"), llm=None,
+                              cv_master="x", mailer=lambda *a, **k: None))
+    assert c.post("/match").status_code == 403
+    assert c.patch("/applications/x", json={"status": "interview"}).status_code == 403
+    assert c.get("/stats").status_code == 200
+
+
+def test_cors_default_is_not_wildcard():
+    """An open origin plus a reachable port is how a stranger drives your apply flow."""
+    assert Settings(_env_file=None).cors_origins != "*"
