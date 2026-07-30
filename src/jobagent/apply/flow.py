@@ -44,7 +44,7 @@ def prepare_application(store: Store, job: dict, profile: Profile, cv_master_md:
     Sends nothing."""
     cv_md = tailor_cv(cv_master_md, job, llm)
     cover = write_cover_letter(cv_master_md, job, llm)
-    subject, body = draft_email(profile.name or "Candidate", job, llm)
+    subject, body = draft_email(profile.name or "Candidate", job, llm, cv_master_md)
 
     cv_id = store.insert_cv_variant(
         CVVariant(job_id=job["id"], base_cv_id="master",

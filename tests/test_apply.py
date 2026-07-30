@@ -5,7 +5,7 @@ import json
 
 from jobagent.apply import approve_and_send, prepare_application
 from jobagent.apply.email_send import build_message, send_email
-from jobagent.apply.generators import cv_prompt, draft_email, email_prompt
+from jobagent.apply.generators import cv_prompt, draft_email
 from jobagent.core.schemas import ApplicationStatus, ApplyMethod, JobPosting, Source
 from jobagent.preferences import Profile
 from jobagent.store import Store
@@ -138,3 +138,88 @@ def test_build_message_attaches_existing_file(tmp_path):
     attachments = [p for p in msg.iter_attachments()]
     assert len(attachments) == 1
     assert attachments[0].get_filename() == "cv.pdf"
+
+
+# --- R1 hardening: the email must be grounded on the CV, not the job ad -----------
+
+def test_email_prompt_carries_the_cv_and_forbids_mirroring_requirements():
+    """A real run claimed 'over 8 years' and three technologies absent from the CV,
+    because the prompt supplied the job ad but no CV — leaving the employer's
+    requirements as the only facts available to assert."""
+    from jobagent.apply.generators import email_prompt
+
+    system, user = email_prompt("T", {"title": "AI Eng", "description": "8+ years. Rust."},
+                                "CV: 3 years Python.")
+    assert "CV: 3 years Python." in user                  # grounded
+    assert "requirements are NOT the candidate's background" in system
+    assert "unless it appears verbatim in the CV" in system
+
+
+def test_email_prompt_without_a_cv_forbids_all_claims():
+    from jobagent.apply.generators import email_prompt
+
+    _, user = email_prompt("T", {"title": "AI Eng", "description": "8+ years required"})
+    assert "NO CV WAS SUPPLIED" in user
+    assert "Make no claims about the candidate's background" in user
+
+
+def test_prepare_application_passes_the_cv_into_the_email():
+    """flow.prepare_application must thread the CV through — the whole guardrail
+    depends on it arriving."""
+    import inspect
+
+    import jobagent.apply.flow as flow
+    src = inspect.getsource(flow.prepare_application)
+    assert "draft_email(" in src and "cv_master_md" in src.split("draft_email(")[1][:80]
+
+
+# --- multi-line JSON must not leak into an email body -----------------------------
+
+def test_multiline_json_body_is_parsed_not_leaked():
+    """Models emit literal newlines inside JSON strings, which is invalid JSON. Strict
+    parsing sent the entire raw blob as the email body."""
+    from jobagent.apply.generators import draft_email
+
+    class MultilineLLM:
+        def complete(self, system, user, json_mode=False):
+            return '{"subject": "Application", "body": "Dear Hiring Manager,\n\nI am writing.\n\nRegards"}'
+
+    subject, body = draft_email("T", {"title": "AI Eng"}, MultilineLLM(), "CV")
+    assert subject == "Application"
+    assert body.startswith("Dear Hiring Manager,")
+    assert '"body"' not in body and not body.lstrip().startswith("{")
+
+
+def test_fenced_json_is_unwrapped():
+    from jobagent.apply.generators import draft_email
+
+    class FencedLLM:
+        def complete(self, system, user, json_mode=False):
+            return '```json\n{"subject": "S", "body": "B"}\n```'
+
+    assert draft_email("T", {"title": "X"}, FencedLLM(), "CV") == ("S", "B")
+
+
+def test_json_shaped_but_unparseable_never_returns_json_syntax():
+    """The fallback must hand back prose or nothing — never JSON braces."""
+    from jobagent.apply.generators import draft_email
+
+    class BrokenLLM:
+        def complete(self, system, user, json_mode=False):
+            return '{"subject": "S", "body": '        # truncated mid-object
+
+    subject, body = draft_email("T", {"title": "AI Eng"}, BrokenLLM(), "CV")
+    assert subject == "Application for AI Eng"
+    assert not body.lstrip().startswith("{") and '"subject"' not in body
+
+
+def test_plain_prose_reply_becomes_the_body():
+    from jobagent.apply.generators import draft_email
+
+    class ProseLLM:
+        def complete(self, system, user, json_mode=False):
+            return "Dear Hiring Manager, I am interested."
+
+    subject, body = draft_email("T", {"title": "AI Eng"}, ProseLLM(), "CV")
+    assert subject == "Application for AI Eng"
+    assert body == "Dear Hiring Manager, I am interested."
