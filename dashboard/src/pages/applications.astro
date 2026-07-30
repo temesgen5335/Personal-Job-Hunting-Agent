@@ -1,11 +1,14 @@
 ---
 import Layout from "../layouts/Layout.astro";
-import { getApplications, apiBase, publicApiBase, APPLICATION_STATUSES, type AppRow } from "../lib/api";
+import { getApplications, getFollowups, apiBase, publicApiBase, APPLICATION_STATUSES,
+         type AppRow, type Followup } from "../lib/api";
 
 let apps: AppRow[] = [];
+let followups: Followup[] = [];
 let error: string | null = null;
 try {
   apps = await getApplications(200);
+  followups = (await getFollowups(7)).followups;
 } catch (e) {
   error = (e as Error).message;
 }
@@ -17,6 +20,30 @@ const fmt = (s: string | null) => (s ? new Date(s).toLocaleString() : "—");
 <Layout title="Applications">
   <h1>Applications <span class="muted" style="font-size:14px">({apps.length})</span></h1>
   <p class="muted">Change a status to track outcomes (interview, offer, rejected). Saves instantly.</p>
+
+  {followups.length > 0 && (
+    <div class="panel stale">
+      <strong>⏰ {followups.length} application(s) awaiting a reply</strong>
+      <p class="muted" style="margin:4px 0 10px">
+        Submitted over a week ago with no outcome recorded. Drafting a nudge never sends
+        it — you get editable text to send yourself.
+      </p>
+      <table>
+        <thead><tr><th>Role</th><th>Company</th><th>Waiting</th><th></th></tr></thead>
+        <tbody>
+          {followups.map((f) => (
+            <tr>
+              <td>{f.title}</td>
+              <td class="muted">{f.company}</td>
+              <td class="muted">{f.days_waiting}d</td>
+              <td><button class="nudge-btn" data-id={f.id} data-days={f.days_waiting}>Draft nudge</button></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div id="nudge-out"></div>
+    </div>
+  )}
 
   {error && <div class="panel">⚠️ Can't reach the API at <code>{apiUrl}</code> — {error}</div>}
 
@@ -30,8 +57,13 @@ const fmt = (s: string | null) => (s ? new Date(s).toLocaleString() : "—");
             <td>{a.company}</td>
             <td class="muted">{a.apply_method}</td>
             <td>
-              <select class="status-select" data-id={a.id}>
-                {APPLICATION_STATUSES.map((s) => <option value={s} selected={s === a.status}>{s}</option>)}
+              <select class="status-select" data-id={a.id} data-prev={a.status}
+                      data-allowed={(a.allowed_next ?? []).join(",")}>
+                {APPLICATION_STATUSES.map((s) => (
+                  <option value={s} selected={s === a.status}>
+                    {s === a.status || (a.allowed_next ?? []).includes(s) ? s : `${s} (correction)`}
+                  </option>
+                ))}
               </select>
             </td>
             <td class="muted">{fmt(a.created_at)}</td>
@@ -45,17 +77,62 @@ const fmt = (s: string | null) => (s ? new Date(s).toLocaleString() : "—");
   </div>
 
   <script define:vars={{ publicUrl }}>
+    document.querySelectorAll(".nudge-btn").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const out = document.getElementById("nudge-out");
+        btn.disabled = true;
+        out.textContent = "Drafting…";
+        try {
+          const r = await fetch(`${publicUrl}/followups/${btn.dataset.id}/draft`, {
+            method: "POST", headers: window.JA.headers(),
+            body: JSON.stringify({ days_waiting: Number(btn.dataset.days) }),
+          });
+          if (!r.ok) throw new Error(window.JA.explain(r.status));
+          const d = await r.json();
+          // Deliberately no send control: the draft is text you copy and send.
+          out.innerHTML =
+            `<div class="draft"><div class="muted">To: ${d.to || "—"} · not sent</div>` +
+            `<input class="draft-subject" value="" /><textarea class="draft-body" rows="9"></textarea></div>`;
+          out.querySelector(".draft-subject").value = d.subject || "";
+          out.querySelector(".draft-body").value = d.body || "";
+        } catch (err) {
+          out.textContent = `Draft failed: ${err.message}`;
+        } finally {
+          btn.disabled = false;
+        }
+      });
+    });
+
     document.querySelectorAll(".status-select").forEach((el) => {
       el.addEventListener("change", async (e) => {
         const sel = e.target;
         const prev = sel.dataset.prev || sel.value;
+        const allowed = (sel.dataset.allowed || "").split(",").filter(Boolean);
+        // Out-of-process moves are possible but deliberate: confirm, then send the
+        // audited correction flag rather than silently rewriting history.
+        const isCorrection = sel.value !== prev && !allowed.includes(sel.value);
+        if (isCorrection && !confirm(
+              `"${prev}" → "${sel.value}" is not part of the normal process.\n\n` +
+              `Record it anyway as a correction? This is logged.`)) {
+          sel.value = prev;
+          return;
+        }
         try {
           const r = await fetch(`${publicUrl}/applications/${sel.dataset.id}`, {
             method: "PATCH", headers: window.JA.headers(),
-            body: JSON.stringify({ status: sel.value }),
+            body: JSON.stringify({ status: sel.value, correction: isCorrection }),
           });
-          if (!r.ok) throw new Error(window.JA.explain(r.status));
+          if (!r.ok) {
+            const body = await r.json().catch(() => null);
+            const d = body && body.detail;
+            throw new Error(
+              d && d.message ? `${d.message} Allowed: ${(d.allowed || []).join(", ") || "none"}`
+                             : window.JA.explain(r.status));
+          }
           sel.dataset.prev = sel.value;
+          // Refresh the legal set for the new status so the next edit is accurate.
+          const next = await r.json();
+          sel.dataset.allowed = (next.allowed_next || []).join(",");
         } catch (err) {
           alert(`Update failed: ${err.message}`);
           sel.value = prev;

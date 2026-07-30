@@ -81,6 +81,9 @@ export interface MatchRow {
   posted_at: string | null;
   score: number;
   rationale: string;
+  // Why this might not fit: level mismatch, missing must-have, exclusion, not remote.
+  // Surfaced in the list so triage does not need a click-through.
+  gaps: string[];
 }
 
 export interface MatchFilter {
@@ -115,6 +118,9 @@ export interface AppRow {
   submitted_at: string | null;
   url: string | null;
   apply_url: string | null;
+  // Legal next statuses, computed server-side so the transition map is never
+  // duplicated here. Anything outside this set needs an audited correction.
+  allowed_next: string[];
 }
 
 export async function getApplications(limit = 200): Promise<AppRow[]> {
@@ -155,3 +161,19 @@ export const APPLICATION_STATUSES = [
   "rejected", "interview", "offer", "skipped", "failed",
 ];
 
+export interface Followup {
+  id: string;
+  title: string;
+  company: string | null;
+  submitted_at: string;
+  days_waiting: number;
+  apply_email: string | null;
+  url: string | null;
+  apply_url: string | null;
+}
+
+// Submitted applications that have gone quiet. Read-only; drafting a nudge is a
+// separate, explicit action and nothing here can send mail.
+export async function getFollowups(afterDays = 7): Promise<{ followups: Followup[]; after_days: number }> {
+  return await getJSON(`/followups?after_days=${afterDays}`);
+}

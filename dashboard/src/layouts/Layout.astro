@@ -147,6 +147,23 @@ const isActive = (href: string) => (href === "/" ? path === "/" : path.startsWit
       .badge.interview { background: rgba(86,160,255,.14); color: var(--info); border-color: rgba(86,160,255,.3); }
       .badge.offer { background: rgba(227,160,8,.16); color: #f0b429; border-color: rgba(227,160,8,.32); }
       .badge.rejected, .badge.failed { background: rgba(248,81,73,.14); color: #ff6a60; border-color: rgba(248,81,73,.3); }
+      /* Shared chips. Values match the scoped copy in jobs/[id].astro so the fit
+         breakdown and the list read as one system. */
+      .chip { display: inline-block; margin: 0 4px 4px 0; padding: 3px 9px; border-radius: 8px;
+              font-size: 12.5px; border: 1px solid var(--border); color: var(--text); }
+      .chip.ok { background: rgba(63,185,80,.12); color: #5ad16b; border-color: rgba(63,185,80,.28); }
+      .chip.gap { background: rgba(227,160,8,.12); color: #e3a008; border-color: rgba(227,160,8,.28); }
+      .gaps { margin-top: 5px; }
+      button { font: inherit; padding: 5px 11px; border-radius: var(--radius-sm);
+               background: var(--hover); color: var(--text); border: 1px solid var(--border);
+               cursor: pointer; }
+      button:hover:not(:disabled) { border-color: var(--accent); color: var(--text-strong); }
+      button:disabled { opacity: .55; cursor: default; }
+      .draft { margin-top: 12px; }
+      .draft input, .draft textarea { width: 100%; margin-top: 6px; font: inherit;
+               background: var(--bg); color: var(--text); border: 1px solid var(--border);
+               border-radius: var(--radius-sm); padding: 8px 10px; }
+      .draft textarea { font-family: var(--mono); font-size: 12.5px; resize: vertical; }
       /* Pipeline health (M1). Semantic, never decorative: `bad`/`stale` mean something
          has actually stopped working and needs a look. */
       .badge.ok { background: rgba(74,222,128,.13); color: var(--good); border-color: rgba(74,222,128,.3); }
