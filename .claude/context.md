@@ -67,7 +67,10 @@ Two interfaces, one backend:
 | Weighted matching | Done (Tier 2) — skill weights, role-zone tiers, seniority + must-have checks |
 | Gap surfacing | Done (Tier 2) — gaps as chips in the dashboard job list |
 | Follow-up reminders | Done (Tier 2) — quiet-application list + drafted nudges (never sent) |
-| Test suite | 182 tests, 23 test files, zero network, injectable fakes throughout |
+| Run-ID spine | Done (Tier 3) — one id ingest→match→digest, run ledger, GET /runs + /runs/{id} |
+| Matching eval harness | Done (Tier 3) — 24 labeled traps, P@5=1.0 / P@10≥0.9 floors, tuning CLI |
+| Architecture doc | Done (Tier 3) — rewritten around the real system; legacy Hermes diagram gone |
+| Test suite | 199 tests, 25 test files, zero network, injectable fakes throughout |
 
 ## Known Gaps (from the July 2026 audit)
 
@@ -106,5 +109,5 @@ pipeline health, retry/backoff, docs truth-pass). Still open:
 
 - **11,700+** jobs scored in a live run (8,253 fetched in a single pass across 6 adapters)
 - **40** companies in the ATS watchlist (Greenhouse/Lever/Ashby)
-- **182** tests across 23 files — all run offline, no network, no credentials
+- **199** tests across 25 files — all run offline, no network, no credentials
 - **6** LLM providers with automatic failover (3 free, 3 paid)

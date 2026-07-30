@@ -121,6 +121,17 @@ Two durable lessons, now rules R1a/R1b:
    against a job ad the CV does not satisfy — that is the only way this class of bug
    becomes visible.
 
+## The eval harness's first catch (Tier 3)
+
+Built to guard ranking quality, it caught a live defect on its first run: a
+"Junior AI Engineer (Internship)" posting with perfect skill hits scored 0.580 and
+outranked the genuine "Founding Engineer" positive (0.405). The flat -0.20 seniority
+penalty could not beat a full role+skills stack. Fix: a level-mismatched title is not
+the target role, so the mismatch now dampens the role component itself (×0.3) on top
+of the penalty. Lesson: unit tests assert behaviors; only a ranked, labeled dataset
+asserts *quality* — and floors belong at measured reality, with known misses
+documented in the dataset rather than hidden by generous thresholds.
+
 ## Known Limitations
 
 - **No LinkedIn/Indeed/Glassdoor adapter.** These sites are aggressively anti-bot with
@@ -151,6 +162,9 @@ Two durable lessons, now rules R1a/R1b:
 | gov | `eb3e34b` | `.claude/` governance dir + `CLAUDE.md`/`AGENTS.md` entrypoints |
 | gov | `86a2c20` | Makefile runner (install / check / run) |
 | Tier 1 | `c876038`..`ba4e5f8` | Audit remediation: API auth on writes, CORS default, browser API URL, retry/backoff, pipeline health, PII split, docs truth-pass |
+| Tier 2 | `a41c592`..`ebf4567` (pre-scrub SHAs; rewritten) | Weighted matching, R1 email grounding, status lifecycle, follow-up drafts, gap chips |
+| scrub | `6a458d0` | History rewrite: CV blob + phone/email removed from all 37 commits |
+| Tier 3 | `65c4afc`.. | Run-ID spine + run ledger, matching eval harness (P@5=1.0 floor), honest ARCHITECTURE.md |
 
 ---
 

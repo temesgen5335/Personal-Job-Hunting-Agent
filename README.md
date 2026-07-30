@@ -30,7 +30,7 @@ Anthropic, or any OpenAI-compatible endpoint). See [docs/ARCHITECTURE.md](docs/A
 A **FastAPI orchestrator** sits between the interfaces and the data: the dashboard
 calls it over REST, and the bot calls the same service layer in-process.
 
-## Status: v2 complete (182 tests passing)
+## Status: v2 complete (199 tests passing)
 Ingestion · matching · Telegram bot (menu + filters) · Tier-1 email apply · Tier-2
 ATS form-fill · multi-LLM failover · FastAPI orchestrator · Astro dashboard with
 config UI, fit-checker, analytics, and pipeline health · VPS + GitHub Actions deploy.

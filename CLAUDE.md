@@ -34,7 +34,7 @@ make check          # preflight: env vars, free ports, store presence
 make run            # API (:8077) + dashboard (:4321), one Ctrl-C stops both
 make run_bot        # Telegram bot (separate long-lived process)
 make pipeline       # one ingest → match pass, no Telegram push
-make test           # 182 offline tests, no credentials needed
+make test           # 199 offline tests, no credentials needed
 
 # Single test file
 .venv/bin/python -m pytest tests/test_api.py -v
@@ -56,6 +56,8 @@ Writes need `DASHBOARD_PASSWORD` set — the API gates every non-GET route (R19)
 - **Health** (`store.pipeline_health()`) — staleness, error count, per-source freshness; bannered in the dashboard and the digest.
 - **Matching** (`matching/heuristic.py`) — preference-weighted: `skill_weights`, title-vs-body role tiers, seniority and must-have checks.
 - **Lifecycle** (`core/schemas.ALLOWED_TRANSITIONS`) — enforced status graph; `correction=true` overrides and audits.
+- **Run ledger** — every pipeline pass has a run_id on all its events; `GET /runs` lists summaries, `GET /runs/{id}` reconstructs a pass.
+- **Eval harness** (`matching/evalset.py`) — labeled ranking floors (P@5=1.0); `scripts/eval_matching.py` is the tuning loop.
 
 Full architecture + module map: `.claude/agent.md`
 
