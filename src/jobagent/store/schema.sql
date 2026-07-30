@@ -68,3 +68,14 @@ CREATE TABLE IF NOT EXISTS events (
     created_at  TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_events_kind ON events(kind);
+
+-- Per-job triage decisions (dashboard redesign). One row per job the user acted on:
+-- dismissed (hidden from the queue permanently), snoozed (hidden until a date), or
+-- just annotated. state NULL + note set = an annotated, still-live job.
+CREATE TABLE IF NOT EXISTS triage (
+    job_id        TEXT PRIMARY KEY REFERENCES jobs(id),
+    state         TEXT,                        -- 'dismissed' | 'snoozed' | NULL
+    snoozed_until TEXT,                        -- ISO ts; only for state='snoozed'
+    note          TEXT,
+    updated_at    TEXT NOT NULL
+);

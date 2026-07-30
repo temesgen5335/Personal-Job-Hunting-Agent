@@ -110,11 +110,22 @@ class Store:
                 "SELECT status, COUNT(*) AS n FROM applications GROUP BY status ORDER BY n DESC"
             )
         ]
+        self._ensure_triage()
+        # The triage queue: strong matches with no live decision. This is the number
+        # on the Jobs nav badge and the "not yet triaged" stat — the reason the
+        # dashboard gets opened in the morning.
+        queue = self.conn.execute(
+            "SELECT COUNT(*) AS n FROM matches m LEFT JOIN triage t ON t.job_id = m.job_id "
+            "WHERE m.score >= 0.7 AND (t.state IS NULL "
+            "  OR (t.state='snoozed' AND COALESCE(t.snoozed_until,'') <= ?))",
+            (_now(),),
+        ).fetchone()["n"]
         return {
             "total_jobs": self.count_jobs(),
             "by_source": by_source,
             "matches": matches,
             "strong_matches": strong,
+            "queue": queue,
             "last_ingest": last_ingest["created_at"] if last_ingest else None,
             "apps": apps,
             "total_apps": sum(a["n"] for a in apps),
@@ -273,12 +284,20 @@ class Store:
                 params.append(f"%{loc.lower()}%")
             where.append("(" + " OR ".join(ors) + ")")
 
+        self._ensure_triage()
         sql = (
-            "SELECT j.*, m.score, m.rationale, m.gaps FROM matches m "
-            "JOIN jobs j ON j.id = m.job_id WHERE " + " AND ".join(where)
+            "SELECT j.*, m.score, m.rationale, m.gaps, "
+            # Lapsed snoozes read as live directly in SQL so ordering and the
+            # dashboard queue agree with get_triage()'s view of the world.
+            "CASE WHEN t.state='snoozed' AND COALESCE(t.snoozed_until,'') <= ? THEN NULL "
+            "     ELSE t.state END AS triage_state, "
+            "t.snoozed_until AS triage_snoozed_until, t.note AS triage_note "
+            "FROM matches m JOIN jobs j ON j.id = m.job_id "
+            "LEFT JOIN triage t ON t.job_id = j.id "
+            "WHERE " + " AND ".join(where)
             + " ORDER BY m.score DESC LIMIT ? OFFSET ?"
         )
-        params += [limit, offset]
+        params = [_now()] + params + [limit, offset]
         return [dict(r) for r in self.conn.execute(sql, params).fetchall()]
 
     def get_job(self, job_id: str) -> dict | None:
@@ -422,6 +441,63 @@ class Store:
                 waited = after_days
             row["days_waiting"] = max(0, waited)
             out.append(row)
+        return out
+
+    # --- triage (dismiss / snooze / note) -----------------------------------
+    # The dashboard's queue is "strong matches you haven't decided on yet", so a
+    # decision has to be stored somewhere the next page load can see. Snoozes carry
+    # an expiry and lapse back to live on read — nothing re-arms them manually.
+
+    def _ensure_triage(self) -> None:
+        # Existing databases predate the table; keep reads/writes self-healing.
+        self.conn.execute(
+            "CREATE TABLE IF NOT EXISTS triage (job_id TEXT PRIMARY KEY REFERENCES jobs(id), "
+            "state TEXT, snoozed_until TEXT, note TEXT, updated_at TEXT NOT NULL)"
+        )
+
+    _KEEP = object()   # sentinel: "field not provided — keep what's stored"
+
+    def set_triage(self, job_id: str, *, state=_KEEP, snoozed_until=_KEEP, note=_KEEP) -> dict:
+        """Upsert one job's triage row. Omitted fields keep their stored value, so
+        noting a snoozed job keeps the snooze and re-snoozing keeps the note. Pass
+        None explicitly to clear a field."""
+        self._ensure_triage()
+        existing = self.get_triage(job_id) or {}
+        merged_state = existing.get("state") if state is self._KEEP else state
+        merged_until = existing.get("snoozed_until") if snoozed_until is self._KEEP else snoozed_until
+        merged_note = existing.get("note") if note is self._KEEP else note
+        self.conn.execute(
+            "INSERT INTO triage (job_id, state, snoozed_until, note, updated_at) "
+            "VALUES (?,?,?,?,?) ON CONFLICT(job_id) DO UPDATE SET "
+            "state=excluded.state, snoozed_until=excluded.snoozed_until, "
+            "note=excluded.note, updated_at=excluded.updated_at",
+            (job_id, merged_state, merged_until, merged_note, _now()),
+        )
+        self.conn.commit()
+        return self.get_triage(job_id) or {}
+
+    def clear_triage(self, job_id: str) -> None:
+        """Undo: back to live. The note survives — undoing a dismissal shouldn't
+        delete what you wrote about the job."""
+        self._ensure_triage()
+        row = self.get_triage(job_id)
+        if row and row.get("note"):
+            self.set_triage(job_id, state=None, snoozed_until=None)
+        else:
+            self.conn.execute("DELETE FROM triage WHERE job_id=?", (job_id,))
+            self.conn.commit()
+
+    def get_triage(self, job_id: str) -> dict | None:
+        self._ensure_triage()
+        row = self.conn.execute("SELECT * FROM triage WHERE job_id=?", (job_id,)).fetchone()
+        if not row:
+            return None
+        out = dict(row)
+        # A lapsed snooze reads as live. Report it as such rather than making every
+        # caller re-derive "snoozed but expired".
+        if out.get("state") == "snoozed" and (out.get("snoozed_until") or "") <= _now():
+            out["state"] = None
+            out["snoozed_until"] = None
         return out
 
     # --- advisory locks ----------------------------------------------------

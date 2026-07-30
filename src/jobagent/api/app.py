@@ -68,6 +68,12 @@ class FollowupReq(BaseModel):
     days_waiting: int | None = None
 
 
+class TriageReq(BaseModel):
+    action: str                     # dismiss | snooze | note | clear
+    days: int = 3                   # snooze horizon
+    note: str | None = None
+
+
 class StatusReq(BaseModel):
     status: str
     # Escape hatch for fixing a mis-click. Bypasses the transition map and logs an
@@ -257,6 +263,33 @@ def create_app(settings=None, profile=None, llm: Any = _UNSET, cv_master: str | 
         finally:
             s.close()
         return {"id": app_id, "status": body.status, "allowed_next": sorted(allowed_next(body.status))}
+
+    @app.post("/triage/{job_id}", dependencies=auth)
+    def triage(job_id: str, body: TriageReq):
+        """One decision per job: dismiss (hide from the queue), snooze (hide for N
+        days, lapses back on its own), note (annotate, stays live), clear (undo)."""
+        from datetime import datetime, timedelta, timezone
+
+        s = store()
+        try:
+            if not s.get_job(job_id):
+                raise HTTPException(404, "Job not found.")
+            if body.action == "dismiss":
+                row = s.set_triage(job_id, state="dismissed", snoozed_until=None)
+            elif body.action == "snooze":
+                until = (datetime.now(timezone.utc) + timedelta(days=max(1, body.days))).isoformat()
+                row = s.set_triage(job_id, state="snoozed", snoozed_until=until)
+            elif body.action == "note":
+                row = s.set_triage(job_id, note=body.note or "")
+            elif body.action == "clear":
+                s.clear_triage(job_id)
+                row = s.get_triage(job_id) or {"job_id": job_id, "state": None, "note": None}
+            else:
+                raise HTTPException(400, "action must be dismiss | snooze | note | clear")
+        finally:
+            s.close()
+        return {"job_id": job_id, "state": row.get("state"),
+                "snoozed_until": row.get("snoozed_until"), "note": row.get("note")}
 
     @app.get("/followups")
     def followups(after_days: int = 7):
