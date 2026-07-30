@@ -132,6 +132,15 @@ def heuristic_score(job: dict, profile: Profile) -> tuple[float, str, list[str]]
     # --- positive signals ---------------------------------------------------------
     role_strength, role_why = _role_signal(title, tags_text, text, profile)
 
+    # A level-mismatched title is not the target role: "Junior AI Engineer" matching
+    # "AI Engineer" is a false role signal, not a true one with a defect. A flat
+    # penalty alone let a junior/intern posting with perfect skill hits outrank
+    # genuine mid-senior positives (caught by the eval harness) — so the mismatch
+    # dampens the role component itself, and the flat penalty below still applies.
+    seniority_gap = _seniority_gap(title, profile)
+    if seniority_gap is not None and role_strength > 0:
+        role_strength *= 0.3
+
     skill_hits = _hits(profile.core_skills, text)
     matched_weight = sum(_weight_of(s, profile.skill_weights) for s in skill_hits)
     skill_cover = min(1.0, matched_weight / _SKILL_SATURATION)
@@ -165,8 +174,7 @@ def heuristic_score(job: dict, profile: Profile) -> tuple[float, str, list[str]]
             score -= _PENALTY_MUST_HAVE
             gaps.append(f"must-have not found: {must}")
 
-    # --- level mismatch -----------------------------------------------------------
-    seniority_gap = _seniority_gap(title, profile)
+    # --- level mismatch (gap computed above, where it dampens the role signal) -----
     if seniority_gap is not None:
         score -= _PENALTY_SENIORITY
         gaps.append(seniority_gap)
