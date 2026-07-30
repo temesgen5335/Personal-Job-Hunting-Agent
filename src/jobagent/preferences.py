@@ -68,9 +68,28 @@ class Preferences(BaseModel):
     sources: Sources = Field(default_factory=Sources)
 
 
-def load_preferences(path: str = DEFAULT_PATH) -> Preferences:
-    p = Path(path)
-    if not p.exists():
-        return Preferences()
-    data = tomllib.loads(p.read_text())
-    return Preferences(**data)
+def _merge(base: dict, overlay: dict) -> dict:
+    """Section-wise merge: overlay keys win, one level deep (matching the TOML shape)."""
+    out = dict(base)
+    for section, values in overlay.items():
+        if isinstance(values, dict) and isinstance(out.get(section), dict):
+            out[section] = {**out[section], **values}
+        else:
+            out[section] = values
+    return out
+
+
+def load_preferences(path: str = DEFAULT_PATH, local_path: str | None = None) -> Preferences:
+    """Load preferences, overlaid by a gitignored local file if present.
+
+    `preferences.toml` is committed and holds shareable search config (target roles,
+    skills, watchlist, source toggles). `preferences.local.toml` is gitignored and
+    holds identity — name, email, phone, cv_path — so a clone of this repo carries a
+    working search profile without carrying anyone's personal contact details.
+    Same split as `.env.example` vs `.env`.
+    """
+    base = tomllib.loads(Path(path).read_text()) if Path(path).exists() else {}
+    local = Path(local_path or str(path).replace(".toml", ".local.toml"))
+    if local.exists():
+        base = _merge(base, tomllib.loads(local.read_text()))
+    return Preferences(**base) if base else Preferences()

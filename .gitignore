@@ -27,6 +27,12 @@ data/
 artifacts/
 cv_master.md
 
+# Personal identity + CV — the committed config carries placeholders only (C2).
+config/preferences.local.toml
+docs/*CV*.pdf
+docs/*cv*.pdf
+
+
 
 # Dashboard (Astro / Node)
 dashboard/node_modules/
