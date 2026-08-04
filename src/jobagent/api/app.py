@@ -26,6 +26,7 @@ from jobagent.bot.service import MatchFilter, ranked_matches
 from jobagent.config import get_settings, reload_settings
 from jobagent.core.schemas import ApplicationStatus, Event, allowed_next, can_transition
 from jobagent.fit import assess_fit
+from jobagent.ingestion.gate import ALL_SOURCES, IngestGate, resolve_sources
 from jobagent.ingestion.registry import build_adapters
 from jobagent.ingestion.runner import run_ingestion
 from jobagent.llm_client import build_llm
@@ -91,7 +92,9 @@ def _token_for(password: str, master_key: str) -> str:
 def _ingest_task(db_path: str, settings, profile, llm, run_id: str) -> None:
     store = Store(db_path)
     try:
-        run_ingestion(build_adapters(settings), store, run_id=run_id)
+        # Same gate the scheduled pipeline uses — one seam, no drift.
+        run_ingestion(build_adapters(settings), store, run_id=run_id,
+                      gate=IngestGate.from_settings(get_settings()))
         run_matching(store, profile, llm=llm, run_id=run_id)
     finally:
         # The endpoint acquired the lock under this run_id before scheduling us.
@@ -198,12 +201,13 @@ def create_app(settings=None, profile=None, llm: Any = _UNSET, cv_master: str | 
     @app.get("/jobs")
     def jobs(days: int = 0, location: str = "any", q: str | None = None,
              exclude: str | None = None, include: str | None = None,
-             limit: int = 50, offset: int = 0):
+             sources: str | None = None, limit: int = 50, offset: int = 0):
         split = lambda v: [x.strip() for x in (v or "").split(",") if x.strip()]  # noqa: E731
         flt = MatchFilter(
             max_age_days=days or None, location=location,
             keywords=[w for w in (q or "").replace(",", " ").split() if w],
             exclude_locations=split(exclude), include_locations=split(include),
+            sources=split(sources),
         )
         s = store()
         try:
@@ -361,6 +365,23 @@ def create_app(settings=None, profile=None, llm: Any = _UNSET, cv_master: str | 
             s.close()
         bg.add_task(_ingest_task, settings.db_path, settings, profile, _llm(), run_id)
         return {"status": "started", "run_id": run_id}
+
+    @app.get("/sources")
+    def sources_view():
+        """Selectable ingest sources, which are enabled, and what is actually in the
+        store — the dashboard needs all three: the full set for the Settings picker,
+        the enabled set to preselect it, and the stored set for the Jobs visibility
+        filter (offering a source with zero stored jobs is just noise)."""
+        s = store()
+        try:
+            in_store = s.stats()["by_source"]
+        finally:
+            s.close()
+        return {
+            "available": ALL_SOURCES,
+            "enabled": sorted(resolve_sources(get_settings(), load_preferences().sources)),
+            "in_store": in_store,
+        }
 
     @app.get("/runs")
     def runs(limit: int = 20):

@@ -5,7 +5,8 @@
 // persist via POST /triage. Filters live in the URL (shareable) and are mirrored to
 // localStorage so a bare /jobs visit restores your last view.
 import Layout from "../layouts/Layout.astro";
-import { getMatches, apiBase, publicApiBase, type MatchRow } from "../lib/api";
+import { getMatches, getSources, apiBase, publicApiBase,
+         type MatchRow, type SourceInfo } from "../lib/api";
 
 const url = Astro.url;
 const q = url.searchParams.get("q") ?? "";
@@ -13,21 +14,30 @@ const within = url.searchParams.get("within") ?? "7d";
 const remote = url.searchParams.get("remote") ?? "any";
 const exclude = url.searchParams.get("exclude") ?? "";
 const page = Math.max(1, parseInt(url.searchParams.get("page") ?? "1", 10) || 1);
+// Repeated `sources=` params (checkbox group) rather than one comma string, so the
+// browser builds the query for free on submit.
+const pickedSources = url.searchParams.getAll("sources").filter(Boolean);
 const PAGE = 25;
 
 const days = within === "24h" ? 1 : within === "3d" ? 3 : within === "7d" ? 7 : 0;
 const excludeParam = exclude === "US-only" ? "US only" : exclude === "On-site" ? "on-site,onsite" : "";
 
 let rows: MatchRow[] = [];
+let sourceInfo: SourceInfo | null = null;
 let error: string | null = null;
 try {
   rows = await getMatches({
     days, location: remote as "any" | "remote" | "hybrid", q,
-    exclude: excludeParam, limit: 200, offset: 0,
+    exclude: excludeParam, sources: pickedSources.join(","), limit: 200, offset: 0,
   });
+  sourceInfo = await getSources();
 } catch (e) {
   error = (e as Error).message;
 }
+// Offer only sources that actually have stored jobs — a checkbox that can never
+// match anything is noise.
+const storedSources = Object.entries(sourceInfo?.in_store ?? {})
+  .sort((a, b) => b[1] - a[1]);
 
 const live = (j: MatchRow) => !j.triage_state;
 const queue = rows.filter((j) => j.score >= 0.7 && live(j));
@@ -72,6 +82,9 @@ if (q) chips.push({ label: `“${q}”`, href: linkWith({ q: "" }) });
 if (within !== "any") chips.push({ label: `posted < ${within === "24h" ? "24h" : within.replace("d", " days")}`, href: linkWith({ within: "any" }) });
 if (remote !== "any") chips.push({ label: remote, href: linkWith({ remote: "any" }) });
 if (exclude) chips.push({ label: `exclude ${exclude}`, href: linkWith({ exclude: "" }) });
+if (pickedSources.length) {
+  chips.push({ label: `sources: ${pickedSources.join(", ")}`, href: linkWith({ sources: "" }) });
+}
 
 const publicUrl = publicApiBase();
 const queueData = queue.map((j) => ({
@@ -122,6 +135,21 @@ const queueData = queue.map((j) => ({
           </select>
           <button class="btn" type="submit">Apply</button>
         </div>
+        {storedSources.length > 1 && (
+          <div class="src-row">
+            <span class="faint" style="font-size:11px">Sources</span>
+            {storedSources.map(([src, n]) => (
+              <label class="src-chip">
+                <input type="checkbox" name="sources" value={src}
+                       checked={pickedSources.includes(src)} />
+                <span>{src}</span><span class="src-n mono">{n}</span>
+              </label>
+            ))}
+            <span class="mono faint" style="font-size:11px;margin-left:auto">
+              {pickedSources.length ? `${pickedSources.length} selected` : "all shown"}
+            </span>
+          </div>
+        )}
         {chips.length > 0 && (
           <div class="chip-row">
             <span class="faint" style="font-size:11px;letter-spacing:.02em">Active</span>
@@ -279,8 +307,15 @@ const queueData = queue.map((j) => ({
     if (![...params.keys()].length) {
       try {
         const saved = JSON.parse(localStorage.getItem(FKEY) || "null");
-        if (saved && Object.values(saved).some((v) => v && v !== "7d" && v !== "any")) {
-          location.replace("/jobs?" + new URLSearchParams(saved).toString());
+        if (saved && Object.entries(saved).some(([k, v]) =>
+              k === "sources" ? (v || []).length : v && v !== "7d" && v !== "any")) {
+          const p = new URLSearchParams();
+          for (const [k, v] of Object.entries(saved)) {
+            // sources is a repeated param (checkbox group), not a comma string.
+            if (k === "sources") (v || []).forEach((x) => p.append("sources", x));
+            else if (v) p.set(k, v);
+          }
+          location.replace("/jobs?" + p.toString());
         }
       } catch {}
     } else {
@@ -288,6 +323,7 @@ const queueData = queue.map((j) => ({
         localStorage.setItem(FKEY, JSON.stringify({
           q: params.get("q") || "", within: params.get("within") || "7d",
           remote: params.get("remote") || "any", exclude: params.get("exclude") || "",
+          sources: params.getAll("sources").filter(Boolean),
         }));
       } catch {}
     }
@@ -436,6 +472,16 @@ const queueData = queue.map((j) => ({
   .filter-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
   .filter-row input[type="search"] { flex: 1; min-width: 180px; background: #0d0d0d; border: 1px solid var(--border); border-radius: 8px; padding: 7px 11px; font-size: 13px; color: var(--text); }
   .filter-row select { background: #0d0d0d; border: 1px solid var(--border); border-radius: 8px; padding: 7px 9px; font-size: 13px; color: var(--text); cursor: pointer; }
+  .src-row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
+  .src-chip {
+    display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+    border: 1px solid var(--border); background: #0d0d0d; border-radius: 999px;
+    padding: 3px 10px 3px 8px; font-size: 12px; font-family: var(--mono);
+  }
+  .src-chip:hover { border-color: #404040; }
+  .src-chip:has(input:checked) { border-color: rgba(125,211,252,.4); background: var(--accent-dim); color: var(--accent); }
+  .src-chip input { accent-color: var(--accent); margin: 0; }
+  .src-n { color: var(--faint); font-size: 10.5px; }
   .chip-row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
   .f-chip {
     display: inline-flex; align-items: center; gap: 6px; border: 1px solid rgba(125, 211, 252, 0.28);

@@ -34,7 +34,7 @@ make check          # preflight: env vars, free ports, store presence
 make run            # API (:8077) + dashboard (:4321), one Ctrl-C stops both
 make run_bot        # Telegram bot (separate long-lived process)
 make pipeline       # one ingest → match pass, no Telegram push
-make test           # 214 offline tests, no credentials needed
+make test           # 234 offline tests, no credentials needed
 
 # Single test file
 .venv/bin/python -m pytest tests/test_api.py -v
@@ -58,6 +58,7 @@ Writes need `DASHBOARD_PASSWORD` set — the API gates every non-GET route (R19)
 - **Lifecycle** (`core/schemas.ALLOWED_TRANSITIONS`) — enforced status graph; `correction=true` overrides and audits.
 - **Run ledger** — every pipeline pass has a run_id on all its events; `GET /runs` lists summaries, `GET /runs/{id}` reconstructs a pass.
 - **Eval harness** (`matching/evalset.py`) — labeled ranking floors (P@5=1.0); `scripts/eval_matching.py` is the tuning loop.
+- **Ingest gate** (`ingestion/gate.py`) — rejects postings before storage on age/location/keywords; source selection via `ingest_sources` (overrides `[sources]`). Editable in Settings; drops counted per reason. Never gate on fit — see R4a.
 - **Triage** (`store.set_triage` / `POST /triage/{job_id}`) — dismiss/snooze/note per job; the dashboard queue = strong ∧ untriaged; snoozes lapse on their own.
 
 Full architecture + module map: `.claude/agent.md`

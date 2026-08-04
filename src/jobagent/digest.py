@@ -66,6 +66,11 @@ def health_banner(report, health: dict) -> str:
         lines += [f"  • {r.source}: {r.error}" for r in failed]
     if report.total_fetched == 0:
         lines.append("⚠️ No postings fetched from any source — check credentials/network.")
+    elif getattr(report, "total_dropped", 0) and report.total_dropped == report.total_fetched:
+        # Sources answered but the gate rejected every posting — almost always a
+        # mis-set filter, and indistinguishable from a dead pipeline without this.
+        lines.append(f"⚠️ The ingest gate filtered out all {report.total_fetched} fetched "
+                     f"postings ({report.drops_by_reason}) — check your ingest filters.")
     stale = [s["source"] for s in health.get("sources", []) if (s.get("hours_since") or 0) > 48]
     if stale:
         lines.append(f"⚠️ No new data in 48h+ from: {', '.join(stale)}")

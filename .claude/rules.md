@@ -40,6 +40,16 @@ manual completion. Never solve CAPTCHAs. Detection uses rendered DOM elements
 
 ## Data Integrity
 
+**R4a — The ingest gate may drop whole postings, but only on stable axes.**
+R4 protects *fields within* a job you keep; the ingest gate decides whether to keep a
+posting at all, which is a different axis — and unlike scoring, it is irreversible. So
+the gate is limited to facts the user will not change their mind about (age, location,
+hard-exclusion keywords) and must never filter on fit judgment (skills, seniority,
+requirements): the scorer handles those reversibly and for free, so a preference change
+re-ranks the existing store instead of needing a re-fetch. Every drop is counted per
+reason in the ingest event and run summary — a mis-set gate must read as "481 filtered",
+never as an empty queue.
+
 **R4 — Never discard source data.**
 Every adapter stores the full source payload in `JobPosting.raw`. Normalized fields
 are additive, not lossy.

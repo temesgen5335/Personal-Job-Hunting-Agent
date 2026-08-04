@@ -10,6 +10,7 @@ from jobagent.ingestion.adapters.remoteok import RemoteOKAdapter
 from jobagent.ingestion.adapters.remotive import RemotiveAdapter
 from jobagent.ingestion.adapters.telegram import TelegramAdapter
 from jobagent.ingestion.base import BaseAdapter
+from jobagent.ingestion.gate import resolve_sources
 from jobagent.ingestion.util import split_slugs
 from jobagent.preferences import load_preferences
 
@@ -27,9 +28,14 @@ def _merge(*lists: list[str]) -> list[str]:
 
 
 def build_adapters(settings) -> list[BaseAdapter]:
-    """Company watchlist + per-source toggles come from config/preferences.toml; env
-    vars supplement slugs/channels. A source disabled in [sources] is dropped here;
-    enabled ones still self-gate on creds/slugs via their `enabled` property."""
+    """Company watchlist comes from config/preferences.toml; env vars supplement
+    slugs/channels.
+
+    Which sources run is resolved by `gate.resolve_sources`: the dashboard-editable
+    `ingest_sources` wins when set, otherwise `[sources]` in preferences.toml. A source
+    excluded there is dropped here; included ones still self-gate on creds/slugs via
+    their own `enabled` property, so selecting Telegram without credentials is a no-op
+    rather than an error."""
     prefs = load_preferences()
     wl, src = prefs.watchlist, prefs.sources
     all_adapters = [
@@ -46,4 +52,5 @@ def build_adapters(settings) -> list[BaseAdapter]:
             limit=settings.telegram_fetch_limit,
         ),
     ]
-    return [a for a in all_adapters if src.is_enabled(a.source.value)]
+    allowed = resolve_sources(settings, src)
+    return [a for a in all_adapters if a.source.value in allowed]

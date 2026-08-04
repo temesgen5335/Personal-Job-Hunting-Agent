@@ -24,6 +24,8 @@ MANAGED_FIELDS = [
     "telegram_bot_token", "telegram_chat_id", "telegram_api_id", "telegram_api_hash",
     "telegram_phone", "telegram_channels",
     "smtp_host", "smtp_port", "smtp_user", "smtp_password", "apply_from_email",
+    # Ingest gate + source selection (non-secret, but same UI-editable surface).
+    "ingest_max_age_days", "ingest_locations", "ingest_drop_keywords", "ingest_sources",
 ]
 # Fields masked in any read-back (never return the plaintext value).
 SECRET_FIELDS = {

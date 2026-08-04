@@ -98,6 +98,7 @@ export interface MatchFilter {
   q?: string;
   exclude?: string;   // comma-separated locations to drop
   include?: string;   // comma-separated locations to keep-only
+  sources?: string;   // comma-separated source slugs to keep-only
   limit?: number;
   offset?: number;
 }
@@ -109,6 +110,7 @@ export async function getMatches(f: MatchFilter = {}): Promise<MatchRow[]> {
   if (f.q) p.set("q", f.q);
   if (f.exclude) p.set("exclude", f.exclude);
   if (f.include) p.set("include", f.include);
+  if (f.sources) p.set("sources", f.sources);
   p.set("limit", String(f.limit ?? 50));
   if (f.offset) p.set("offset", String(f.offset));
   return (await getJSON(`/jobs?${p.toString()}`)).jobs;
@@ -182,4 +184,15 @@ export interface Followup {
 // separate, explicit action and nothing here can send mail.
 export async function getFollowups(afterDays = 7): Promise<{ followups: Followup[]; after_days: number }> {
   return await getJSON(`/followups?after_days=${afterDays}`);
+}
+
+export interface SourceInfo {
+  available: string[];              // everything selectable
+  enabled: string[];                // what the next fetch will run
+  in_store: Record<string, number>; // stored job count per source
+}
+
+// Public read — used by the Jobs source filter and the Settings source picker.
+export async function getSources(): Promise<SourceInfo> {
+  return await getJSON("/sources");
 }

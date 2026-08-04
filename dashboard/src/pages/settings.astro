@@ -40,6 +40,22 @@ const apiUrl = publicApiBase();
   <script is:inline define:vars={{ apiUrl }}>
     const TOKEN_KEY = "jobagent_token";
     const GROUPS = [
+      // First group on purpose: this is the knob that decides what ever reaches the
+      // store, so it should not be buried under credential fields.
+      { title: "Ingestion filter", note:
+          "Applied between fetch and store — filtered postings never enter your store " +
+          "and never cost matching time. Blank = no filter. Fit judgment (skills, " +
+          "seniority) is deliberately NOT here: the scorer does that reversibly.",
+        fields: [
+          { k: "ingest_sources", label: "Sources to fetch", type: "multi",
+            hint: "Unchecking all falls back to [sources] in preferences.toml." },
+          { k: "ingest_max_age_days", label: "Max posting age (days)",
+            hint: "0 or blank = no age limit. Postings with no date are always kept." },
+          { k: "ingest_locations", label: "Keep only these locations", type: "list",
+            hint: "Comma-separated, any-match, e.g. remote, EMEA, Africa. \"remote\" also accepts the structured remote flag." },
+          { k: "ingest_drop_keywords", label: "Drop if it mentions", type: "list",
+            hint: "Comma-separated, e.g. unpaid, clearance required, US citizens only." },
+        ]},
       { title: "LLM", fields: [
         { k: "llm_provider", label: "Primary provider", type: "select",
           options: ["groq", "gemini", "openrouter", "custom", "openai", "anthropic"] },
@@ -90,13 +106,31 @@ const apiUrl = publicApiBase();
       } catch (e) { showError(`Can't reach API at ${apiUrl} — ${e.message}`); }
     }
 
-    function renderForm(cfg) {
+    function renderForm(cfg, sourceInfo) {
+      const esc = (t) => String(t == null ? "" : t).replace(/"/g, "&quot;");
       const html = GROUPS.map((g) => `
-        <section class="s-group"><div class="s-title">${g.title}</div><div class="s-fields">
+        <section class="s-group"><div class="s-title">${g.title}</div>
+        ${g.note ? `<p class="s-note">${g.note}</p>` : ""}
+        <div class="s-fields">
         ${g.fields.map((f) => {
           const v = cfg[f.k];
           let input, badge = "";
-          if (f.type === "select") {
+          if (f.type === "multi") {
+            // Checkbox chips rather than a <select multiple>: the whole point is
+            // seeing at a glance which sources are on.
+            const available = (sourceInfo && sourceInfo.available) || [];
+            const chosen = new Set(String(v || "").split(",").map((x) => x.trim()).filter(Boolean));
+            // Nothing stored → show what is actually resolved (the TOML fallback),
+            // so the boxes reflect the run that would happen right now.
+            const effective = chosen.size ? chosen : new Set((sourceInfo && sourceInfo.enabled) || []);
+            const counts = (sourceInfo && sourceInfo.in_store) || {};
+            input = `<span class="src-picker" id="f_${f.k}">` + available.map((o) => `
+              <label class="src-chip">
+                <input type="checkbox" value="${esc(o)}" ${effective.has(o) ? "checked" : ""} />
+                <span>${esc(o)}</span>
+                <span class="src-n mono">${counts[o] ? counts[o] : ""}</span>
+              </label>`).join("") + `</span>`;
+          } else if (f.type === "select") {
             input = `<select id="f_${f.k}">${f.options.map((o) =>
               `<option value="${o}" ${o === v ? "selected" : ""}>${o}</option>`).join("")}</select>`;
           } else if (f.secret) {
@@ -104,10 +138,10 @@ const apiUrl = publicApiBase();
             badge = `<span class="set-badge ${set ? "" : "no"}">${set ? "set" : "not set"}</span>`;
             input = `<input id="f_${f.k}" type="password" placeholder="${set ? "blank to keep" : "not set"}" autocomplete="off" />`;
           } else {
-            const val = v == null ? "" : String(v).replace(/"/g, "&quot;");
-            input = `<input id="f_${f.k}" type="text" value="${val}" class="mono" />`;
+            input = `<input id="f_${f.k}" type="text" value="${esc(v)}" class="mono" placeholder="${esc(f.placeholder || "")}" />`;
           }
-          return `<label class="field"><span>${labelOf(f)} ${badge}</span>${input}</label>`;
+          return `<label class="field"><span>${labelOf(f)} ${badge}</span>${input}` +
+                 (f.hint ? `<span class="f-hint">${f.hint}</span>` : "") + `</label>`;
         }).join("")}
         </div></section>`).join("");
       $("form").innerHTML = html;
@@ -118,7 +152,9 @@ const apiUrl = publicApiBase();
         const r = await fetch(`${apiUrl}/config`, { headers: headers() });
         if (r.status === 401 || r.status === 403) { localStorage.removeItem(TOKEN_KEY); return gate(); }
         if (!r.ok) return showError(`config load failed (${r.status})`);
-        renderForm((await r.json()).config);
+        // /sources is a public read; a failure there must not block the config form.
+        const sourceInfo = await fetch(`${apiUrl}/sources`).then((x) => x.json()).catch(() => null);
+        renderForm((await r.json()).config, sourceInfo);
         $("login").style.display = "none";
         $("config").style.display = "block";
       } catch (e) { showError(`Can't reach API at ${apiUrl} — ${e.message}`); }
@@ -128,6 +164,10 @@ const apiUrl = publicApiBase();
       const patch = {};
       for (const f of ALL) {
         const el = $(`f_${f.k}`); if (!el) continue;
+        if (f.type === "multi") {
+          patch[f.k] = [...el.querySelectorAll("input:checked")].map((c) => c.value).join(",");
+          continue;
+        }
         const val = el.value.trim();
         if (SECRET.has(f.k)) { if (val) patch[f.k] = val; }   // blank secret = keep existing
         else patch[f.k] = val;
@@ -136,8 +176,9 @@ const apiUrl = publicApiBase();
       try {
         const r = await fetch(`${apiUrl}/config`, { method: "PUT", headers: headers(), body: JSON.stringify({ values: patch }) });
         if (!r.ok) { $("save-msg").textContent = `error ${r.status}`; return; }
-        renderForm((await r.json()).config);
-        $("save-msg").textContent = "saved ✓";
+        const sourceInfo = await fetch(`${apiUrl}/sources`).then((x) => x.json()).catch(() => null);
+        renderForm((await r.json()).config, sourceInfo);
+        $("save-msg").textContent = "saved ✓ · applies to the next fetch";
         setTimeout(() => { $("save-msg").textContent = ""; }, 2500);
       } catch (e) { showError(e.message); }
     }
@@ -162,4 +203,18 @@ const apiUrl = publicApiBase();
   }
   .s-title { font-size: 12px; color: var(--strong); margin-bottom: 14px; }
   .s-fields { display: grid; gap: 12px; }
+  .s-note { font-size: 12px; color: var(--muted); line-height: 1.55; margin: -6px 0 14px; }
+  .f-hint { display: block; font-size: 11.5px; color: var(--faint); margin-top: 5px; line-height: 1.5; }
+  .src-picker { display: flex; flex-wrap: wrap; gap: 6px; }
+  .src-chip {
+    display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+    border: 1px solid var(--border); background: #0d0d0d; border-radius: 999px;
+    padding: 4px 11px 4px 9px; font-size: 12.5px; font-family: var(--mono);
+  }
+  .src-chip:hover { border-color: var(--border-2, #404040); }
+  .src-chip:has(input:checked) {
+    border-color: rgba(125, 211, 252, 0.4); background: var(--accent-dim); color: var(--accent);
+  }
+  .src-chip input { accent-color: var(--accent); margin: 0; }
+  .src-n { color: var(--faint); font-size: 10.5px; }
 </style>

@@ -22,6 +22,7 @@ from jobagent.bot.service import jobs_text  # noqa: E402
 from jobagent.config import get_settings  # noqa: E402
 from jobagent.core.schemas import Event  # noqa: E402
 from jobagent.digest import format_followups, health_banner  # noqa: E402
+from jobagent.ingestion.gate import IngestGate  # noqa: E402
 from jobagent.ingestion.registry import build_adapters  # noqa: E402
 from jobagent.ingestion.runner import run_ingestion  # noqa: E402
 from jobagent.llm_client import build_llm  # noqa: E402
@@ -55,9 +56,15 @@ def main() -> None:
     print(f"[run] {run_id}")
     try:
 
-        # 1) Ingest
-        report = run_ingestion(build_adapters(settings), store, run_id=run_id)
-        print(f"[ingest] {report.total_new} new / {report.total_fetched} fetched")
+        # 1) Ingest — the gate rejects postings before they are stored.
+        gate = IngestGate.from_settings(settings)
+        adapters = build_adapters(settings)
+        print(f"[ingest] sources: {', '.join(a.source.value for a in adapters) or 'none'}")
+        print(f"[ingest] gate: {gate.describe()}")
+        report = run_ingestion(adapters, store, run_id=run_id, gate=gate)
+        print(f"[ingest] {report.total_new} new / {report.total_fetched} fetched"
+              + (f" / {report.total_dropped} filtered {report.drops_by_reason}"
+                 if report.total_dropped else ""))
         for r in report.results:
             if r.error:
                 print(f"[ingest]   {r.source}: ERROR {r.error}")
@@ -98,6 +105,9 @@ def main() -> None:
             "run_id": run_id,
             "duration_s": round(time.monotonic() - started, 1),
             "ingest": {"fetched": report.total_fetched, "new": report.total_new,
+                       "dropped": report.total_dropped, "drops": report.drops_by_reason,
+                       "gate": gate.describe(),
+                       "sources": [a.source.value for a in adapters],
                        "errors": [r.source for r in report.results if r.error]},
             "match": {"scored": mreport.scored, "llm_reranked": mreport.llm_reranked},
             "digest": digest_status,

@@ -247,11 +247,13 @@ class Store:
         keywords: list[str] | None = None,
         exclude_locations: list[str] | None = None,
         include_locations: list[str] | None = None,
+        sources: list[str] | None = None,
         offset: int = 0,
     ) -> list[dict]:
         """Ranked matches with filters: recency, location mode (remote/hybrid/any),
         keyword OR-match, exclude_locations (drop), include_locations (keep-only),
-        and pagination via offset."""
+        sources (keep-only, for the dashboard's per-source visibility toggle), and
+        pagination via offset."""
         where = ["m.score >= ?"]
         params: list = [min_score]
 
@@ -283,6 +285,12 @@ class Store:
                 ors.append("LOWER(COALESCE(j.location,'')) LIKE ?")
                 params.append(f"%{loc.lower()}%")
             where.append("(" + " OR ".join(ors) + ")")
+
+        if sources:
+            # Exact match on the source slug — not LIKE, so "lever" can never also
+            # select a future "lever-eu".
+            where.append("j.source IN (" + ",".join("?" for _ in sources) + ")")
+            params += [s.lower() for s in sources]
 
         self._ensure_triage()
         sql = (

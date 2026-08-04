@@ -25,6 +25,15 @@ class Settings(BaseSettings):
             return None
         return v
 
+    # The gate's age limit is a non-optional int where 0 means "no limit", so a blank
+    # from the dashboard form (or CI) must become 0, not None.
+    @field_validator("ingest_max_age_days", mode="before")
+    @classmethod
+    def _blank_int_to_zero(cls, v):
+        if v is None or (isinstance(v, str) and v.strip() == ""):
+            return 0
+        return v
+
     # --- LLM: multi-provider with failover (see jobagent/llm_client.py) ---
     # Primary provider; the rest become automatic backups. Free providers stay as
     # backups even after you add a paid one and point LLM_PROVIDER at it.
@@ -58,6 +67,16 @@ class Settings(BaseSettings):
     cors_origins: str = Field(
         "http://localhost:4321,http://127.0.0.1:4321", alias="JOBAGENT_CORS_ORIGINS"
     )
+
+    # --- Ingest gate (dashboard-editable; see ingestion/gate.py) -------------------
+    # Applied between fetch and store, so filtered postings never enter the store and
+    # never cost matching time on later passes. Comma-separated lists; all blank/0 =
+    # store everything (the pre-gate behavior).
+    ingest_max_age_days: int = Field(0, alias="INGEST_MAX_AGE_DAYS")     # 0 = no age limit
+    ingest_locations: str = Field("", alias="INGEST_LOCATIONS")          # e.g. remote,EMEA,Africa
+    ingest_drop_keywords: str = Field("", alias="INGEST_DROP_KEYWORDS")
+    # Sources allowed to run. Blank = fall back to [sources] in preferences.toml.
+    ingest_sources: str = Field("", alias="INGEST_SOURCES")
 
     # Telegram — channel reader (Telethon)
     telegram_api_id: int | None = Field(None, alias="TELEGRAM_API_ID")
@@ -112,7 +131,8 @@ def _build_effective() -> Settings:
         fields = set(Settings.model_fields)
         update = {k: v for k, v in overlay.items() if k in fields and v not in (None, "")}
         # model_copy bypasses validation — coerce numeric fields the UI stores as strings.
-        int_fields = {"telegram_chat_id", "telegram_api_id", "telegram_owner_id", "smtp_port"}
+        int_fields = {"telegram_chat_id", "telegram_api_id", "telegram_owner_id", "smtp_port",
+                      "ingest_max_age_days"}
         for k in list(update):
             if k in int_fields and isinstance(update[k], str) and update[k].strip().lstrip("-").isdigit():
                 update[k] = int(update[k])

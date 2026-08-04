@@ -31,6 +31,7 @@ class MatchFilter:
     keywords: list[str] = field(default_factory=list)
     exclude_locations: list[str] = field(default_factory=list)  # drop if location matches
     include_locations: list[str] = field(default_factory=list)  # keep-only if set
+    sources: list[str] = field(default_factory=list)            # keep-only if set
     min_score: float = 0.0
 
     @classmethod
@@ -83,7 +84,7 @@ def ranked_matches(store: Store, n: int = 10, flt: MatchFilter | None = None, of
         limit=max(n * 8, 40), min_score=flt.min_score,
         max_age_days=flt.max_age_days, location=flt.location, keywords=flt.keywords,
         exclude_locations=flt.exclude_locations, include_locations=flt.include_locations,
-        offset=offset,
+        sources=flt.sources, offset=offset,
     )
     return diversify(pool, n, max_per_company=2)
 
