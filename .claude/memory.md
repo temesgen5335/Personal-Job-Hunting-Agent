@@ -295,6 +295,45 @@ browser: the page's own `confirmCard` closure — it needs a real pending approv
 needs a tool loop, which needed Groq, whose tokens-per-day limit I exhausted during
 testing. The server half of that flow is covered by a test that changes real DB state.
 
+## Phase 5: the eval found a real hole in the degradation story (Aug 2026)
+
+The eval set exists to catch what the suite cannot, and it did so on its first run —
+which is the second time a harness in this project has earned its keep immediately
+(`matching/evalset.py` was the first).
+
+**The finding: `prefetch_single_shot` was answering the wrong questions.** The prefetch
+was *fixed* — always health + recent runs — so on the degraded path the model never
+chose a tool at all. Every question needing something else (follow-ups, config, search,
+hand-back-to-human) was unanswerable. Measured selection: **50%**. The degradation story
+was half true and would have stayed that way, because the suite tests that prefetch
+*runs*, not that it fetches the *right* thing. Fixed by making the prefetch
+question-aware — crude keyword routing in Python, which beats a model that cannot route
+at all. Re-measured: **100%**.
+
+**Two defects in the harness itself**, both of which would have made its numbers lie:
+
+1. It printed `grounding 100%` over **zero** graded cases. A vacuous pass is worse than
+   no measurement, because it reassures. Now reports `n/a` and the rate is `None`, not
+   `1.0`.
+2. It scored a *correct* answer as a miss: the model wrote `12,971`, the store said
+   `12971`. An eval that fails a right answer sends you hunting a bug that is not there.
+   Digit separators are now normalized on both sides.
+
+**And one in the diagnostic.** `llm_doctor --probe` reported Groq "reachable" when it
+could not serve a real request — the probe was one tiny call, and with tokens-per-day
+nearly spent, "reply ok" fits where a system prompt plus fourteen tool schemas does not.
+A doctor that says you are fine when you are not is worse than none, since it is
+consulted precisely when something is already wrong. It now probes at realistic size too.
+
+**Measured, degraded path** (prefetch_single_shot on gpt-oss-20b, tool support unproven):
+selection 100%, grounding 100%, in-bounds 100%. Floors set just under that.
+
+**Not measured: the undegraded `native_loop` path.** All three free providers hit daily
+limits, partly because these eval runs drained them. Related measurement worth keeping:
+one loop turn sends ~1,258 tokens, **1,047 of which are tool schemas resent every turn**
+— so a 5-step answer costs ~8k tokens against ~350 on the prefetch path. That is the
+first thing to attack if cost matters; `GuardedToolBox.allowed` already exists for it.
+
 ## Known Limitations
 
 - **No LinkedIn/Indeed/Glassdoor adapter.** These sites are aggressively anti-bot with
@@ -331,7 +370,8 @@ testing. The server half of that flow is covered by a test that changes real DB 
 | agentkit P1 | `3166413`..`d4a4255` | Capability-aware multi-LLM: IR, tier registry, breaker, router, nine strategies, Runner. 386 tests |
 | agentkit P2 | `f656906` | Permission tiers, FTS5 knowledge, fail-closed audit, GuardedToolBox. 425 tests |
 | assistant P3 | `a05b4ba` | 14 in-process tools, R2 exclusions, CONFIG_WRITABLE + computed frozen, impact previews, snapshots, fenced retrieval. 463 tests |
-| interfaces P4 | (this) | CLI + dashboard page + Telegram /ask; run-ledger separation. 489 tests |
+| interfaces P4 | `3464136` | CLI + dashboard page + Telegram /ask; run-ledger separation. 489 tests |
+| hardening P5 | (this) | Assistant eval set + floors, llm_doctor, question-aware prefetch. 509 tests |
 
 ---
 

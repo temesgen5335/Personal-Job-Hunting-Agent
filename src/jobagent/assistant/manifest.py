@@ -38,6 +38,27 @@ Rules you must follow:
 Answer briefly."""
 
 
+# Always gathered: nearly every question about this system is partly a question about
+# whether it is running.
+PREFETCH_BASE: tuple[str, ...] = ("pipeline_health", "recent_runs")
+
+# (keywords, tool, args-builder). First-match-wins is deliberately NOT used — a question
+# can legitimately need two of these, and over-fetching costs context, not correctness.
+PREFETCH_ROUTES: tuple[tuple[tuple[str, ...], str, object], ...] = (
+    (("match", "queue", "ignoring", "strong", "score", "job", "role", "posting"),
+     "top_matches", lambda q: {"min_score": 0.6}),
+    (("application", "applied", "sent", "interview", "offer", "reject"),
+     "applications", lambda q: {}),
+    (("follow", "waiting", "nudge", "chase", "heard back", "silent"),
+     "needs_followup", lambda q: {}),
+    (("setting", "config", "filter", "gate", "provider", "model", "key", "locations"),
+     "current_config", lambda q: {}),
+    (("mention", "search", "find", "which posting", "any posting", "keyword",
+      "kubernetes", "rust", "python", "described"),
+     "search_postings", lambda q: {"query": q}),
+)
+
+
 def default_links(base_url: str = "http://localhost:4321"):
     """Deep links into the dashboard, so `request_human_action` hands over a place to
     go rather than an instruction to go looking."""
@@ -66,16 +87,30 @@ class Assistant:
         """The TaskSpec for one question.
 
         `prefetch` is what lets this answer on a model that cannot run a tool loop: it
-        gathers the standard picture in Python — health, recent runs — so a weak model
-        only has to write the answer. Most questions asked of this system are about
-        exactly that picture.
+        gathers context in Python so a weak model only has to write the answer.
+
+        It is **question-aware**, and that is not a refinement — it is the difference
+        between the degradation story being true and being half true. A fixed prefetch
+        (health + recent runs) scored 50% on the eval set: every question needing a
+        different tool was unanswerable on the degraded path, because the model never
+        gets to choose. Routing by keyword is crude, but crude deterministic routing
+        beats a model that cannot route at all, and the baseline still runs so a
+        misrouted question is no worse off than before.
         """
         def prefetch(inputs, toolbox) -> str:
             from agentkit.llm.types import ToolCall
+
+            question = str(inputs.get("prompt", "")).lower()
+            names = list(PREFETCH_BASE)
+            for keywords, tool, args in PREFETCH_ROUTES:
+                if any(k in question for k in keywords):
+                    names.append((tool, args(question)))
+
             parts = []
-            for name in ("pipeline_health", "recent_runs"):
-                res = toolbox.execute(ToolCall(f"pf_{name}", name, {}))
-                parts.append(f"## {name}\n{res.content}")
+            for entry in names:
+                tool, args = entry if isinstance(entry, tuple) else (entry, {})
+                res = toolbox.execute(ToolCall(f"pf_{tool}", tool, args))
+                parts.append(f"## {tool}\n{res.content}")
             return "\n\n".join(parts)
 
         return TaskSpec(

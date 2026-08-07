@@ -18,7 +18,7 @@ PY           := $(VENV)/bin/python
 API_PORT     ?= 8077
 DASH_PORT    ?= 4321
 
-.PHONY: install run run_backend run_bot run_dashboard check test pipeline ask
+.PHONY: install run run_backend run_bot run_dashboard check test pipeline ask doctor eval_assistant
 
 install: ## backend + dashboard deps (idempotent)
 	@if command -v uv >/dev/null 2>&1; then \
@@ -57,6 +57,12 @@ run_backend: ## API only (uvicorn on $(API_PORT))
 
 run_bot: ## telegram bot only (long-polling)
 	$(PY) scripts/run_bot.py
+
+doctor: ## explain the LLM chain, model cards, and routing per task (offline)
+	@$(PY) scripts/llm_doctor.py $(if $(PROBE),--probe)
+
+eval_assistant: ## run the assistant eval set (spends LLM quota)
+	@$(PY) scripts/eval_assistant.py $(if $(WEAK),--weak) --floors
 
 ask: ## ask the assistant, e.g. make ask Q="is the pipeline healthy?"
 	@$(PY) scripts/ask.py $(if $(EXPLAIN),--explain) "$(Q)"
