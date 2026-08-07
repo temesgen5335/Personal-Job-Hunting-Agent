@@ -396,6 +396,40 @@ When one module reads `os.environ` and the rest read a settings object, the dive
 shows up as "I set it and it says it is not set" — the most confusing failure shape
 there is.
 
+## Assistant chat bubble — one client, two surfaces (Aug 2026)
+
+The floating bubble and the `/assistant` page are the *same conversation*, and the only
+way to make that true rather than aspirational was to give them nothing of their own.
+`dashboard/src/lib/assistant.ts` owns the session and renders the thread; both surfaces
+are thin frames that call `mount()`. There is no incremental render path one could take
+and the other miss, and no second copy of the ask/confirm logic to drift.
+
+- **Continuity is the localStorage session, not shared component state.** Every mutation
+  writes `jobagent_assistant_session` and notifies every mount; a `storage` event keeps
+  separate tabs in step too. Verified live: asked in the bubble on /jobs, opened
+  /assistant, the exchange was already there; added a turn from the page side, it
+  appeared in the bubble on the next page. "New chat" clears the key on both.
+- **The bubble is hidden on /assistant** — a floating copy of the page you are looking
+  at is clutter, and the check is `pathname.startsWith("/assistant")`.
+- **Turns are stored as data and rendered through `textContent` on every path.** Answers
+  quote job descriptions and channel text written by strangers; `innerHTML` there would
+  be XSS with extra steps. Same reason the confirm card renders only server-computed
+  values.
+- **Confirmations keep the Phase-4 property.** The client holds only the nonce; the
+  arguments stay server-side, so confirm-then-swap has no field to happen in — true on
+  the bubble exactly as on the page, because it is the same code.
+- **UX details that matter:** auto-scroll only when already at the bottom (never yank a
+  reader away); reopen where left off (persisted open-state); ⌘K toggle + Esc close;
+  drag the top-left grip to resize (pointer events, persisted, clamped to the viewport);
+  a full-screen sheet under 560px because a 400px card on a 390px screen is worse than
+  taking the screen. All verified in a real browser.
+
+Gotcha worth keeping: the browser-tool JS context reported `getBoundingClientRect()` as
+0 for a visibly-rendered panel — a measurement artifact of that context, not a layout
+bug. Confirmed by screenshot and by reading the persisted inline style (540×600), not
+by trusting the number. When an automated measurement disagrees with a screenshot,
+believe the screenshot.
+
 ## Known Limitations
 
 - **No LinkedIn/Indeed/Glassdoor adapter.** These sites are aggressively anti-bot with
@@ -435,7 +469,8 @@ there is.
 | interfaces P4 | `3464136` | CLI + dashboard page + Telegram /ask; run-ledger separation. 489 tests |
 | hardening P5 | `271af44` | Assistant eval set + floors, llm_doctor, question-aware prefetch. 509 tests |
 | systest | `413272a` | Full-system exercise: /jobs payload, 503 on exhaustion, config-write UX. 512 tests |
-| secretfix | (this) | SecretStore reads .env; presence-not-truthiness override. 515 tests |
+| secretfix | `bfe474a` | SecretStore reads .env; presence-not-truthiness override. 515 tests |
+| chat-bubble | (this) | Floating assistant on every page; shared client + session with /assistant. Dashboard-only, no test-count change |
 
 ---
 

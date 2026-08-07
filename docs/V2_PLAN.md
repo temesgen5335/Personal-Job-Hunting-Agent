@@ -1,3 +1,7 @@
+> **Historical.** This is the v2 build plan, kept for provenance. It is not
+> maintained. For what the system is today see `.claude/context.md`;
+> for how it works see `docs/ARCHITECTURE.md`.
+
 # v2 Plan — Configurable, reusable, fit-aware
 
 v1 (tagged `v1.0.0`) is complete and working: ingestion → matching → Telegram bot →

@@ -48,6 +48,52 @@ The bot calls the service layer **in-process** (no HTTP hop); the dashboard call
 REST API. Both read and write the same store, and every write path funnels through
 the same service functions.
 
+## The agent harness
+
+Added Aug 2026, in two packages whose separation is the whole point:
+
+```
+   CLI  ·  /assistant page  ·  Telegram /ask        three renderers, one mechanism
+                     │
+                     ▼
+   ┌──────────────────────────────────────┐   supplies tools, knowledge,
+   │  jobagent/assistant  (DOMAIN)        │   prompts, policy — via a manifest
+   │  14 in-process tools · CONFIG_       │
+   │  WRITABLE · FTS5 over postings       │
+   └───────────────────┬──────────────────┘
+                       ▼
+   ┌──────────────────────────────────────┐   stdlib + pydantic only.
+   │  agentkit  (DOMAIN-AGNOSTIC)         │   NEVER imports jobagent (R30)
+   │  capability routing · 9 strategies · │
+   │  governed toolbox · fail-closed audit│
+   └──────────────────────────────────────┘
+```
+
+**Route before you run.** `resolve_card()` answers what a model can do — a measured
+entry, else a family pattern, else the parameter count in its name, else UNKNOWN
+(treated as WEAK, never assumed capable). `plans_for()` filters by that and returns a
+ranked queue which *is* the failover queue, so a fallback can never land on a model
+that would silently do the job badly. The configured `LLM_PROVIDER` no longer decides
+admission — only ties.
+
+**Degrade by changing how, not what.** Nine strategies share one signature. The
+load-bearing one moves planning into Python and leaves the model only the write-up,
+so a model that emits perfect tool calls but cannot use a tool *result* still answers
+correctly. That distinction is measured, not assumed: llama-3.1-8b scores 5/5 on
+emitting and selecting, 0/5 on using the result.
+
+**Safety is structural, not procedural.** There is no tool that can send, submit or
+approve — those names are in an exclusion set and registering one raises at wiring
+time. Frozen configuration is the *computed complement* of a short allow-list, so a
+setting added next year is frozen the day it is added. The component that decides
+whether an action may run is given no access to the transcript or to retrieved text,
+so a prompt injection can make the model *ask* for something but cannot make the
+gatekeeper agree. Confirmations are server-side and bound to the exact arguments.
+
+Assistant sessions ride the existing run ledger (`kind_detail="agent_session"`), so
+they are auditable with no new storage — and are filtered out of `list_runs()` by
+default, because a session has no ingest counts and would render as a blank pass.
+
 ## The two-Telegrams rule (most important design point)
 "Telegram" plays two unrelated roles and needs two different mechanisms:
 
@@ -133,8 +179,19 @@ report, and a failed digest send is reported in the run summary rather than cras
 the pass.
 
 ## Tech stack
-Python 3.11+ · pydantic v2 · **FastAPI** (orchestrator, :8077) · SQLite (→ Postgres
-if ever needed) · Telethon + python-telegram-bot · Playwright (Tier 2) ·
-multi-provider LLM failover (Groq/Gemini/OpenRouter/OpenAI/Anthropic + any
-OpenAI-compatible endpoint) · **Astro** SSR dashboard · systemd timers on a VPS ·
-GitHub Actions for the serverless digest.
+Python 3.11+ · pydantic v2 · **FastAPI** (orchestrator, :8077) · SQLite + **FTS5**
+(→ Postgres if ever needed) · Telethon + python-telegram-bot · Playwright (Tier 2) ·
+capability-aware multi-provider LLM routing (Groq/Gemini/OpenRouter/Qwen/OpenAI/
+Anthropic + any OpenAI-compatible endpoint) · **Astro** SSR dashboard · systemd
+timers on a VPS · GitHub Actions for the serverless digest.
+
+Retrieval is FTS5 rather than embeddings: it ships with SQLite, so there is no vector
+store, no model download and no reindex job — and for "which document mentions this
+identifier", which is what operational questions actually are, it beats a small
+embedding model outright.
+
+## Diagnosing it
+`scripts/llm_doctor.py` prints the chain, every model card and where its capabilities came
+from, and for each task shape which plan wins and why every other was rejected. It is
+offline unless you pass `--probe`. Reach for it first — the routing deliberately does
+not obey `LLM_PROVIDER`, which looks like a bug the first time you see it.

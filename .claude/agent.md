@@ -61,6 +61,14 @@ so any developer or AI agent can navigate the codebase and contribute immediatel
 | Identity overlay | `preferences.local.toml` (gitignored) overlays `preferences.toml` (committed placeholders) section-wise, so a clone carries a working search profile but nobody's contact details. |
 | Telethon + Bot API (two Telegrams) | Telethon (MTProto, user account) for reading channels. Bot API (BotFather token) for the interactive bot. Never conflate them. |
 | HITL gate for all submissions | R2. Both email (Tier 1) and ATS (Tier 2) stop and show the user what will be sent. `approved_at` stamped only on explicit action. |
+| Harness split in two packages | `agentkit` is domain-agnostic and may never import `jobagent` (R30); `jobagent/assistant` supplies tools, knowledge, prompts and policy through a manifest. If wiring a second application required editing `agentkit`, the boundary would be decorative — so three tests hold it. |
+| Route before running | `plans_for()` filters backends by capability *first* and returns a ranked queue that doubles as the failover queue. An incapable backend never enters it, so failover cannot land on a model that would silently do the job badly. Consequence worth knowing: `LLM_PROVIDER` no longer decides admission, only ties — a chosen primary that cannot do a task is skipped, with a reason. |
+| Degrade by changing *how*, not *what* | Nine strategies behind one signature. The load-bearing one, `prefetch_single_shot`, moves the planning into Python so a model that cannot use a tool *result* still answers. Measured: the same question answered correctly on llama-3.3-70b via a native loop and on llama-3.1-8b (0/5 on loops) via prefetch. |
+| Exclusion over gating | A tool the agent must never have is not registered at all (R26). A gate is a runtime check an attacker defeats once; absence has no code path to attack. Same call this repo already made for follow-up sends (R24). |
+| Frozen config is the *complement* | `CONFIG_WRITABLE` names what may change; everything else in `MANAGED_FIELDS` is frozen by construction, so a setting added next year is frozen the day it is added. A frozen *list* would default the other way and fail silently. |
+| Policy input carries no text | `SessionContext` holds actor, surface and prior grants — no transcript, no retrieved chunks, no model output (R28). An injection can make the model *request* a config rewrite; it cannot make the gatekeeper approve one, because the gatekeeper cannot read it. |
+| Confirmations bound to arguments | The nonce is server-side and tied to `sha256(args)`. On HTTP and Telegram the client sends *only* the nonce and the arguments never leave the server, which makes confirm-then-swap structurally impossible rather than merely detected. |
+| Assistant sessions share the run spine | A session closes with a `run` event carrying `kind_detail="agent_session"`, so it lands in the existing ledger with no new table — and `list_runs()` filters it out by default, because a session has no ingest counts and would render as a blank pipeline pass. |
 
 ---
 
@@ -139,20 +147,55 @@ src/jobagent/
 │   └── notify.py            # send_message() with chunk_text() (4096-char limit)
 ├── digest.py                # diversify() (per-company cap), format_matches(),
 │                            #   health_banner() — degraded-run warnings on the digest
-└── api/app.py               # FastAPI create_app() factory — all REST endpoints
-                             #   every non-GET route carries dependencies=auth (R19)
+├── api/
+│   ├── app.py               # FastAPI create_app() factory — all REST endpoints
+│   │                        #   every non-GET route carries dependencies=auth (R19)
+│   └── assistant_routes.py  # /assistant/ask + two-phase /assistant/confirm/{nonce}
+├── assistant/               # THE DOMAIN HALF OF THE AGENT HARNESS
+│   ├── manifest.py          # build_assistant() — wires tools+policy+audit+knowledge
+│   ├── tools.py             # 14 in-process tools; EXCLUDED = absences, not gates (R26)
+│   ├── config_policy.py     # CONFIG_WRITABLE allow-list; FROZEN = computed complement
+│   ├── knowledge.py         # postings → FTS5 chunks, all Trust.UNTRUSTED
+│   └── evalset.py           # labeled cases: selection / grounding / in-bounds
+└── bot/assistant_bridge.py  # Telegram /ask — logic here, handler stays thin
+
+src/agentkit/                # DOMAIN-AGNOSTIC HARNESS — never imports jobagent (R30)
+├── tools.py                 # ToolBox: a raising tool becomes a result, not a crash
+├── permissions.py           # READ/ACT/ADMIN + costly; UNIVERSALLY_EXCLUDED (R25)
+├── guard.py                 # GuardedToolBox — same shape as ToolBox, so no bypass
+├── audit.py                 # intent before policy; fail-closed sink (R27)
+├── session.py               # SessionContext — valuable for what it LACKS (R28)
+├── knowledge.py             # FtsIndex, Trust, nonce-fenced render()
+└── llm/
+    ├── types.py             # ChatRequest/Result IR + portable tool-schema validation
+    ├── capabilities.py      # resolve_card(): measured → family → size → UNKNOWN
+    ├── router.py            # choose_strategy() + plans_for() — the failover queue
+    ├── strategies.py        # nine executors; prefetch_single_shot is load-bearing
+    ├── runner.py            # walks the plan queue, classifies before acting
+    ├── errors.py            # classify() by SDK type name — imports with no SDK
+    ├── health.py            # per-(provider,model) breaker, injected clock
+    ├── chain.py             # build_chain() — adding a key needs no code change
+    ├── jsonx.py             # tolerant JSON; every rule is an observed failure
+    └── backends/            # openai_compat, anthropic_chat — SDK imported lazily
 
 dashboard/src/
 ├── lib/api.ts               # API client, types, fetch functions
+├── lib/assistant.ts         # SHARED assistant client — owns the session, renders the
+│                            #   thread; the bubble and the page both just mount() it
+├── styles/assistant.css     # one stylesheet for both surfaces (identical by construction)
+├── components/AssistantBubble.astro  # floating chat on every page except /assistant
 ├── layouts/Layout.astro     # Shared layout (portfolio dark theme, .topbar not .bar)
 └── pages/
     ├── index.astro          # Overview: stats, funnel, analytics, timeline, top matches
     ├── jobs.astro           # Filterable job list with pagination
     ├── jobs/[id].astro      # Job detail with fit-check button
     ├── applications.astro   # Application tracker with inline status editing
+    ├── assistant.astro      # Assistant chat + confirmation cards (nonce-only)
     └── settings.astro       # Auth-gated config editor (LLM/Telegram/SMTP)
 
 scripts/                     # CLI entrypoints: run_bot, run_api, pipeline, apply, etc.
+                             #   ask.py (assistant CLI), llm_doctor.py (routing, offline),
+                             #   eval_assistant.py (eval + floors), genkey.py (Fernet key)
 deploy/                      # systemd service/timer units
 config/preferences.toml      # User profile, watchlist, source toggles
 ```
@@ -180,6 +223,28 @@ config/preferences.toml      # User profile, watchlist, source toggles
 
 ---
 
+## Adding a New Assistant Tool
+
+1. Write the function in `src/jobagent/assistant/tools.py`. It takes one `dict` of
+   validated arguments and returns a **string** — that is what a model reads.
+2. Call the service layer **in-process**. Never this system's own REST API: a URL can
+   be redirected by a string the model emits, a named Python function cannot.
+3. Give it a `ToolPolicy`. READ never confirms; ACT confirms once per session; ADMIN
+   confirms every time. `costly=True` is orthogonal — a tool can change nothing and
+   still need a budget, and a prompt would just train the operator to click through.
+4. Register it with `Registration(spec, run, policy)` in the returned list. The schema
+   must pass `validate_tool_schema` — flat objects, primitives, one nesting level.
+5. **Read the store keys, do not remember them.** Wrong keys render `None` into
+   model-visible text (R32). Query wider than you display so a cap is never reported
+   as a total.
+6. If the tool must never exist, add its name to `EXCLUDED` instead of writing it (R26).
+7. Add a case to `assistant/evalset.py` if a real question should reach it.
+
+**Before adding an ADMIN tool, ask whether the action moves data or grants access.** If
+it does, it belongs in the frozen complement, not `CONFIG_WRITABLE`.
+
+---
+
 ## Common Pitfalls (from build history)
 
 | Pitfall | What happened | Fix |
@@ -196,3 +261,17 @@ config/preferences.toml      # User profile, watchlist, source toggles
 | Browser fetching `127.0.0.1` | `define:vars` baked the server-side URL into client JS; worked locally, broke any split deploy | `publicApiBase()` / `PUBLIC_JOBAGENT_API_URL` |
 | Retry claimed, never implemented | R8 promised backoff; adapters called `client.get` once, so a transient 429 lost the whole source | `get_with_retry` in `ingestion/util.py` |
 | Silent pipeline death | A three-day-dead pipeline rendered identically to a healthy one | `pipeline_health()` + dashboard stale banner + digest `health_banner()` |
+| Guessed store keys | Assistant tools rendered `jobs=None ... (Noneh ago) stale=None` because key names were written from memory, not read off `Store`. A model handed `None` states it as fact or invents around it | Four renderers corrected; a test now runs every read tool against a *populated* store and fails on any `None` in model-visible text (R32) |
+| Cap reported as total | `top_matches` queried `limit=MAX_ROWS`, making the cap indistinguishable from the count — it answered "there are 12 strong matches" when there were 231 | Fetch wider than you show (`FETCH_ROWS > MAX_ROWS`), assert the gap (R32) |
+| `tool_use_failed` as CAPABILITY | Groq's 400 for a malformed call was classified "this model cannot use tools" — about a model measured 5/5 on loops. It never retried and blamed the wrong thing | Classified TRANSIENT; generation is non-deterministic and the attempt budget bounds the retry |
+| Dead `:free` model default | `meta-llama/llama-3.3-70b-instruct:free` began 404ing; the third provider in the chain was dead on every call, silently | Verified live and replaced. `:free` slugs are withdrawn without notice — re-verify when the chain looks short |
+| Two readers for one setting | `SecretStore` read `os.environ` while everything else read pydantic-settings, which does not export `.env`. Reads worked (no store file → no crypto), every *write* failed with "not set" — while it *was* set | One reader per value; fall back through the same parser pydantic uses, keyed on presence not truthiness (R31) |
+| Test read the developer's machine | `test_preferences_load` asserted a name that only the gitignored identity overlay supplies — green locally, red in CI, always | Pin `local_path` at a nonexistent file; a guard test forbids bare `load_preferences()` in tests |
+| Vacuous eval pass | The assistant eval printed "grounding 100%" over **zero** graded cases. A number that reassures without measuring is worse than none | Rate is `None`, not `1.0`; the table prints `n/a` |
+| Eval failed a correct answer | The model wrote `12,971`; the store said `12971`. A right answer scored as a miss sends you hunting a bug that is not there | Normalize digit separators on both sides before matching |
+| Fixed prefetch, wrong questions | `prefetch_single_shot` always fetched health + recent runs, so on the degraded path the model never chose a tool — every other question was unanswerable. Measured 50% | Question-aware keyword routing in Python; re-measured 100% |
+| Tiny probe said "reachable" | `llm_doctor --probe` reported a provider healthy when it could not serve a real request — "reply ok" fits where a system prompt plus 14 tool schemas does not | Probe at realistic size too; a doctor consulted when things are broken must not say they are fine |
+| 1 MB job list | `/jobs` shipped `raw` — the untouched source payload — on every row: 63% of the response, ~640 KB per dashboard page load, read by nobody | Stripped on the wire; the store still keeps it. Storage rule ≠ transport rule |
+| Provider exhaustion as 500 | A free-tier daily limit surfaced as `Internal Server Error`, which reads like a code fault | 503 naming the cause and pointing at `make doctor PROBE=1`. Note `/fit` and `/match` correctly stay 200 — both fall back to heuristics |
+| Import cycle via package `__init__` | `agentkit.tools` → `agentkit.llm.types` → runs `llm/__init__.py` → `runner` → `agentkit.tools`. Only failed depending on import order, so it looked fixed once | `Runner` duck-typed against the tool seam (better design anyway — it is why a governed box substitutes); topological-sort test over module-level imports |
+| Test asserted the sequence, not the property | "Intent is audited before the policy runs" checked event *order*, which survives moving the call. It stayed green with the guarantee gone | Assert the consequence: a dead sink must stop the call *before* the gatekeeper is asked anything |

@@ -23,7 +23,8 @@ Greenhouse/Lever/  ┼─▶ ingestion adapters ─▶ SQLite store ─▶ match
 Ashby              ┤        (normalize+dedup)      │                     │
 (aggregator: soon) ┘                               ▼                     ▼
                                           Telegram bot  ◀──────  ranked digest / /apply
-                                          Astro dashboard (read-only analytics)
+                                          Astro dashboard (analytics + triage)
+                                          Assistant     ◀──────  ask it about any of this
 ```
 Multi-provider LLM with automatic failover (Groq → Gemini → OpenRouter → OpenAI →
 Anthropic, or any OpenAI-compatible endpoint). See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
@@ -31,10 +32,11 @@ Anthropic, or any OpenAI-compatible endpoint). See [docs/ARCHITECTURE.md](docs/A
 A **FastAPI orchestrator** sits between the interfaces and the data: the dashboard
 calls it over REST, and the bot calls the same service layer in-process.
 
-## Status: v3 (353 tests passing, CI on every push)
+## Status: v3 (515 tests passing, CI on every push)
 Ingestion · matching · Telegram bot (menu + filters) · Tier-1 email apply · Tier-2
 ATS form-fill · multi-LLM failover · FastAPI orchestrator · Astro dashboard with
-config UI, fit-checker, analytics, and pipeline health · VPS + GitHub Actions deploy.
+config UI, fit-checker, analytics, and pipeline health · VPS + GitHub Actions deploy
+· **an assistant that can answer questions about the whole system**.
 
 **Security note:** every state-changing API route requires a bearer token, so
 `DASHBOARD_PASSWORD` must be set for applying, status edits, fit checks, or config
@@ -108,6 +110,26 @@ needs the **API running** — it is a client of it, not a direct reader of the s
 `make check` runs a preflight (missing env vars, occupied ports, absent store) and
 `make install` sets up both halves. See [Running](#running) for all targets.
 In Telegram: **`/menu`** → set Date/Location/keyword filters → **Show jobs** → tap **📨 N** to apply.
+
+### Ask it things
+
+```bash
+make ask Q="is the pipeline healthy?"
+make ask Q="which strong matches am I ignoring?"
+make doctor                                     # why is it using that model? (offline)
+```
+Also at `/assistant` in the dashboard, and `/ask <question>` in Telegram.
+
+The assistant reads your pipeline, runs, queue, applications and settings. **It cannot
+send, submit or approve anything** — no such tool exists, which is a structural
+property rather than a rule it follows. When something needs sending it hands you a
+link instead. Config changes are limited to an explicit allow-list (search filters and
+which model answers); anything that decides *where data goes* or *who can reach the
+system* is frozen and cannot be delegated.
+
+It degrades rather than failing: on a model too weak to run a tool loop, the retrieval
+runs in Python and the model only writes the answer. Measured on the free tier at
+100% tool-selection and 100% answer-grounding through that degraded path.
 
 ## LLM options (all OpenAI-compatible except Anthropic)
 | Provider | Free tier | Set | Notes |

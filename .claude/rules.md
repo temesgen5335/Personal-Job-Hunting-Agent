@@ -228,3 +228,36 @@ No real API calls, no real Strapi/DB, no real Telegram, no real browser. Use
 **R18 — Settings cache reset between tests.**
 `conftest.py` resets `cfg._cached = None` around every test. If a test mutates
 settings, the next test must not see it.
+
+**R31 — One reader per config value.**
+A module that has a Settings object must not also read `os.environ` for the same
+value. pydantic-settings loads `.env` into Settings and deliberately does *not*
+export it to the environment, so a second reader sees a different world — and the
+symptom is the most confusing one there is: "I set it and it says it is not set."
+`SecretStore` had exactly this bug and it silently broke every config write for
+anyone following the documented setup. If a module genuinely cannot import
+settings (circular import), fall back through the *same parser* pydantic uses
+(`dotenv_values`), and key the override on **presence, not truthiness** — an
+explicitly empty value means empty, never "go look somewhere else".
+
+**R32 — A number shown to a user must be the number, not the page size.**
+Query wider than you display (`FETCH_ROWS > MAX_ROWS`) so the true total is known,
+and say what was omitted. Querying with `limit=MAX_ROWS` makes the cap
+indistinguishable from the count; that shipped once as "there are 12 strong
+matches" when there were 231. Related: never write a store key from memory —
+a wrong key renders `None` into model-visible text, and a model handed `None`
+states it as fact or invents around it. Both are covered by a test that exercises
+every read tool against a *populated* store.
+
+---
+
+## Reuse Boundary
+
+**R30 — `agentkit` never imports the host application.**
+Stdlib and pydantic only at module scope; never `jobagent`, `fastapi`, `telegram`,
+`telethon`, `playwright`, or a provider SDK (backends import their SDK lazily,
+inside a function). The host supplies its domain through a manifest — tools,
+knowledge, prompts, policy. Three tests hold this: an AST import check, a
+**vocabulary** check (no `job`/`cv`/`application` identifiers), and a topological
+sort forbidding import cycles. The import test catches coupling; the vocabulary
+test catches the slow leak where a domain special case grows into generic code.

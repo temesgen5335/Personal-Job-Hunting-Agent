@@ -1,3 +1,7 @@
+> **Historical.** This is the v1 build plan, kept for provenance. It is not
+> maintained. For what the system is today see `.claude/context.md`;
+> for how it works see `docs/ARCHITECTURE.md`.
+
 # Build Plan
 
 > **HISTORICAL DOCUMENT** — the v1 build plan, kept for the record. Unchecked items

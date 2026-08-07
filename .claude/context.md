@@ -82,9 +82,9 @@ Two interfaces, one backend:
 | Dashboard v3 | Done — sidebar shell, health-first Overview, triage queue + focus mode, fit-check states, nudge banner, locked Settings (from the Claude Design project) |
 | agentkit (Phase 2) | **Complete.** Permission tiers (READ/ACT/ADMIN + structural exclusion), argument-bound single-use confirmations, FTS5 knowledge index with per-chunk provenance and trust, fail-closed audit on the run_id spine, and `GuardedToolBox` — same shape as `ToolBox`, so it drops into the Runner and there is no ungoverned path |
 | assistant (Phase 3) | **Complete.** `src/jobagent/assistant/`: 14 in-process tools, R2 exclusions as absences (no send/approve/ats tool exists), `CONFIG_WRITABLE` allow-list with frozen as the computed complement, impact previews dry-run over real stored rows, config snapshots + rollback, and FTS5 search over postings fenced as UNTRUSTED |
-| assistant interfaces (Phase 4) | **Complete.** Three surfaces on one mechanism: `scripts/ask.py` (CLI), `/assistant` dashboard page, and Telegram `/ask`. Confirmations differ only in renderer — the CLI binds to `sha256(args)`, HTTP and Telegram send only a nonce and keep the arguments server-side. Config writes are refused on chat by construction (`Surface.CHAT` is outside `admin_surfaces`) |
+| assistant interfaces (Phase 4) | **Complete + extended.** Four surfaces on one mechanism: `scripts/ask.py` (CLI), the `/assistant` dashboard page, a floating chat **bubble on every page** (`components/AssistantBubble.astro`), and Telegram `/ask`. The bubble and the page share one client (`lib/assistant.ts`) and one `localStorage` session, so a conversation continues seamlessly between them until cleared with New chat. Confirmations differ only in renderer — the CLI binds to `sha256(args)`, HTTP and Telegram send only a nonce and keep the arguments server-side. Config writes are refused on chat by construction (`Surface.CHAT` is outside `admin_surfaces`) |
 | assistant hardening (Phase 5) | **Complete.** 10-case eval set scoring tool *selection*, answer *grounding* and *in-bounds* separately; `scripts/eval_assistant.py` with floors; `scripts/llm_doctor.py` explaining the chain, every model card's provenance, and per-task routing offline. Degraded-path conformance run measured **100% / 100% / 100%** |
-| Test suite | 515 tests, 37 test files, zero network, injectable fakes throughout |
+| Test suite | 527 tests, 35 test files, zero network, injectable fakes throughout |
 
 ## Assistant cost characteristics (measured Aug 2026)
 
@@ -131,5 +131,5 @@ pipeline health, retry/backoff, docs truth-pass). Still open:
 
 - **11,700+** jobs scored in a live run (8,253 fetched in a single pass across 6 adapters)
 - **40** companies in the ATS watchlist (Greenhouse/Lever/Ashby)
-- **515** tests across 37 files — all run offline, no network, no credentials
+- **527** tests across 35 files — all run offline, no network, no credentials
 - **6** LLM providers with automatic failover (3 free, 3 paid)
