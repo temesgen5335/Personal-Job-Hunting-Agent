@@ -37,10 +37,41 @@ SECRET_FIELDS = {
 }
 
 
+def _from_env_or_dotenv(name: str, default: str = "") -> str:
+    """Read a setting from the process environment, falling back to `.env`.
+
+    Everything else in this project reads config through pydantic-settings, which loads
+    `.env` into a Settings object but deliberately does NOT export those values into
+    `os.environ`. This module used `os.environ` alone, so a key set in `.env` — the
+    location `.env.example` documents — never reached it: reads appeared to work (an
+    absent store needs no crypto) while every *write* failed with "not set", even though
+    it was set. That silently broke the Settings page, the assistant's config tool and
+    rollback for anyone following the documented setup.
+
+    `get_settings()` cannot be called from here: `config._build_effective()` constructs
+    a SecretStore, so this would recurse forever. `dotenv_values` is the parser
+    pydantic-settings itself uses, which keeps the two readings from drifting.
+    """
+    # PRESENCE, not truthiness. A test (or an operator) that sets the variable to an
+    # empty string means "explicitly no key" and must not have `.env` silently supplied
+    # underneath — that is how a suite stops being hermetic and starts depending on the
+    # developer's own machine. Falling back only when the variable is *absent* keeps the
+    # override honest in both directions.
+    if name in os.environ:
+        return os.environ[name] or default
+    try:
+        from dotenv import dotenv_values
+
+        return (dotenv_values(".env").get(name) or default)
+    except Exception:  # noqa: BLE001 — no dotenv, or an unreadable file: fall back
+        return default
+
+
 class SecretStore:
     def __init__(self, path: str | None = None, key: str | bytes | None = None):
-        self.path = Path(path or os.environ.get("JOBAGENT_SECRETS_PATH", "data/secrets.enc"))
-        self._key = key or os.environ.get("JOBAGENT_MASTER_KEY", "")
+        self.path = Path(path or _from_env_or_dotenv("JOBAGENT_SECRETS_PATH",
+                                                     "data/secrets.enc"))
+        self._key = key or _from_env_or_dotenv("JOBAGENT_MASTER_KEY")
 
     @staticmethod
     def generate_key() -> str:

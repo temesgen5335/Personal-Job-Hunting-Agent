@@ -365,6 +365,37 @@ Also confirmed live, with an unconditional-yes approver: 14 tools registered, no
 send/approve/ats tool exists at all, `execute_sql`/`run_shell` refused, five frozen
 config fields refused, and config writes refused from chat.
 
+## SecretStore never saw `.env` — the config UI was broken for everyone (Aug 2026)
+
+Asked what `JOBAGENT_MASTER_KEY` should be, checked, and found it was *already set* —
+44 chars, a valid Fernet key. Yet every config write said "not set".
+
+**`SecretStore` read `os.environ` directly.** Everything else in the project reads config
+through pydantic-settings, which loads `.env` into a Settings object but deliberately
+does NOT export those values into `os.environ`. So a key set in `.env` — the location
+`.env.example` documents — never reached the store. The failure was near-invisible
+because `load()` returns `{}` when no store file exists and never touches the crypto:
+**reads looked fine while every write failed.** That silently broke the Settings page,
+the assistant's `apply_config_change`, and rollback for anyone following the documented
+setup. It only worked if you also `export`ed the variable, which nothing documents.
+
+Fixed with a fallback that reads `.env` via `dotenv_values` — the same parser
+pydantic-settings uses, so the two readings cannot drift. `get_settings()` cannot be
+called from there: `config._build_effective()` constructs a SecretStore, so it would
+recurse forever.
+
+**And the fix immediately introduced a hermeticity regression, caught before commit.**
+The first version fell back whenever the value was falsy, so a test setting
+`JOBAGENT_MASTER_KEY=""` — meaning *explicitly no key* — silently picked up the real
+44-char key from the developer's own `.env`. Same class as the `test_preferences_load`
+failure earlier in the session. Now keyed on **presence, not truthiness**: an explicit
+empty string stays empty; only an *absent* variable falls through.
+
+Lesson worth keeping: **a config value has two readers only if someone made it so.**
+When one module reads `os.environ` and the rest read a settings object, the divergence
+shows up as "I set it and it says it is not set" — the most confusing failure shape
+there is.
+
 ## Known Limitations
 
 - **No LinkedIn/Indeed/Glassdoor adapter.** These sites are aggressively anti-bot with
@@ -403,7 +434,8 @@ config fields refused, and config writes refused from chat.
 | assistant P3 | `a05b4ba` | 14 in-process tools, R2 exclusions, CONFIG_WRITABLE + computed frozen, impact previews, snapshots, fenced retrieval. 463 tests |
 | interfaces P4 | `3464136` | CLI + dashboard page + Telegram /ask; run-ledger separation. 489 tests |
 | hardening P5 | `271af44` | Assistant eval set + floors, llm_doctor, question-aware prefetch. 509 tests |
-| systest | (this) | Full-system exercise: /jobs payload, 503 on exhaustion, config-write UX. 512 tests |
+| systest | `413272a` | Full-system exercise: /jobs payload, 503 on exhaustion, config-write UX. 512 tests |
+| secretfix | (this) | SecretStore reads .env; presence-not-truthiness override. 515 tests |
 
 ---
 

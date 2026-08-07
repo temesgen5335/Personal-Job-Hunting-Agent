@@ -65,3 +65,57 @@ def test_custom_provider_in_chain():
     )
     llm = build_llm(st)
     assert llm.chain == ["custom"]             # only custom configured → it's the whole chain
+
+
+# --- the .env fallback, and the hermeticity it must not break ----------------------
+
+def test_a_key_set_only_in_dotenv_reaches_the_store(tmp_path, monkeypatch):
+    """The bug this fallback exists for.
+
+    Everything else reads config through pydantic-settings, which loads `.env` into a
+    Settings object but does not export it to os.environ. This module read os.environ
+    alone, so a key set in `.env` — the location .env.example documents — never arrived:
+    reads appeared fine (an absent store needs no crypto) while every *write* failed
+    with "not set". That silently broke the Settings page, the assistant's config tool
+    and rollback for anyone following the documented setup.
+    """
+    from jobagent.secrets_store import SecretStore
+
+    key = SecretStore.generate_key()
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text(f"JOBAGENT_MASTER_KEY={key}\n")
+    monkeypatch.delenv("JOBAGENT_MASTER_KEY", raising=False)
+    monkeypatch.delenv("JOBAGENT_SECRETS_PATH", raising=False)
+
+    store = SecretStore(path=str(tmp_path / "s.enc"))
+    store.update({"groq_model": "llama-3.3-70b-versatile"})     # the path that failed
+    assert store.load()["groq_model"] == "llama-3.3-70b-versatile"
+
+
+def test_an_explicitly_empty_env_var_is_not_backfilled_from_dotenv(tmp_path, monkeypatch):
+    """Presence, not truthiness.
+
+    A test that sets the variable to "" means *explicitly no key*. Backfilling it from
+    `.env` would make the suite depend on whatever the developer has on their own
+    machine — the same non-hermetic failure that once made test_preferences_load pass
+    locally and fail in CI.
+    """
+    from jobagent.secrets_store import _from_env_or_dotenv
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("JOBAGENT_MASTER_KEY=should-never-be-used\n")
+
+    monkeypatch.setenv("JOBAGENT_MASTER_KEY", "")
+    assert _from_env_or_dotenv("JOBAGENT_MASTER_KEY") == ""
+
+    monkeypatch.delenv("JOBAGENT_MASTER_KEY")
+    assert _from_env_or_dotenv("JOBAGENT_MASTER_KEY") == "should-never-be-used"
+
+
+def test_the_env_var_still_wins_over_dotenv(tmp_path, monkeypatch):
+    from jobagent.secrets_store import _from_env_or_dotenv
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("JOBAGENT_MASTER_KEY=from-dotenv\n")
+    monkeypatch.setenv("JOBAGENT_MASTER_KEY", "from-environ")
+    assert _from_env_or_dotenv("JOBAGENT_MASTER_KEY") == "from-environ"
