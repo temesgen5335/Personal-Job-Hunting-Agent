@@ -241,8 +241,23 @@ def build_tools(*, store, settings, links, index=None) -> list[Registration]:
         except ConfigRefused as exc:
             return f"Refused: {exc}"
 
+        # Check the store is writable BEFORE snapshotting: without a master key the
+        # write cannot happen, and taking a snapshot first leaves a useless file and
+        # reports a raw RuntimeError to the operator. Observed on a system with no
+        # JOBAGENT_MASTER_KEY set — which is the default.
+        store_ = SecretStore()
+        try:
+            store_.load()
+        except RuntimeError as exc:
+            return (f"Cannot change settings: {exc} "
+                    f"Set JOBAGENT_MASTER_KEY in .env, then try again. "
+                    f"Nothing was changed.")
+
         Snapshotter().take(label=field_name)
-        SecretStore().update({field_name: value})
+        try:
+            store_.update({field_name: value})
+        except Exception as exc:  # noqa: BLE001 — report, never half-apply silently
+            return f"Failed to write settings: {type(exc).__name__}: {exc}. Nothing was changed."
         reload_settings()
         return f"Set {field_name} = {value!r}. Previous config snapshotted; ask to roll back if wrong."
 

@@ -37,6 +37,38 @@ from jobagent.store import Store
 
 _UNSET = object()
 
+# `MultiLLM.complete` raises this bare RuntimeError when every provider fails, and the
+# common cause is a free-tier daily limit — an expected, self-healing condition. Left
+# unhandled it surfaced as a 500 Internal Server Error, which tells the operator
+# nothing and reads like a code fault. Found by exercising the running system with all
+# three free tiers exhausted.
+_ALL_PROVIDERS_FAILED = "All LLM providers failed"
+
+
+def _llm_unavailable(exc: Exception) -> HTTPException:
+    """Turn provider exhaustion into a 503 the caller can act on."""
+    detail = str(exc)
+    hint = ""
+    if "rate_limit" in detail or "429" in detail or "quota" in detail.lower():
+        hint = (" Every configured provider is rate-limited or out of quota — "
+                "this usually clears on its own. Run `make doctor PROBE=1` to see which.")
+    return HTTPException(503, f"No LLM provider could serve that request.{hint}")
+
+
+# The untouched source payload is kept in the store forever (JobPosting.raw — never
+# discard it) but no consumer reads it over the wire: the dashboard's MatchRow does not
+# declare it, and neither the bot nor the assistant touches it. It was 63% of a default
+# /jobs response — ~640 KB of dead weight on every dashboard page load. Storage rule,
+# not a transport one.
+_WIRE_OMIT = ("raw",)
+
+
+def _strip_heavy(rows: list[dict]) -> list[dict]:
+    for r in rows:
+        for field in _WIRE_OMIT:
+            r.pop(field, None)
+    return rows
+
 
 def _decode_gaps(rows: list[dict]) -> list[dict]:
     """gaps is stored as JSON text; hand clients a real array so neither the
@@ -214,7 +246,8 @@ def create_app(settings=None, profile=None, llm: Any = _UNSET, cv_master: str | 
         )
         s = store()
         try:
-            return {"jobs": _decode_gaps(ranked_matches(s, limit, flt, offset=offset))}
+            return {"jobs": _strip_heavy(
+                _decode_gaps(ranked_matches(s, limit, flt, offset=offset)))}
         finally:
             s.close()
 
@@ -327,7 +360,12 @@ def create_app(settings=None, profile=None, llm: Any = _UNSET, cv_master: str | 
             if not job:
                 raise HTTPException(404, "Job not found.")
             days = (body.days_waiting if body and body.days_waiting is not None else 7)
-            subject, text = draft_followup(profile.name or "", job, days, current_llm)
+            try:
+                subject, text = draft_followup(profile.name or "", job, days, current_llm)
+            except RuntimeError as exc:
+                if _ALL_PROVIDERS_FAILED in str(exc):
+                    raise _llm_unavailable(exc) from exc
+                raise
             # Logged so the reminder stops firing until the next window.
             s.log_event(Event(kind="followup_drafted", job_id=application["job_id"],
                               payload={"application_id": app_id, "days_waiting": days}))
@@ -348,6 +386,9 @@ def create_app(settings=None, profile=None, llm: Any = _UNSET, cv_master: str | 
     def match():
         s = store()
         try:
+            # No wrapper here: llm_score swallows provider failures and matching
+            # falls back to heuristic scoring, so this path degrades rather than
+            # failing. Asserted in tests/test_api.py so nobody "fixes" it into a 503.
             r = run_matching(s, profile, llm=_llm())
             return {"scored": r.scored, "used_llm": r.used_llm, "llm_reranked": r.llm_reranked}
         finally:
@@ -414,7 +455,12 @@ def create_app(settings=None, profile=None, llm: Any = _UNSET, cv_master: str | 
                 raise HTTPException(404, "Job not found.")
         finally:
             s.close()
-        return assess_fit(job, profile, cv_master, _llm()).to_dict()
+        try:
+            return assess_fit(job, profile, cv_master, _llm()).to_dict()
+        except RuntimeError as exc:
+            if _ALL_PROVIDERS_FAILED in str(exc):
+                raise _llm_unavailable(exc) from exc
+            raise
 
     @app.post("/apply/prepare", dependencies=auth)
     def apply_prepare(req: JobIdReq):
@@ -428,7 +474,12 @@ def create_app(settings=None, profile=None, llm: Any = _UNSET, cv_master: str | 
             job = s.get_job(req.job_id)
             if not job:
                 raise HTTPException(404, "Job not found.")
-            b = prepare_application(s, job, profile, cv_master, current_llm)
+            try:
+                b = prepare_application(s, job, profile, cv_master, current_llm)
+            except RuntimeError as exc:
+                if _ALL_PROVIDERS_FAILED in str(exc):
+                    raise _llm_unavailable(exc) from exc
+                raise
             return {
                 "application_id": b.application_id, "apply_method": b.apply_method,
                 "cv_markdown": b.cv_markdown, "cover_letter": b.cover_letter,

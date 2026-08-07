@@ -334,6 +334,37 @@ one loop turn sends ~1,258 tokens, **1,047 of which are tool schemas resent ever
 — so a 5-step answer costs ~8k tokens against ~350 on the prefetch path. That is the
 first thing to attack if cost matters; `GuardedToolBox.allowed` already exists for it.
 
+## Full-system exercise (Aug 2026): three defects the suite could not see
+
+Ran every surface against the live store — 12 API write routes, 9 read routes, all 5
+dashboard pages, 5 CLI scripts, the Telegram bridge, the ingest lock, and the whole
+safety boundary. Everything held. Three real defects surfaced, all invisible to a green
+suite because each needed *production-shaped data* or a *degraded environment*:
+
+1. **`/jobs` shipped 1 MB by default, 63% of it dead weight.** Every row carried `raw`,
+   the untouched source payload, which no consumer reads — the dashboard's `MatchRow`
+   does not even declare it. ~640 KB on every page load. Now stripped on the wire;
+   1,004 KB → 361 KB. The store still keeps `raw` forever: that is a storage rule, not
+   a transport one.
+2. **Provider exhaustion surfaced as a 500.** `MultiLLM` raises a bare RuntimeError when
+   every backend fails, and free-tier daily limits are an expected, self-healing
+   condition. `/apply/prepare` returned `Internal Server Error`, which reads like a code
+   fault. Now a 503 naming the cause and pointing at `make doctor PROBE=1`.
+   Discovered only because I had exhausted all three free tiers running evals.
+3. **The assistant's config write reported a raw `RuntimeError` and snapshotted first.**
+   With no `JOBAGENT_MASTER_KEY` — the default on a fresh install — the encrypted store
+   cannot be written, so the tool left a useless snapshot and an unreadable message.
+   Now it checks writability before snapshotting and explains the fix.
+
+Worth recording as a *non*-defect, because it looked like one: `/fit` and `/match`
+return 200 during total provider exhaustion. Both fall back to heuristics by design.
+Tests now assert that explicitly, so nobody "fixes" them into 503s to match
+`/apply/prepare` — degrading to a heuristic answer is the better behaviour.
+
+Also confirmed live, with an unconditional-yes approver: 14 tools registered, no
+send/approve/ats tool exists at all, `execute_sql`/`run_shell` refused, five frozen
+config fields refused, and config writes refused from chat.
+
 ## Known Limitations
 
 - **No LinkedIn/Indeed/Glassdoor adapter.** These sites are aggressively anti-bot with
@@ -371,7 +402,8 @@ first thing to attack if cost matters; `GuardedToolBox.allowed` already exists f
 | agentkit P2 | `f656906` | Permission tiers, FTS5 knowledge, fail-closed audit, GuardedToolBox. 425 tests |
 | assistant P3 | `a05b4ba` | 14 in-process tools, R2 exclusions, CONFIG_WRITABLE + computed frozen, impact previews, snapshots, fenced retrieval. 463 tests |
 | interfaces P4 | `3464136` | CLI + dashboard page + Telegram /ask; run-ledger separation. 489 tests |
-| hardening P5 | (this) | Assistant eval set + floors, llm_doctor, question-aware prefetch. 509 tests |
+| hardening P5 | `271af44` | Assistant eval set + floors, llm_doctor, question-aware prefetch. 509 tests |
+| systest | (this) | Full-system exercise: /jobs payload, 503 on exhaustion, config-write UX. 512 tests |
 
 ---
 

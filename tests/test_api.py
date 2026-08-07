@@ -408,3 +408,61 @@ def test_second_ingest_while_running_is_409(client, monkeypatch):
     monkeypatch.setattr(api_mod, "_ingest_task", fake_task)
     assert client.post("/ingest").status_code == 202     # runs + releases (sync in tests)
     assert client.post("/ingest").status_code == 202     # so the next one acquires again
+
+
+def test_the_job_list_does_not_ship_the_untouched_source_payload(client):
+    """`raw` was 63% of a default /jobs response — ~640 KB on every dashboard page
+    load — and nothing reads it: the dashboard's MatchRow does not declare it, and
+    neither the bot nor the assistant touches it.
+
+    The store still keeps it (JobPosting.raw is never discarded); this is about what
+    goes on the wire.
+    """
+    rows = client.get("/jobs").json()["jobs"]
+    assert rows, "fixture should seed jobs"
+    assert all("raw" not in r for r in rows)
+    # The fields consumers actually render must survive the strip.
+    for field in ("id", "title", "company", "score", "source", "url"):
+        assert field in rows[0], f"stripping removed {field!r}, which the UI renders"
+
+
+def test_provider_exhaustion_is_a_503_not_a_500(client, monkeypatch):
+    """A free-tier daily limit is an expected, self-healing condition. Unhandled it
+    surfaced as `Internal Server Error`, which reads like a code fault and tells the
+    operator nothing about what to do.
+
+    Found by exercising the running system with all three free tiers exhausted.
+    """
+    from jobagent.api import app as api
+
+    class Exhausted:
+        chain = ["groq"]
+
+        def complete(self, system, user, json_mode=False):
+            raise RuntimeError(
+                "All LLM providers failed:\n"
+                "  groq: RateLimitError: Error code: 429 - tokens per day (TPD)")
+
+    app = api.create_app(
+        settings=Settings(_env_file=None),
+        profile=Profile(name="Tester", email="me@x.com", cv_path=""),
+        llm=Exhausted(), cv_master="MASTER CV TEXT", mailer=lambda *a, **k: None)
+    c = TestClient(app)
+    c.headers["Authorization"] = client.headers["Authorization"]
+
+    job_id = client.get("/jobs").json()["jobs"][0]["id"]
+
+    # Generation has no fallback — there is no non-LLM way to write a tailored CV —
+    # so it must say 503 and say why.
+    r = c.post("/apply/prepare", json={"job_id": job_id})
+    assert r.status_code == 503, f"/apply/prepare returned {r.status_code}"
+    detail = r.json()["detail"]
+    assert "rate-limited" in detail or "No LLM provider" in detail
+    assert "Traceback" not in detail
+
+    # Scoring and fit-checking DO have fallbacks and must keep answering. Asserted so
+    # nobody "fixes" them into 503s to match their neighbour — degrading to a heuristic
+    # answer is the better behaviour, not an oversight.
+    fit = c.post("/fit", json={"job_id": job_id})
+    assert fit.status_code == 200 and fit.json()["source"] == "heuristic"
+    assert c.post("/match", json={}).status_code == 200

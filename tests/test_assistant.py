@@ -536,3 +536,27 @@ def test_assistant_sessions_do_not_pollute_the_pipeline_run_ledger(store, settin
     # And the tool that renders the ledger shows neither None nor the session.
     out = assistant(store, settings).toolbox.execute(ToolCall("c", "recent_runs", {})).content
     assert "None" not in out and "sess0000" not in out
+
+
+def test_a_config_write_without_a_master_key_explains_itself_and_snapshots_nothing(
+        store, settings, tmp_path, monkeypatch):
+    """The default state of a fresh install: no JOBAGENT_MASTER_KEY, so the encrypted
+    store cannot be written.
+
+    Before this, the operator got a bare `RuntimeError: JOBAGENT_MASTER_KEY not set`
+    *and* a snapshot file for a write that never happened. Found by exercising the
+    running system, not by a test.
+    """
+    monkeypatch.setenv("JOBAGENT_MASTER_KEY", "")
+    monkeypatch.setenv("JOBAGENT_SECRETS_PATH", str(tmp_path / "secrets.enc"))
+    monkeypatch.chdir(tmp_path)
+
+    a = assistant(store, settings, ask=lambda *x: True)
+    out = a.toolbox.execute(ToolCall("c1", "apply_config_change",
+                                     {"field": "ingest_max_age_days", "value": "45"}))
+
+    assert "JOBAGENT_MASTER_KEY" in out.content
+    assert "Nothing was changed" in out.content
+    assert not out.content.startswith("RuntimeError")
+    snaps = tmp_path / "data" / "config_snapshots"
+    assert not snaps.exists() or list(snaps.glob("*.enc")) == []
