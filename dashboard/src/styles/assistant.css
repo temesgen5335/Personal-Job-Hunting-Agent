@@ -1,0 +1,200 @@
+/* Assistant — shared by the floating bubble and the /assistant page.
+ *
+ * One stylesheet on purpose. The two surfaces differ only in the frame around the
+ * thread; the thread itself must look identical, and the cheapest way to guarantee
+ * that is for there to be nothing to keep in sync.
+ *
+ * Everything reads from the tokens already defined in Layout.astro, so the widget
+ * inherits the dashboard's palette rather than declaring a second one.
+ */
+
+/* --- the thread ------------------------------------------------------------------- */
+
+.ja-thread {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  overflow-y: auto;
+  overscroll-behavior: contain;   /* scrolling the panel must not scroll the page */
+}
+
+.ja-turn { display: flex; flex-direction: column; gap: 6px; }
+
+.ja-msg {
+  border-radius: var(--radius);
+  padding: 10px 13px;
+  max-width: 90%;
+  overflow-wrap: anywhere;        /* long URLs and ids must not widen the panel */
+  white-space: pre-wrap;
+}
+.ja-you {
+  align-self: flex-end;
+  background: var(--accent-dim);
+  border: 1px solid var(--border);
+  color: var(--strong);
+}
+.ja-it  { background: var(--panel); border: 1px solid var(--border); }
+.ja-err {
+  background: rgba(248, 113, 113, 0.08);
+  border: 1px solid var(--danger);
+  color: var(--danger);
+}
+
+.ja-meta { font: 11px/1.45 var(--mono); color: var(--faint); overflow-wrap: anywhere; }
+.ja-warn { color: var(--warn); }
+.ja-done { font-size: 12px; color: var(--good); }
+
+/* Three dots rather than a spinner: it reads as "composing", and a spinner in a chat
+   pane is indistinguishable from a page that has hung. */
+.ja-thinking { display: flex; gap: 5px; padding: 6px 2px; }
+.ja-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--muted);
+  animation: ja-pulse 1.3s ease-in-out infinite;
+}
+.ja-dot:nth-child(2) { animation-delay: 0.18s; }
+.ja-dot:nth-child(3) { animation-delay: 0.36s; }
+@keyframes ja-pulse {
+  0%, 60%, 100% { opacity: 0.25; transform: translateY(0); }
+  30%           { opacity: 1;    transform: translateY(-3px); }
+}
+
+/* --- empty state ------------------------------------------------------------------ */
+
+.ja-empty { color: var(--muted); font-size: 13px; }
+.ja-empty p { margin: 0 0 10px; }
+.ja-chips { display: flex; flex-wrap: wrap; gap: 7px; }
+.ja-chip {
+  background: var(--panel); border: 1px solid var(--border); color: var(--text);
+  border-radius: 999px; padding: 6px 12px; font-size: 12.5px; cursor: pointer;
+  text-align: left; transition: background 0.12s, border-color 0.12s;
+}
+.ja-chip:hover { background: var(--hover); border-color: var(--accent); }
+
+/* --- confirmation card ------------------------------------------------------------ */
+/* Rendered from server-computed values only — no model output reaches this markup. */
+
+.ja-confirm {
+  border: 1px solid var(--warn);
+  border-radius: var(--radius);
+  background: rgba(251, 191, 36, 0.06);
+  padding: 11px 13px;
+}
+.ja-confirm h4 { margin: 0 0 6px; font-size: 12.5px; color: var(--warn); }
+.ja-confirm pre {
+  margin: 0 0 10px; font: 11.5px/1.5 var(--mono); color: var(--text);
+  white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.ja-row { display: flex; gap: 7px; }
+.ja-row button {
+  border-radius: var(--radius-sm); padding: 5px 13px; cursor: pointer; font-size: 12.5px;
+  border: 1px solid var(--border); background: var(--hover); color: var(--text);
+}
+.ja-row button:hover:not(:disabled) { border-color: var(--accent); }
+.ja-row button:disabled { opacity: 0.55; cursor: default; }
+.ja-ok { border-color: var(--warn) !important; color: var(--warn) !important; }
+
+/* --- composer --------------------------------------------------------------------- */
+
+.ja-composer { display: flex; gap: 8px; }
+.ja-composer input {
+  flex: 1; min-width: 0;
+  background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 10px 13px; color: var(--text);
+}
+.ja-composer input:focus { border-color: var(--accent); outline: none; }
+.ja-composer input:disabled { opacity: 0.6; }
+.ja-composer button {
+  background: var(--panel); border: 1px solid var(--border); color: var(--text);
+  border-radius: var(--radius); padding: 10px 16px; cursor: pointer;
+}
+.ja-composer button:hover:not(:disabled) { background: var(--hover); border-color: var(--accent); }
+.ja-composer button:disabled { opacity: 0.5; cursor: default; }
+
+/* --- the floating bubble ----------------------------------------------------------- */
+
+.ja-fab {
+  position: fixed; right: 22px; bottom: 22px; z-index: 60;
+  width: 52px; height: 52px; border-radius: 50%;
+  display: grid; place-items: center;
+  background: var(--panel); color: var(--accent);
+  border: 1px solid var(--border);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
+  cursor: pointer;
+  transition: transform 0.16s ease, border-color 0.16s, background 0.16s;
+}
+.ja-fab:hover { transform: translateY(-2px); border-color: var(--accent); background: var(--hover); }
+.ja-fab svg { width: 22px; height: 22px; }
+.ja-fab[hidden] { display: none; }
+
+.ja-panel {
+  position: fixed; right: 22px; bottom: 86px; z-index: 61;
+  display: flex; flex-direction: column;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.6);
+  overflow: hidden;
+  /* Sized from JS (persisted), clamped so it can never exceed the viewport. */
+  max-width: calc(100vw - 44px);
+  max-height: calc(100vh - 120px);
+  transform-origin: bottom right;
+  animation: ja-in 0.16s ease-out;
+}
+@keyframes ja-in {
+  from { opacity: 0; transform: translateY(8px) scale(0.98); }
+  to   { opacity: 1; transform: none; }
+}
+.ja-panel[hidden] { display: none; }
+
+.ja-head {
+  display: flex; align-items: center; gap: 8px;
+  padding: 11px 13px; border-bottom: 1px solid var(--border);
+  background: var(--panel);
+}
+.ja-title { font-size: 13px; color: var(--strong); font-weight: 600; margin-right: auto; }
+.ja-head button {
+  background: none; border: 1px solid transparent; color: var(--muted);
+  border-radius: var(--radius-sm); padding: 4px 8px; font-size: 12px; cursor: pointer;
+}
+.ja-head button:hover { color: var(--text); background: var(--hover); border-color: var(--border); }
+.ja-head a { color: var(--muted); text-decoration: none; font-size: 12px; padding: 4px 8px;
+             border-radius: var(--radius-sm); border: 1px solid transparent; }
+.ja-head a:hover { color: var(--text); background: var(--hover); border-color: var(--border); }
+
+.ja-panel .ja-thread { flex: 1; padding: 14px 13px; }
+.ja-panel .ja-composer { padding: 11px 13px; border-top: 1px solid var(--border);
+                         background: var(--panel); }
+.ja-panel .ja-composer button { padding: 10px 13px; }
+
+/* Resize from the top-left, because the panel is anchored bottom-right — dragging that
+   corner is the only direction that grows it into free space. */
+.ja-grip {
+  position: absolute; top: 0; left: 0; width: 16px; height: 16px;
+  cursor: nwse-resize; z-index: 2;
+}
+.ja-grip::after {
+  content: ""; position: absolute; top: 5px; left: 5px;
+  width: 7px; height: 7px;
+  border-top: 2px solid var(--border); border-left: 2px solid var(--border);
+  border-radius: 2px 0 0 0;
+}
+.ja-panel:hover .ja-grip::after { border-color: var(--muted); }
+
+/* On a phone the panel becomes a sheet: a 400px floating card on a 390px screen is a
+   worse experience than simply taking the screen. */
+@media (max-width: 560px) {
+  .ja-panel {
+    right: 0; left: 0; bottom: 0; top: 0;
+    width: auto !important; height: auto !important;
+    max-width: none; max-height: none; border-radius: 0; border: none;
+  }
+  .ja-grip { display: none; }
+  .ja-fab { right: 16px; bottom: 16px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ja-panel { animation: none; }
+  .ja-fab { transition: none; }
+  .ja-dot { animation: none; opacity: 0.6; }
+}

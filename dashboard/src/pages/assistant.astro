@@ -1,20 +1,15 @@
 ---
-// The assistant chat surface.
+// The full-page assistant.
 //
-// Everything happens client-side against the API, because /assistant/ask needs the
-// bearer token and Astro's server render has no access to it — the same reason triage
-// and fit-check are client-driven on the other pages.
-//
-// The confirmation card is the part worth reading carefully. When a turn wants to do
-// something privileged, the API refuses it *for that turn* and returns a pending
-// approval: a nonce plus a card the server computed. This page renders the card and
-// POSTs the nonce back. It never holds the arguments, so there is nothing here that
-// could send different ones than the card described.
+// It mounts the *same* client module as the floating bubble, over the same stored
+// session — so a question asked in the bubble is already here when you open this page,
+// and vice versa. The two surfaces differ only in the frame around the thread; the
+// thread itself is rendered by one function, which is why they cannot drift.
 import Layout from "../layouts/Layout.astro";
 import { publicApiBase } from "../lib/api";
 
-// The browser fetches this itself, so it needs the *public* base — 127.0.0.1 on the
-// server means this machine; in a visitor's browser it means their laptop.
+// The browser fetches this itself, so it needs the *public* base — a server-side
+// 127.0.0.1 means the visitor's own laptop once it reaches a browser.
 const publicUrl = publicApiBase();
 ---
 
@@ -27,200 +22,67 @@ const publicUrl = publicApiBase();
         send or approve anything.
       </p>
     </div>
-    <button id="reindex" class="ghost" title="Rebuild the posting search index">
-      Reindex postings
-    </button>
+    <div class="head-actions">
+      <button id="page-new" class="ghost" type="button"
+              title="Start a fresh conversation">New chat</button>
+      <button id="page-reindex" class="ghost" type="button"
+              title="Rebuild the posting search index">Reindex postings</button>
+    </div>
   </header>
 
-  <div id="thread" class="thread">
-    <div class="empty" id="empty">
-      <p>Try one of these:</p>
-      <div class="suggestions">
-        <button class="chip">Is the pipeline healthy?</button>
-        <button class="chip">What did the last run do?</button>
-        <button class="chip">Which strong matches am I ignoring?</button>
-        <button class="chip">Are any sources stale?</button>
-      </div>
-    </div>
-  </div>
+  <div class="ja-thread page-thread" id="page-thread" role="log" aria-live="polite"
+       data-base={publicUrl}></div>
 
-  <form id="composer" class="composer">
-    <input
-      id="q"
-      type="text"
-      autocomplete="off"
-      placeholder="Ask about your pipeline…"
-      maxlength="2000"
-    />
-    <button id="send" type="submit">Ask</button>
+  <form class="ja-composer page-composer" id="page-form">
+    <input id="page-input" type="text" autocomplete="off" maxlength="2000"
+           placeholder="Ask about your pipeline…" aria-label="Ask the assistant" />
+    <button type="submit" id="page-send">Ask</button>
   </form>
 
   <style is:global>
-    .page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
+    .page-head { display: flex; align-items: flex-start; justify-content: space-between;
+                 gap: 16px; margin-bottom: 20px; flex-wrap: wrap; }
     .page-head h1 { margin: 0 0 4px; font-size: 20px; color: var(--strong); }
     .page-head .sub { margin: 0; color: var(--muted); font-size: 13px; max-width: 60ch; }
+    .head-actions { display: flex; gap: 8px; }
+    .ghost { background: var(--panel); border: 1px solid var(--border); color: var(--text);
+             border-radius: var(--radius); padding: 9px 15px; cursor: pointer; font-size: 13px; }
+    .ghost:hover { background: var(--hover); border-color: var(--accent); }
 
-    .thread { display: flex; flex-direction: column; gap: 14px; margin-bottom: 96px; }
-    .empty { color: var(--muted); font-size: 13px; }
-    .suggestions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
-    .chip { background: var(--panel); border: 1px solid var(--border); color: var(--text);
-            border-radius: 999px; padding: 6px 13px; font-size: 13px; cursor: pointer; }
-    .chip:hover { background: var(--hover); border-color: var(--accent); }
-
-    .turn { display: flex; flex-direction: column; gap: 8px; }
-    .bubble { border-radius: var(--radius); padding: 12px 14px; max-width: 78ch; }
-    .bubble.you { align-self: flex-end; background: var(--accent-dim); border: 1px solid var(--border); }
-    .bubble.it { background: var(--panel); border: 1px solid var(--border); white-space: pre-wrap; }
-    .bubble.err { background: rgba(248,113,113,.08); border: 1px solid var(--danger); color: var(--danger); }
-
-    .meta { font: 11px/1.4 var(--mono); color: var(--faint); }
-    .meta .warn { color: var(--warn); }
-    .thinking { color: var(--muted); font-size: 13px; }
-
-    /* The confirmation card: rendered from server-computed values only. */
-    .confirm { border: 1px solid var(--warn); border-radius: var(--radius);
-               background: rgba(251,191,36,.06); padding: 12px 14px; max-width: 78ch; }
-    .confirm h4 { margin: 0 0 6px; font-size: 13px; color: var(--warn); }
-    .confirm pre { margin: 0 0 10px; font: 12px/1.5 var(--mono); color: var(--text);
-                   white-space: pre-wrap; word-break: break-word; }
-    .confirm .row { display: flex; gap: 8px; }
-    .confirm button { border-radius: var(--radius-sm); padding: 6px 14px; cursor: pointer;
-                      border: 1px solid var(--border); background: var(--hover); color: var(--text); }
-    .confirm button.ok { border-color: var(--warn); color: var(--warn); }
-    .confirm .done { font-size: 12px; color: var(--good); }
-
-    .composer { position: fixed; bottom: 0; right: 0; left: var(--side-w, 210px);
-                display: flex; gap: 8px; padding: 14px 28px;
-                background: linear-gradient(transparent, var(--bg) 30%); }
-    .composer input { flex: 1; background: var(--panel); border: 1px solid var(--border);
-                      border-radius: var(--radius); padding: 11px 14px; color: var(--text); }
-    .composer input:focus { border-color: var(--accent); outline: none; }
-    .composer button, .ghost { background: var(--panel); border: 1px solid var(--border);
-                               color: var(--text); border-radius: var(--radius);
-                               padding: 11px 18px; cursor: pointer; }
-    .composer button:hover, .ghost:hover { background: var(--hover); border-color: var(--accent); }
-    .composer button[disabled] { opacity: .5; cursor: default; }
-    @media (max-width: 720px) { .composer { left: 0; padding: 12px 16px; } }
+    /* The page frames the same thread differently: it scrolls with the document and
+       the composer is docked, where the panel scrolls internally. */
+    .page-thread { margin-bottom: 96px; overflow: visible; }
+    .page-composer {
+      position: fixed; bottom: 0; right: 0; left: var(--side-w, 210px);
+      padding: 14px 28px;
+      background: linear-gradient(transparent, var(--bg) 30%);
+    }
+    @media (max-width: 720px) { .page-composer { left: 0; padding: 12px 16px; } }
   </style>
 
-  <script is:inline define:vars={{ publicUrl }}>
-    (() => {
-      const base = publicUrl;
-      const thread = document.getElementById("thread");
-      const empty = document.getElementById("empty");
-      const form = document.getElementById("composer");
-      const input = document.getElementById("q");
-      const send = document.getElementById("send");
+  <script>
+    import { ask, clearSession, mount } from "../lib/assistant";
 
-      /* On 401/403 the actionable message must win over the server's terse detail:
-         "Unauthorized." tells you nothing, "open Settings, sign in" tells you what to
-         do. Every other status keeps the server's wording, which is more specific than
-         anything this page could invent. */
-      const problem = (status, body) =>
-        status === 401 || status === 403
-          ? window.JA.explain(status)
-          : (body && body.detail) || window.JA.explain(status);
+    const root = document.getElementById("page-thread") as HTMLElement;
+    const input = document.getElementById("page-input") as HTMLInputElement;
+    const base = root.dataset.base || "";
 
-      const el = (tag, cls, text) => {
-        const n = document.createElement(tag);
-        if (cls) n.className = cls;
-        if (text !== undefined) n.textContent = text;   // textContent, never innerHTML:
-        return n;                                       // answers may quote job text
-      };
+    mount({
+      root,
+      form: document.getElementById("page-form") as HTMLFormElement,
+      input,
+      send: document.getElementById("page-send") as HTMLButtonElement,
+      base,
+      scroll: document.scrollingElement as HTMLElement,
+    });
 
-      function turn() {
-        const t = el("div", "turn");
-        thread.appendChild(t);
-        t.scrollIntoView({ behavior: "smooth", block: "end" });
-        return t;
-      }
-
-      /* One approval. The card text is server-computed; we send back only the nonce. */
-      function confirmCard(t, p) {
-        const box = el("div", "confirm");
-        box.appendChild(el("h4", null, `${p.tool} needs your approval`));
-        box.appendChild(el("pre", null, p.card));
-        const row = el("div", "row");
-        const yes = el("button", "ok", "Approve");
-        const no = el("button", null, "Dismiss");
-        row.append(yes, no);
-        box.appendChild(row);
-        t.appendChild(box);
-
-        no.onclick = () => box.replaceChildren(el("div", "meta", "Dismissed."));
-        yes.onclick = async () => {
-          yes.disabled = no.disabled = true;
-          yes.textContent = "Applying…";
-          try {
-            const r = await fetch(
-              `${base}/assistant/confirm/${encodeURIComponent(p.nonce)}`,
-              { method: "POST", headers: window.JA.headers() },
-            );
-            const body = await r.json().catch(() => ({}));
-            box.replaceChildren(
-              el("div", r.ok ? "done" : "meta warn",
-                 r.ok ? body.result : problem(r.status, body)),
-            );
-          } catch (e) {
-            box.replaceChildren(el("div", "meta warn", `Could not reach the API: ${e}`));
-          }
-        };
-      }
-
-      async function ask(question, opts = {}) {
-        if (!question.trim()) return;
-        empty?.remove();
-        const t = turn();
-        t.appendChild(el("div", "bubble you", question));
-        const waiting = el("div", "thinking", "thinking…");
-        t.appendChild(waiting);
-        send.disabled = input.disabled = true;
-
-        try {
-          const r = await fetch(`${base}/assistant/ask`, {
-            method: "POST",
-            headers: window.JA.headers(),
-            body: JSON.stringify({ question, reindex: !!opts.reindex }),
-          });
-          const body = await r.json().catch(() => ({}));
-          waiting.remove();
-
-          if (!r.ok) {
-            t.appendChild(el("div", "bubble err", problem(r.status, body)));
-            return;
-          }
-
-          t.appendChild(el("div", "bubble it", body.answer));
-          const marks = [`${body.provider}/${body.model}`, body.strategy,
-                         `${body.elapsed_ms}ms`, `run ${body.run_id}`];
-          t.appendChild(el("div", "meta", marks.join(" · ")));
-          // Degradation is surfaced, never hidden: an answer from a weaker model
-          // should not look identical to an answer from the best one available.
-          for (const w of body.warnings || []) {
-            t.appendChild(el("div", "meta warn", `! ${w}`));
-          }
-          for (const p of body.pending || []) confirmCard(t, p);
-        } catch (e) {
-          waiting.remove();
-          t.appendChild(el("div", "bubble err", `Could not reach the API: ${e}`));
-        } finally {
-          send.disabled = input.disabled = false;
-          input.focus();
-          thread.lastElementChild?.scrollIntoView({ behavior: "smooth", block: "end" });
-        }
-      }
-
-      form.onsubmit = (e) => {
-        e.preventDefault();
-        const q = input.value;
-        input.value = "";
-        ask(q);
-      };
-      document.querySelectorAll(".chip").forEach((c) => {
-        c.onclick = () => ask(c.textContent);
-      });
-      document.getElementById("reindex").onclick = () =>
-        ask("How many postings are indexed now?", { reindex: true });
-    })();
+    document.getElementById("page-new")!.onclick = () => {
+      clearSession();
+      input.focus();
+    };
+    // Reindexing is slow and invisible, so it is phrased as a question whose answer
+    // proves it happened rather than a button that silently returns.
+    document.getElementById("page-reindex")!.onclick = () =>
+      ask(base, "How many postings are indexed now?", { reindex: true });
   </script>
 </Layout>

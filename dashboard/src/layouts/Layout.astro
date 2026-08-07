@@ -5,6 +5,8 @@
 // any page. Badge data comes from the same API the pages use; a failed fetch just
 // hides the badges rather than breaking the page.
 import { getStats, getFollowups, type Stats } from "../lib/api";
+import AssistantBubble from "../components/AssistantBubble.astro";
+import "../styles/assistant.css";
 
 const { title = "Job Agent" } = Astro.props;
 const path = Astro.url.pathname;
@@ -87,6 +89,8 @@ const isActive = (href: string) =>
       </nav>
       <main class="content"><slot /></main>
     </div>
+
+    <AssistantBubble />
 
     <style is:global>
       :root {

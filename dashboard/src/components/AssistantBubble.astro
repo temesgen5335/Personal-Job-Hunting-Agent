@@ -1,0 +1,134 @@
+---
+// The floating assistant, on every page.
+//
+// It is not a second implementation — it mounts the same client module the /assistant
+// page mounts, over the same stored session. Ask something here, open the page, and
+// the conversation is there; the reverse holds too.
+//
+// Hidden on /assistant itself, where a floating copy of the page you are already
+// looking at is just clutter.
+import { publicApiBase } from "../lib/api";
+
+const publicUrl = publicApiBase();
+const hide = Astro.url.pathname.startsWith("/assistant");
+---
+
+{!hide && (
+  <>
+    <button
+      id="ja-fab"
+      class="ja-fab"
+      type="button"
+      aria-label="Open assistant"
+      aria-expanded="false"
+      aria-controls="ja-panel"
+      title="Assistant  (⌘K)"
+      data-base={publicUrl}
+    >
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 9 9 0 0 1-3.3-.6L3 21l1.7-5a8.2 8.2 0 0 1-.7-3.5 8.4 8.4 0 0 1 8.5-8.4 8.4 8.4 0 0 1 8.5 8.4z"/>
+      </svg>
+    </button>
+
+    <section id="ja-panel" class="ja-panel" hidden aria-label="Assistant">
+      <div class="ja-grip" id="ja-grip" role="separator" aria-label="Resize"></div>
+      <header class="ja-head">
+        <span class="ja-title">Assistant</span>
+        <button type="button" id="ja-new" title="Start a fresh conversation">New</button>
+        <a href="/assistant" title="Open the full page">Expand</a>
+        <button type="button" id="ja-close" aria-label="Close assistant">✕</button>
+      </header>
+      <div class="ja-thread" id="ja-thread" role="log" aria-live="polite"></div>
+      <form class="ja-composer" id="ja-form">
+        <input id="ja-input" type="text" autocomplete="off" maxlength="2000"
+               placeholder="Ask about your pipeline…" aria-label="Ask the assistant" />
+        <button type="submit" id="ja-send">Ask</button>
+      </form>
+    </section>
+  </>
+)}
+
+<script>
+  import { clearSession, loadUi, mount, saveUi } from "../lib/assistant";
+
+  const fab = document.getElementById("ja-fab") as HTMLButtonElement | null;
+  const panel = document.getElementById("ja-panel");
+  if (fab && panel) {
+    const base = fab.dataset.base || "";
+    const input = document.getElementById("ja-input") as HTMLInputElement;
+    const grip = document.getElementById("ja-grip")!;
+
+    mount({
+      root: document.getElementById("ja-thread") as HTMLElement,
+      form: document.getElementById("ja-form") as HTMLFormElement,
+      input,
+      send: document.getElementById("ja-send") as HTMLButtonElement,
+      base,
+    });
+
+    // Restore the size the user last chose. Clamped in CSS, so a size saved on a big
+    // monitor cannot render the panel unusable on a laptop.
+    const ui = loadUi();
+    panel.style.width = `${ui.w}px`;
+    panel.style.height = `${ui.h}px`;
+
+    let lastFocus: HTMLElement | null = null;
+    const setOpen = (open: boolean) => {
+      panel.hidden = !open;
+      fab.setAttribute("aria-expanded", String(open));
+      fab.setAttribute("aria-label", open ? "Close assistant" : "Open assistant");
+      saveUi({ open });
+      if (open) {
+        lastFocus = document.activeElement as HTMLElement;
+        input.focus();
+      } else {
+        // Return focus where it was, or the widget swallows keyboard navigation.
+        (lastFocus && document.contains(lastFocus) ? lastFocus : fab).focus();
+      }
+    };
+
+    fab.onclick = () => setOpen(panel.hidden);
+    document.getElementById("ja-close")!.onclick = () => setOpen(false);
+    document.getElementById("ja-new")!.onclick = () => {
+      clearSession();
+      input.focus();
+    };
+
+    // Reopen where you left off — a widget that forgets it was open is a widget you
+    // have to re-open on every navigation.
+    if (ui.open) setOpen(true);
+
+    document.addEventListener("keydown", (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setOpen(panel.hidden);
+      } else if (e.key === "Escape" && !panel.hidden) {
+        setOpen(false);
+      }
+    });
+
+    // Drag the top-left corner to resize. Pointer events (not mouse) so it works with
+    // a trackpad, a stylus and touch without three code paths.
+    grip.addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      grip.setPointerCapture(e.pointerId);
+      const rect = panel.getBoundingClientRect();
+      const x0 = e.clientX, y0 = e.clientY;
+
+      const move = (ev: PointerEvent) => {
+        const w = Math.min(Math.max(320, rect.width + (x0 - ev.clientX)), window.innerWidth - 44);
+        const h = Math.min(Math.max(280, rect.height + (y0 - ev.clientY)), window.innerHeight - 120);
+        panel.style.width = `${w}px`;
+        panel.style.height = `${h}px`;
+      };
+      const up = () => {
+        grip.removeEventListener("pointermove", move);
+        grip.removeEventListener("pointerup", up);
+        saveUi({ w: panel.getBoundingClientRect().width, h: panel.getBoundingClientRect().height });
+      };
+      grip.addEventListener("pointermove", move);
+      grip.addEventListener("pointerup", up);
+    });
+  }
+</script>
