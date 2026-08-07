@@ -46,7 +46,21 @@ class Settings(BaseSettings):
     anthropic_api_key: str = Field("", alias="ANTHROPIC_API_KEY")
 
     # Per-provider model (sensible free defaults).
-    groq_model: str = Field("llama-3.1-8b-instant", alias="GROQ_MODEL")
+    # llama-3.3-70b-versatile over llama-3.1-8b-instant, measured on this project's own
+    # tasks (spike, Aug 2026, n=5-6 against the real CV and store). Both free on Groq.
+    #
+    #   quality on current tasks : identical — 18/18 valid+conformant for both
+    #   latency                  : 8b is FASTER (0.38s vs 0.61s median per scoring call),
+    #                              worth ~6s across a whole pipeline run. Negligible.
+    #   tool-calling loop        : 8b scores 0/5. It emits well-formed tool calls and
+    #                              picks the right tool, then CANNOT use the tool result
+    #                              to produce an answer. 70b: 5/5.
+    #
+    # So this is not a speed or quality choice — on today's prompt-and-parse work the 8B
+    # is fine and marginally quicker. It is chosen because the assistant harness needs a
+    # model that can complete a tool loop, and a default that silently can't would make
+    # every agent task take the degraded path.
+    groq_model: str = Field("llama-3.3-70b-versatile", alias="GROQ_MODEL")
     openrouter_model: str = Field("meta-llama/llama-3.3-70b-instruct:free", alias="OPENROUTER_MODEL")
     openai_model: str = Field("gpt-4o-mini", alias="OPENAI_MODEL")
     gemini_model: str = Field("gemini-2.0-flash", alias="GEMINI_MODEL")

@@ -132,6 +132,32 @@ of the penalty. Lesson: unit tests assert behaviors; only a ranked, labeled data
 asserts *quality* — and floors belong at measured reality, with known misses
 documented in the dataset rather than hidden by generous thresholds.
 
+## Free-model capability spike (Aug 2026)
+
+Measured against the real CV and store before changing the Groq default, because the
+agentkit plan assumed the 8B model was too weak and assumptions about models age badly.
+
+| | quality (existing tasks) | latency / scoring call | tool loop |
+|---|---|---|---|
+| `llama-3.1-8b-instant` | 18/18 | **0.38s** (fastest) | **0/5** |
+| `llama-3.3-70b-versatile` | 18/18 | 0.61s | 5/5 |
+| `openai/gpt-oss-120b` | 18/18 | 1.26s | 5/5 |
+
+Three things worth keeping:
+
+1. **The 8B emits perfect tool calls and still cannot run a loop.** 5/5 on emitting a
+   well-formed call and 5/5 on picking the right tool, then 0/5 on using the tool
+   *result* to answer. A naive capability probe would set `native_tools=True` and be
+   badly wrong — which is exactly why the plan says a probe may set capability flags
+   but never tier.
+2. **A first latency measurement was off by 30x and nearly shipped in a code comment.**
+   Bursting three tasks x six runs hit Groq rate limits, and the OpenAI SDK retries
+   internally with backoff, so the numbers measured queueing rather than the model. Fair
+   A/B needs warmed clients, interleaved models, and spacing between calls.
+3. `llama-3.3-70b` over-calls tools on a conversational closing ("thanks, that's all")
+   but answers three other no-tool prompts directly. `gpt-oss-120b` was clean 20/20 and
+   is the better pure-capability pick, at ~3x the latency.
+
 ## Known Limitations
 
 - **No LinkedIn/Indeed/Glassdoor adapter.** These sites are aggressively anti-bot with
