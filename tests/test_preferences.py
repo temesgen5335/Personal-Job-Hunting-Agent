@@ -4,14 +4,42 @@ from jobagent.preferences import load_preferences
 
 
 def test_preferences_load():
-    prefs = load_preferences()
-    assert prefs.profile.name == "Temesgen Gebreabzgi"
+    """The *tracked* config alone yields a usable search profile.
+
+    `local_path` points at a file that cannot exist, so the gitignored identity overlay
+    is excluded by construction. This test previously asserted the real name, which only
+    the overlay supplies — so it passed on the author's machine and failed in CI, where
+    there is no overlay. Identity is covered by the overlay tests below; this one must
+    only assert what every clone of the repo gets.
+    """
+    prefs = load_preferences(local_path="config/no_such_overlay.toml")
     assert "AI Engineer" in prefs.profile.target_roles
     assert "remote" in prefs.profile.must_haves
     # Watchlist populated with verified slugs across all three ATS platforms.
     assert "anthropic" in prefs.watchlist.greenhouse
     assert "openai" in prefs.watchlist.ashby
     assert len(prefs.watchlist.lever) >= 1
+
+
+def test_no_test_depends_on_the_gitignored_identity_overlay():
+    """The class of bug, not just the instance.
+
+    A test that reads `config/preferences.toml` without pinning `local_path` silently
+    picks up whatever identity overlay the developer happens to have, which is how the
+    stale assertion above stayed green locally for weeks while CI was the only thing
+    that could see it.
+    """
+    import pathlib
+    import re
+
+    offenders = []
+    for path in pathlib.Path("tests").glob("*.py"):
+        for lineno, line in enumerate(path.read_text().splitlines(), 1):
+            if re.search(r"load_preferences\(\s*\)", line):
+                offenders.append(f"{path.name}:{lineno}")
+    assert offenders == [], (
+        "these tests load the real preferences file with the gitignored overlay "
+        f"participating, so they are environment-dependent: {offenders}")
 
 
 def test_missing_file_returns_empty_defaults():
