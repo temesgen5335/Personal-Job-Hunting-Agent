@@ -374,6 +374,12 @@ def test_no_read_tool_emits_None_into_a_model_result(store, settings):
         "match": {"scored": 10}}))
     store.log_event(Event(kind="ingest", job_id=job_id,
                           payload={"run_id": "abc123def456", "source": "remoteok"}))
+    # An assistant session closes with its own `run` event carrying no counts. The
+    # first version of this fixture omitted it, so the guard missed the very bug the
+    # feature that writes it introduced: `fetched=None ... took=Nones` in recent_runs.
+    store.log_event(Event(kind="run", payload={
+        "run_id": "sess00000001", "kind_detail": "agent_session",
+        "summary": "asked a question", "tool_calls": 3}))
 
     a = assistant(store, settings)
     calls = {
@@ -502,3 +508,31 @@ def test_indexing_skips_postings_with_no_description(store):
         {"id": "3", "title": "C", "source": "remoteok"},
     ])
     assert [c.ref for c in chunks] == ["1"]      # empty chunks are only noise
+
+
+def test_assistant_sessions_do_not_pollute_the_pipeline_run_ledger(store, settings):
+    """Sessions share the audit spine — same `run` event, no new table — but they are
+    not pipeline passes.
+
+    Left mixed in, they put countless rows in the ledger that `GET /runs`, the dashboard
+    and the assistant's own recent_runs tool all render as blank pipeline runs. Found by
+    running the CLI against the real store and watching my own session come back as
+    `fetched=None ... took=Nones`.
+    """
+    from jobagent.core.schemas import Event
+
+    store.log_event(Event(kind="run", payload={
+        "run_id": "pipe00000001", "duration_s": 9.5,
+        "ingest": {"fetched": 10, "new": 2}, "match": {"scored": 10}}))
+    store.log_event(Event(kind="run", payload={
+        "run_id": "sess00000001", "kind_detail": "agent_session", "tool_calls": 2}))
+
+    pipeline = store.list_runs(limit=10)
+    sessions = store.list_runs(limit=10, kind_detail="agent_session")
+
+    assert [r["run_id"] for r in pipeline] == ["pipe00000001"]
+    assert [r["run_id"] for r in sessions] == ["sess00000001"]
+
+    # And the tool that renders the ledger shows neither None nor the session.
+    out = assistant(store, settings).toolbox.execute(ToolCall("c", "recent_runs", {})).content
+    assert "None" not in out and "sess0000" not in out

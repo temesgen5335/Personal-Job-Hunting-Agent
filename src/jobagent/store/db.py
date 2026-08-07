@@ -615,16 +615,25 @@ class Store:
         self.conn.execute("DELETE FROM locks WHERE name=? AND holder=?", (name, holder))
         self.conn.commit()
 
-    def list_runs(self, limit: int = 20) -> list[dict]:
+    def list_runs(self, limit: int = 20, *, kind_detail: str | None = None) -> list[dict]:
         """The run ledger: one row per pipeline pass, newest first.
 
         Reads the `run` summary events the pipeline logs at the end of each pass.
         This is the answer to "what has the agent actually done lately" — counts per
         stage, digest outcome, duration — without grepping journald.
+
+        Assistant sessions also close with a `run` event, so they share the audit spine
+        and need no new table. They are **excluded here by default**: they carry no
+        ingest or match counts, so mixing them in puts blank rows in the ledger and
+        anything rendering counts prints None. Pass `kind_detail="agent_session"` to
+        list those instead.
         """
+        wanted = kind_detail or ""
         rows = self.conn.execute(
-            "SELECT payload, created_at FROM events WHERE kind='run' ORDER BY id DESC LIMIT ?",
-            (limit,),
+            "SELECT payload, created_at FROM events WHERE kind='run' "
+            "AND COALESCE(json_extract(payload, '$.kind_detail'), '') = ? "
+            "ORDER BY id DESC LIMIT ?",
+            (wanted, limit),
         ).fetchall()
         out = []
         for r in rows:

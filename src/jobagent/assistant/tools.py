@@ -113,11 +113,19 @@ def build_tools(*, store, settings, links, index=None) -> list[Registration]:
         def render(r):
             ing = r.get("ingest") or {}
             errs = ing.get("errors") or []
-            return (f"{r.get('run_id', '?')[:8]} {r.get('finished_at', '')} "
-                    f"fetched={ing.get('fetched')} new={ing.get('new')} "
-                    f"dropped={ing.get('dropped')} scored={(r.get('match') or {}).get('scored')} "
-                    f"took={r.get('duration_s')}s"
-                    + (f" ERRORS: {'; '.join(str(e) for e in errs)[:200]}" if errs else ""))
+            # Render only what the row actually carries. Rows differ in shape — an
+            # assistant session has no counts — and printing None invites the model to
+            # report a missing figure as zero.
+            bits = [f"{k}={ing[k]}" for k in ("fetched", "new", "dropped")
+                    if ing.get(k) is not None]
+            if (scored := (r.get("match") or {}).get("scored")) is not None:
+                bits.append(f"scored={scored}")
+            if (secs := r.get("duration_s")) is not None:
+                bits.append(f"took={secs}s")
+            if errs:
+                bits.append(f"ERRORS: {'; '.join(str(e) for e in errs)[:200]}")
+            return (f"{(r.get('run_id') or '?')[:8]} {r.get('finished_at') or ''} "
+                    + (" ".join(bits) or "no counts recorded"))
         return _rows(store.list_runs(limit=FETCH_ROWS), render)
 
     def run_detail(args: dict) -> str:

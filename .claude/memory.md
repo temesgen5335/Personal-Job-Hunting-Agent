@@ -259,6 +259,42 @@ The guarantee is structural: no send tool exists, `custom_llm_base_url` is froze
 data proves the data contract.** Both Phase 1 and Phase 3 shipped green suites with real
 defects that one live call exposed immediately.
 
+## Phase 4: three interfaces, one mechanism (Aug 2026)
+
+CLI, dashboard page and Telegram `/ask`. The confirmation flow is the same mechanism
+with three renderers, and the differences between them turned out to be instructive
+rather than incidental:
+
+- **CLI** blocks on input, so it can bind an approval to `sha256(args)` and check it.
+- **HTTP and Telegram cannot block**, so the model's turn completes *without* the write
+  and the approval becomes a separate request. That forced split is a security
+  *upgrade*: the client sends only a nonce, the arguments never leave the server, so
+  confirm-then-swap has no field to happen in. There is nothing to substitute.
+- **Chat cannot approve config changes at all.** `Surface.CHAT` sits outside
+  `admin_surfaces`, so the refusal comes from the gatekeeper rather than from the
+  Telegram module remembering a rule.
+
+Two defects found by actually running it, neither catchable by the suite:
+
+1. **Assistant sessions polluted the pipeline run ledger.** Sessions close with a `run`
+   event to share the audit spine — the plan's intent, and it works — but `list_runs()`
+   returned them alongside pipeline passes, so `GET /runs`, the dashboard and the
+   assistant's own `recent_runs` all rendered blank rows: `fetched=None ... took=Nones`.
+   Found by running the CLI against the real store and watching my own session come
+   back. `list_runs` now filters on `kind_detail`. **This is the same None-rendering
+   class as Phase 3, and my Phase 3 guard missed it because the fixture had no
+   agent-session row** — the feature that writes those rows was added after the guard.
+2. **The dashboard showed `"Unauthorized."` instead of "open Settings, sign in".** My
+   fallback was `body.detail || JA.explain(status)`, so the server's terse text always
+   won. On 401/403 the actionable message must win; every other status keeps the
+   server's wording. Found in a browser, not in a test.
+
+Verified in a real browser against the live API: answer with correct numbers, provenance
+line, both degradation warnings, and the confirmation card's POST path. Not verified in
+browser: the page's own `confirmCard` closure — it needs a real pending approval, which
+needs a tool loop, which needed Groq, whose tokens-per-day limit I exhausted during
+testing. The server half of that flow is covered by a test that changes real DB state.
+
 ## Known Limitations
 
 - **No LinkedIn/Indeed/Glassdoor adapter.** These sites are aggressively anti-bot with
@@ -294,7 +330,8 @@ defects that one live call exposed immediately.
 | Tier 3 | `65c4afc`.. | Run-ID spine + run ledger, matching eval harness (P@5=1.0 floor), honest ARCHITECTURE.md |
 | agentkit P1 | `3166413`..`d4a4255` | Capability-aware multi-LLM: IR, tier registry, breaker, router, nine strategies, Runner. 386 tests |
 | agentkit P2 | `f656906` | Permission tiers, FTS5 knowledge, fail-closed audit, GuardedToolBox. 425 tests |
-| assistant P3 | (this) | 14 in-process tools, R2 exclusions, CONFIG_WRITABLE + computed frozen, impact previews, snapshots, fenced retrieval. 463 tests |
+| assistant P3 | `a05b4ba` | 14 in-process tools, R2 exclusions, CONFIG_WRITABLE + computed frozen, impact previews, snapshots, fenced retrieval. 463 tests |
+| interfaces P4 | (this) | CLI + dashboard page + Telegram /ask; run-ledger separation. 489 tests |
 
 ---
 

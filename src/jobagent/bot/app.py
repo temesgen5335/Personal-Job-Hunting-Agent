@@ -26,6 +26,13 @@ from telegram.ext import (
 )
 
 from jobagent.apply import approve_and_send, prepare_application
+from jobagent.bot.assistant_bridge import (
+    PendingBox,
+    ask_blocking,
+    format_answer,
+    format_pending,
+    run_confirmed,
+)
 from jobagent.apply.ats import apply_target
 from jobagent.apply.ats_flow import create_ats_application, run_ats
 from jobagent.bot.service import (
@@ -179,6 +186,36 @@ async def apply_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await _start_apply(context, update.message, rank)
 
 
+async def ask_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/ask <question> — the assistant, read-mostly.
+
+    The model call is blocking, so it runs in a worker thread like every other slow
+    helper here. Config changes cannot be approved from chat (see assistant_bridge);
+    ordinary actions come back as an inline button carrying only a nonce.
+    """
+    if not await _guard(update, context):
+        return
+    question = " ".join(context.args or "").strip()
+    if not question:
+        await update.message.reply_text("Usage: /ask <question>\ne.g. /ask is the pipeline healthy?")
+        return
+
+    box = context.bot_data.setdefault("assistant_pending", PendingBox())
+    thinking = await update.message.reply_text("🤔 thinking…")
+    answer = await asyncio.to_thread(
+        ask_blocking, db_path=_db(context), settings=_bd(context, "settings"),
+        question=question, pending_box=box)
+
+    await thinking.edit_text(format_answer(answer))
+    for item in answer.pending:
+        await update.message.reply_text(
+            format_pending(item),
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("✅ Approve", callback_data=f"askok:{item['nonce']}"),
+                InlineKeyboardButton("✖️ Dismiss", callback_data="askno:x"),
+            ]]))
+
+
 async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Captures keywords when the menu asked for them."""
     if not await _guard(update, context):
@@ -290,6 +327,22 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     action, value = parse_callback_data(query.data)
     flt = _flt(context)
 
+    # --- assistant confirmations ---
+    if action == "askno":
+        await query.edit_message_text("Dismissed.")
+        return
+    if action == "askok":
+        box = context.bot_data.setdefault("assistant_pending", PendingBox())
+        item = box.take(value)
+        if item is None:
+            await query.edit_message_text("That approval expired or was already used.")
+            return
+        await query.edit_message_text("Applying…")
+        text = await asyncio.to_thread(run_confirmed, db_path=_db(context),
+                                       settings=_bd(context, "settings"), item=item)
+        await query.edit_message_text(text)
+        return
+
     # --- menu navigation / filters ---
     if action == "menu":
         await query.edit_message_text(menu_text(flt), parse_mode=MD, reply_markup=main_menu_kb())
@@ -360,6 +413,7 @@ def build_application(settings, profile, llm, cv_master: str) -> Application:
     app.add_handler(CommandHandler("jobs", jobs))
     app.add_handler(CommandHandler("apply", apply_cmd))
     app.add_handler(CommandHandler("status", status))
+    app.add_handler(CommandHandler("ask", ask_cmd))
     app.add_handler(CallbackQueryHandler(on_button))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
     return app

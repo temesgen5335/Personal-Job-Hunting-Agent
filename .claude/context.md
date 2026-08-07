@@ -82,7 +82,8 @@ Two interfaces, one backend:
 | Dashboard v3 | Done — sidebar shell, health-first Overview, triage queue + focus mode, fit-check states, nudge banner, locked Settings (from the Claude Design project) |
 | agentkit (Phase 2) | **Complete.** Permission tiers (READ/ACT/ADMIN + structural exclusion), argument-bound single-use confirmations, FTS5 knowledge index with per-chunk provenance and trust, fail-closed audit on the run_id spine, and `GuardedToolBox` — same shape as `ToolBox`, so it drops into the Runner and there is no ungoverned path |
 | assistant (Phase 3) | **Complete.** `src/jobagent/assistant/`: 14 in-process tools, R2 exclusions as absences (no send/approve/ats tool exists), `CONFIG_WRITABLE` allow-list with frozen as the computed complement, impact previews dry-run over real stored rows, config snapshots + rollback, and FTS5 search over postings fenced as UNTRUSTED |
-| Test suite | 463 tests, 34 test files, zero network, injectable fakes throughout |
+| assistant interfaces (Phase 4) | **Complete.** Three surfaces on one mechanism: `scripts/ask.py` (CLI), `/assistant` dashboard page, and Telegram `/ask`. Confirmations differ only in renderer — the CLI binds to `sha256(args)`, HTTP and Telegram send only a nonce and keep the arguments server-side. Config writes are refused on chat by construction (`Surface.CHAT` is outside `admin_surfaces`) |
+| Test suite | 489 tests, 36 test files, zero network, injectable fakes throughout |
 
 ## Known Gaps (from the July 2026 audit)
 
@@ -120,5 +121,5 @@ pipeline health, retry/backoff, docs truth-pass). Still open:
 
 - **11,700+** jobs scored in a live run (8,253 fetched in a single pass across 6 adapters)
 - **40** companies in the ATS watchlist (Greenhouse/Lever/Ashby)
-- **463** tests across 34 files — all run offline, no network, no credentials
+- **489** tests across 36 files — all run offline, no network, no credentials
 - **6** LLM providers with automatic failover (3 free, 3 paid)

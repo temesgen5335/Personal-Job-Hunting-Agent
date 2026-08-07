@@ -473,6 +473,16 @@ def create_app(settings=None, profile=None, llm: Any = _UNSET, cv_master: str | 
             s.close()
         return _ats_response(app_id, res)
 
+    # The assistant lives in its own module: it is the only surface with a two-phase
+    # confirmation flow, and keeping that out of here stops it being mistaken for the
+    # ordinary single-request pattern every other route follows.
+    from jobagent.api.assistant_routes import register as register_assistant
+
+    # Held on app.state so the pending-approval registry is reachable — tests drive the
+    # two-phase flow through it, and an operator surface can list what is waiting.
+    app.state.assistant_pending = register_assistant(
+        app, store_factory=store, settings_factory=get_settings, auth=auth)
+
     return app
 
 
