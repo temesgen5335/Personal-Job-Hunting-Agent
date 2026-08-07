@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from jobagent.assistant import ASSISTANT_NAME
 from jobagent.digest import diversify, format_matches
 from jobagent.store import Store
 
@@ -15,6 +16,8 @@ HELP_TEXT = (
     "/jobs [N] — top N job matches (default 10)\n"
     "/apply <rank> — draft a tailored application for job #rank\n"
     "/status — pipeline stats (jobs, sources, matches)\n"
+    f"/ask <question> — ask {ASSISTANT_NAME} about your pipeline "
+    f"(or just say “{ASSISTANT_NAME}, …”)\n"
     "/help — this message\n\n"
     "Daily digests arrive automatically."
 )

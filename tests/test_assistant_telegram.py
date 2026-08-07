@@ -147,3 +147,52 @@ def test_the_bot_registers_the_ask_command_and_its_buttons():
     src = inspect.getsource(bot)
     assert 'CommandHandler("ask", ask_cmd)' in src
     assert '"askok"' in src and '"askno"' in src
+
+
+# --- addressing the assistant by name ------------------------------------------------
+
+def test_the_assistant_answers_to_its_name_in_plain_chat():
+    """"Baer, ..." reaches the assistant the same as /ask, which is what makes the name
+    real in chat and not only in the model's own answer."""
+    from jobagent.assistant import ASSISTANT_NAME
+    from jobagent.bot.assistant_bridge import address
+
+    q = "is the pipeline healthy?"
+    assert address(f"{ASSISTANT_NAME}, {q}") == q
+    assert address(f"{ASSISTANT_NAME} {q}") == q
+    assert address(f"{ASSISTANT_NAME}: {q}") == q
+    assert address(f"{ASSISTANT_NAME.lower()} {q}") == q      # case-insensitive
+    assert address(f"{ASSISTANT_NAME.upper()} — {q}") == q
+
+
+def test_a_bare_name_is_an_opening_not_a_question():
+    """"Baer" alone should prompt for more, not send an empty question to a model."""
+    from jobagent.assistant import ASSISTANT_NAME
+    from jobagent.bot.assistant_bridge import address
+
+    assert address(ASSISTANT_NAME) == ""
+    assert address(f"{ASSISTANT_NAME}  ") == ""
+
+
+def test_a_passing_mention_is_not_a_command():
+    """Leading address only. A message that merely mentions the name is not addressed
+    to the assistant, and hijacking it would make the bot feel like it is interrupting."""
+    from jobagent.bot.assistant_bridge import address
+
+    assert address("did Baer answer earlier?") is None
+    assert address("the Baermann role looks good") is None   # word boundary, not prefix
+    assert address("") is None
+    assert address("just a normal message") is None
+
+
+def test_the_name_is_a_single_constant_shared_by_every_surface():
+    """One source of truth, so the prompt, the CLI, Telegram and the dashboard cannot
+    disagree about what the assistant is called."""
+    from jobagent.assistant import ASSISTANT_NAME
+    from jobagent.assistant.manifest import SYSTEM_PROMPT
+
+    assert ASSISTANT_NAME == "Baer"
+    assert f"Your name is {ASSISTANT_NAME}" in SYSTEM_PROMPT
+    # The prompt must tell the model that references to the name mean itself, or the
+    # model treats "Baer" as a stranger it has never heard of.
+    assert "they mean you" in SYSTEM_PROMPT

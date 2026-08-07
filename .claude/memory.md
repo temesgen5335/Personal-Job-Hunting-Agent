@@ -430,6 +430,27 @@ bug. Confirmed by screenshot and by reading the persisted inline style (540×600
 by trusting the number. When an automated measurement disagrees with a screenshot,
 believe the screenshot.
 
+## The assistant is named "Baer" (Aug 2026)
+
+`ASSISTANT_NAME = "Baer"` in `jobagent/assistant/manifest.py` is the single source of
+truth. The system prompt opens with it and tells the model that being addressed as
+"Baer" — or referred to as Baer in the third person — means *itself*; without that
+line the model treats the name as a stranger it has never heard of. Verified live:
+"What is your name?" → "My name is Baer."
+
+Because every surface uses the same `SYSTEM_PROMPT`, the identity flows to the CLI, the
+dashboard bubble/page and Telegram for free. On top of that, name-awareness was made
+real per surface rather than left implicit:
+- **Telegram**: `assistant_bridge.address()` (pure, tested) routes "Baer, <question>"
+  to the assistant exactly like `/ask`. Leading address only — a passing mention
+  ("did Baer answer earlier?") is not a command, and the word boundary means
+  "Baermann" does not match. A bare "Baer" prompts for more rather than sending an
+  empty question.
+- **Dashboard**: the nav item, bubble title, FAB label, page heading and title tag all
+  say Baer.
+
+To rename, change the one constant; nothing else hardcodes it (asserted by test).
+
 ## Known Limitations
 
 - **No LinkedIn/Indeed/Glassdoor adapter.** These sites are aggressively anti-bot with
@@ -470,7 +491,8 @@ believe the screenshot.
 | hardening P5 | `271af44` | Assistant eval set + floors, llm_doctor, question-aware prefetch. 509 tests |
 | systest | `413272a` | Full-system exercise: /jobs payload, 503 on exhaustion, config-write UX. 512 tests |
 | secretfix | `bfe474a` | SecretStore reads .env; presence-not-truthiness override. 515 tests |
-| chat-bubble | (this) | Floating assistant on every page; shared client + session with /assistant. Dashboard-only, no test-count change |
+| chat-bubble | `8bcaebf` | Floating assistant on every page; shared client + session with /assistant. Dashboard-only, no test-count change |
+| naming | (this) | Assistant named Baer; name-addressing in Telegram; 531 tests |
 
 ---
 

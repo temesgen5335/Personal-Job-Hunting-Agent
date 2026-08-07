@@ -26,8 +26,10 @@ from telegram.ext import (
 )
 
 from jobagent.apply import approve_and_send, prepare_application
+from jobagent.assistant import ASSISTANT_NAME
 from jobagent.bot.assistant_bridge import (
     PendingBox,
+    address,
     ask_blocking,
     format_answer,
     format_pending,
@@ -187,19 +189,25 @@ async def apply_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def ask_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """/ask <question> — the assistant, read-mostly.
+    """/ask <question> — talk to the assistant (Baer), read-mostly."""
+    if not await _guard(update, context):
+        return
+    question = " ".join(context.args or "").strip()
+    if not question:
+        await update.message.reply_text(
+            f"Usage: /ask <question>\ne.g. /ask is the pipeline healthy?\n"
+            f"You can also just say: {ASSISTANT_NAME}, is the pipeline healthy?")
+        return
+    await _run_ask(update, context, question)
+
+
+async def _run_ask(update: Update, context: ContextTypes.DEFAULT_TYPE, question: str) -> None:
+    """Shared assistant flow for both `/ask` and being addressed by name.
 
     The model call is blocking, so it runs in a worker thread like every other slow
     helper here. Config changes cannot be approved from chat (see assistant_bridge);
     ordinary actions come back as an inline button carrying only a nonce.
     """
-    if not await _guard(update, context):
-        return
-    question = " ".join(context.args or "").strip()
-    if not question:
-        await update.message.reply_text("Usage: /ask <question>\ne.g. /ask is the pipeline healthy?")
-        return
-
     box = context.bot_data.setdefault("assistant_pending", PendingBox())
     thinking = await update.message.reply_text("🤔 thinking…")
     answer = await asyncio.to_thread(
@@ -217,9 +225,12 @@ async def ask_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Captures keywords when the menu asked for them."""
+    """Captures keywords when the menu asked for them, and lets the operator address
+    the assistant by name in plain chat."""
     if not await _guard(update, context):
         return
+    # Menu keyword capture wins: if the menu just asked for keywords, the next message
+    # IS the keywords — even if it happens to start with the assistant's name.
     if context.user_data.get("awaiting") == "keyword":
         flt = set_keywords(_flt(context), update.message.text)
         context.user_data["awaiting"] = None
@@ -227,6 +238,16 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             f"✅ Keywords set: {', '.join(flt.keywords) or 'none'}\n\n{menu_text(flt)}",
             parse_mode=MD, reply_markup=main_menu_kb(),
         )
+        return
+
+    # "Baer, ..." routes to the assistant, the same as /ask.
+    addressed = address(update.message.text or "")
+    if addressed is not None:
+        if not addressed:
+            await update.message.reply_text(
+                f"Yes? Ask me something, e.g. “{ASSISTANT_NAME}, is the pipeline healthy?”")
+            return
+        await _run_ask(update, context, addressed)
 
 
 # --- shared views ----------------------------------------------------------------

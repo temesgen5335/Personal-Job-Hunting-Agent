@@ -19,10 +19,10 @@ const hide = Astro.url.pathname.startsWith("/assistant");
       id="ja-fab"
       class="ja-fab"
       type="button"
-      aria-label="Open assistant"
+      aria-label="Open Baer, your assistant"
       aria-expanded="false"
       aria-controls="ja-panel"
-      title="Assistant  (⌘K)"
+      title="Baer — your assistant  (⌘K)"
       data-base={publicUrl}
     >
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
@@ -31,10 +31,10 @@ const hide = Astro.url.pathname.startsWith("/assistant");
       </svg>
     </button>
 
-    <section id="ja-panel" class="ja-panel" hidden aria-label="Assistant">
+    <section id="ja-panel" class="ja-panel" hidden aria-label="Baer">
       <div class="ja-grip" id="ja-grip" role="separator" aria-label="Resize"></div>
       <header class="ja-head">
-        <span class="ja-title">Assistant</span>
+        <span class="ja-title">Baer</span>
         <button type="button" id="ja-new" title="Start a fresh conversation">New</button>
         <a href="/assistant" title="Open the full page">Expand</a>
         <button type="button" id="ja-close" aria-label="Close assistant">✕</button>

@@ -21,12 +21,33 @@ surface gets for the same reason.
 
 from __future__ import annotations
 
+import re
 import secrets
 import time
 from dataclasses import dataclass, field
 
+from jobagent.assistant import ASSISTANT_NAME
+
 MAX_TELEGRAM_CHARS = 3500      # 4096 hard limit; leave room for the footer
 NONCE_TTL_S = 300.0
+
+
+def address(text: str, name: str = ASSISTANT_NAME) -> str | None:
+    """If a message opens by addressing the assistant by name, return the rest.
+
+    So "Baer, is the pipeline healthy?" reaches the assistant just like `/ask` does —
+    which is what makes the name real in chat and not only in the model's answer.
+
+    Deliberately *leading* address only. A message that merely mentions the name in
+    passing ("did Baer answer earlier?") is not a command, and hijacking it would make
+    the bot feel like it is interrupting. Returns the remainder ("" when the message is
+    just the bare name, so the caller can prompt for more), or None when not addressed.
+    """
+    if not text:
+        return None
+    # name, then an optional comma/colon/dash, then either end-of-string or whitespace.
+    m = re.match(rf"\s*{re.escape(name)}\b[\s,:—-]*", text, re.IGNORECASE)
+    return text[m.end():].strip() if m else None
 
 
 @dataclass(frozen=True)

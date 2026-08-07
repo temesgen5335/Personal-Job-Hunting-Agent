@@ -4,7 +4,7 @@
 prompt and policy. Nothing here is imported by agentkit, and a test enforces that.
 """
 
-from jobagent.assistant.manifest import Assistant, build_assistant
+from jobagent.assistant.manifest import ASSISTANT_NAME, Assistant, build_assistant
 from jobagent.assistant.tools import EXCLUDED
 
-__all__ = ["Assistant", "build_assistant", "EXCLUDED"]
+__all__ = ["ASSISTANT_NAME", "Assistant", "build_assistant", "EXCLUDED"]
