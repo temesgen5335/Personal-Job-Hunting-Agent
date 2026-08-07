@@ -3,6 +3,17 @@ classified failover."""
 
 from agentkit.llm.capabilities import ModelCard, Tier, resolve_card
 from agentkit.llm.errors import Classified, Verdict, classify
+from agentkit.llm.health import Breaker
+from agentkit.llm.router import choose_strategy, describe, plans_for
+from agentkit.llm.tasks import (
+    Budget,
+    NoCapableModel,
+    Plan,
+    Rejection,
+    Strategy,
+    TaskOutcome,
+    TaskSpec,
+)
 from agentkit.llm.types import (
     ChatRequest,
     ChatResult,
@@ -20,4 +31,6 @@ __all__ = [
     "Usage", "assert_wellformed", "validate_tool_schema",
     "ModelCard", "Tier", "resolve_card",
     "Classified", "Verdict", "classify",
+    "Breaker", "choose_strategy", "describe", "plans_for",
+    "Budget", "NoCapableModel", "Plan", "Rejection", "Strategy", "TaskOutcome", "TaskSpec",
 ]
