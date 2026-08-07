@@ -53,7 +53,9 @@ DEFAULT_PROVIDERS: tuple[ProviderSpec, ...] = (
                  default_model="qwen-plus"),
     ProviderSpec("openrouter", "openrouter_api_key", "openrouter_model",
                  "https://openrouter.ai/api/v1",
-                 default_model="meta-llama/llama-3.3-70b-instruct:free"),
+                 # :free slugs are withdrawn without notice — the previous default
+                 # started 404ing. Verified live Aug 2026.
+                 default_model="openai/gpt-oss-20b:free"),
     ProviderSpec("custom", "custom_llm_api_key", "custom_llm_model",
                  None, base_url_field="custom_llm_base_url", requires_key=False),
 )

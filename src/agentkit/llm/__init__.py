@@ -6,6 +6,8 @@ from agentkit.llm.chain import DEFAULT_ORDER, DEFAULT_PROVIDERS, ProviderSpec, b
 from agentkit.llm.errors import Classified, Verdict, classify
 from agentkit.llm.health import Breaker
 from agentkit.llm.router import choose_strategy, describe, plans_for
+from agentkit.llm.runner import Runner
+from agentkit.llm.strategies import EXECUTORS, BudgetExceeded
 from agentkit.llm.tasks import (
     Budget,
     NoCapableModel,
@@ -33,6 +35,7 @@ __all__ = [
     "ModelCard", "Tier", "resolve_card",
     "Classified", "Verdict", "classify",
     "Breaker", "choose_strategy", "describe", "plans_for",
+    "Runner", "EXECUTORS", "BudgetExceeded",
     "build_chain", "ProviderSpec", "DEFAULT_PROVIDERS", "DEFAULT_ORDER",
     "Budget", "NoCapableModel", "Plan", "Rejection", "Strategy", "TaskOutcome", "TaskSpec",
 ]

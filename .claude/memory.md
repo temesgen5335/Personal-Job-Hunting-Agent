@@ -158,6 +158,37 @@ Three things worth keeping:
    but answers three other no-tool prompts directly. `gpt-oss-120b` was clean 20/20 and
    is the better pure-capability pick, at ~3x the latency.
 
+## The agent loop, proved end to end (Aug 2026)
+
+Phase 1 of agentkit closed with the strategy executors and the `Runner`. Three things
+the offline suite could not have told us, all found by making real calls:
+
+1. **The degradation claim is real, not theoretical.** The same task —"when did the
+   pipeline last run?"— answered correctly twice: through `native_loop` on
+   `llama-3.3-70b-versatile`, and through `prefetch_single_shot` on
+   `llama-3.1-8b-instant`, the model measured at 0/5 on tool loops. Python ran the
+   retrieval; the 8B only wrote the sentence. That is the whole design justified in one
+   comparison.
+2. **The shipped OpenRouter default was dead.** `meta-llama/llama-3.3-70b-instruct:free`
+   now 404s — OpenRouter moved it behind the paid slug — so the third provider in the
+   chain would have failed on every call, silently, forever. Nothing offline could catch
+   this; a live call caught it immediately. Replaced with `openai/gpt-oss-20b:free`
+   (~12s, verified). **`:free` slugs are withdrawn without notice — re-verify the
+   default whenever the chain looks short.**
+3. **The full failover walk works on real errors.** Groq 401 → classified PERMANENT,
+   breaker opened, never retried. Gemini 429 with no `Retry-After` → switched rather
+   than waiting. OpenRouter answered, and the router *changed strategy* on the way
+   because that backend's tool support is unproven. Failover crossed a capability
+   boundary without the caller knowing.
+
+Also worth keeping: the `agentkit` vocabulary boundary test earned its place. It failed
+on the word "employer" in a `jsonx.py` docstring — a comment, not code. That is exactly
+the slow leak the test exists to catch, and it caught it on the first try.
+
+Gemini's tool support is *still* unmeasured: every attempt has hit the free-tier quota.
+Its card says `native_tools=True` from the family pattern and its `notes` field says
+"unverified". Leave that honest until a call actually succeeds.
+
 ## Known Limitations
 
 - **No LinkedIn/Indeed/Glassdoor adapter.** These sites are aggressively anti-bot with
@@ -191,6 +222,7 @@ Three things worth keeping:
 | Tier 2 | `a41c592`..`ebf4567` (pre-scrub SHAs; rewritten) | Weighted matching, R1 email grounding, status lifecycle, follow-up drafts, gap chips |
 | scrub | `6a458d0` | History rewrite: CV blob + phone/email removed from all 37 commits |
 | Tier 3 | `65c4afc`.. | Run-ID spine + run ledger, matching eval harness (P@5=1.0 floor), honest ARCHITECTURE.md |
+| agentkit P1 | `3166413`.. | Capability-aware multi-LLM: IR, tier registry, breaker, router, nine strategies, Runner. 386 tests |
 
 ---
 

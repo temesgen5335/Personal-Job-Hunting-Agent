@@ -64,7 +64,13 @@ class Settings(BaseSettings):
     # model that can complete a tool loop, and a default that silently can't would make
     # every agent task take the degraded path.
     groq_model: str = Field("llama-3.3-70b-versatile", alias="GROQ_MODEL")
-    openrouter_model: str = Field("meta-llama/llama-3.3-70b-instruct:free", alias="OPENROUTER_MODEL")
+    # The previous default (meta-llama/llama-3.3-70b-instruct:free) now 404s — OpenRouter
+    # moved it behind the paid slug, so the third provider in the chain was dead on every
+    # call. Verified live Aug 2026: gpt-oss-20b:free answers in ~12s (nemotron-3-super
+    # also works but takes ~30s), same family as the gpt-oss-120b measured at 20/20.
+    # :free slugs are withdrawn without notice — if this 404s, list the current ones at
+    # https://openrouter.ai/api/v1/models and pick one advertising "tools".
+    openrouter_model: str = Field("openai/gpt-oss-20b:free", alias="OPENROUTER_MODEL")
     openai_model: str = Field("gpt-4o-mini", alias="OPENAI_MODEL")
     gemini_model: str = Field("gemini-2.0-flash", alias="GEMINI_MODEL")
     anthropic_model: str = Field("claude-sonnet-4-6", alias="ANTHROPIC_MODEL")

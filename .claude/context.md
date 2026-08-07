@@ -75,12 +75,12 @@ Two interfaces, one backend:
 | Dependability (Phase 0) | Actions workflow hardened: ingest gate applied in CI, store pruned+vacuumed so the 10GB cache limit can't be hit, failure notifies Telegram. Silence alarm warns when a schedule was skipped. **Still needs repo secrets set to actually run.** |
 | Store retention | Done — `prune_jobs(older_than_days)`; jobs you applied to are never pruned |
 | Provider coverage | groq · gemini · openai · anthropic · qwen · openrouter · custom, all assembled by `build_chain(settings)`. Families resolve by pattern and open models by parameter size, so adding a key needs no code change |
-| agentkit (Phase 1) | `src/agentkit/llm`: chat+tools IR, provider translation, measured tier registry, classified errors, circuit breaker, and the router (`plans_for`/`choose_strategy`). The strategy *implementations* and the loop itself are still to come |
+| agentkit (Phase 1) | **Complete.** `src/agentkit/`: chat+tools IR, provider translation, measured tier registry, classified errors, circuit breaker, router (`plans_for`/`choose_strategy`), the nine strategy executors, the `ToolBox` seam, tolerant JSON, and the `Runner` that walks the plan queue. Verified live: the same task answered correctly through `native_loop` on llama-3.3-70b and through `prefetch_single_shot` on llama-3.1-8b (measured incapable of a tool loop), and a full failover walk 401→429→answer across three providers |
 | Triage respected everywhere | Done — dismissed/snoozed jobs leave the digest, bot `/jobs` and `/apply` numbering; the dashboard opts out (`hide_triaged=False`) so it can still render Undo |
 | Triage | Done — dismiss/snooze/note per job (triage table, POST /triage, queue count) |
 | Ingest gate | Done — age/locations/drop-keywords + source selection, editable in Settings, applied before storage with per-reason drop counts |
 | Dashboard v3 | Done — sidebar shell, health-first Overview, triage queue + focus mode, fit-check states, nudge banner, locked Settings (from the Claude Design project) |
-| Test suite | 353 tests, 31 test files, zero network, injectable fakes throughout |
+| Test suite | 386 tests, 32 test files, zero network, injectable fakes throughout |
 
 ## Known Gaps (from the July 2026 audit)
 
@@ -96,6 +96,10 @@ pipeline health, retry/backoff, docs truth-pass). Still open:
   one board's tagging habit would be overfitting.
 - **FakeLLM tests cannot detect fabrication.** Two R1 violations survived a full green
   suite and were only caught by running the real model (see R1a/R1b).
+- **Gemini's tool support is still unverified.** The card claims `native_tools=True`
+  from the family pattern, but the free-tier quota has been exhausted on every attempt,
+  so no call has ever reached it. The card's `notes` field says so; treat the claim as
+  documented-not-measured until a call succeeds.
 - **The Telegram handlers have no runtime test coverage.** `tests/test_bot.py` covers
   only the pure helpers in `bot/service.py`; the handlers in `bot/app.py` need live
   `Update`/`Context` objects. This is how a call to an undefined `_llm()` shipped in
@@ -114,5 +118,5 @@ pipeline health, retry/backoff, docs truth-pass). Still open:
 
 - **11,700+** jobs scored in a live run (8,253 fetched in a single pass across 6 adapters)
 - **40** companies in the ATS watchlist (Greenhouse/Lever/Ashby)
-- **353** tests across 31 files — all run offline, no network, no credentials
+- **386** tests across 32 files — all run offline, no network, no credentials
 - **6** LLM providers with automatic failover (3 free, 3 paid)
