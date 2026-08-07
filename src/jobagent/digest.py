@@ -52,14 +52,26 @@ def format_digest(matches: list[dict], limit: int = 10, max_per_company: int = 2
     return format_matches(diversify(matches, limit, max_per_company))
 
 
-def health_banner(report, health: dict) -> str:
+def health_banner(report, health: dict, *, gap_hours: float | None = None,
+                  expected_every_hours: float = 24.0) -> str:
     """Prefix for the digest describing anything degraded about this run.
 
     A digest that never mentions failure is indistinguishable from a healthy one,
-    so the daily push doubles as the heartbeat: warnings ride along with it, and a
-    digest that never arrives is itself the signal that the pipeline is dead.
+    so the daily push doubles as the heartbeat: warnings ride along with it.
+
+    `gap_hours` is the age of the previous successful ingest, measured *before* this
+    run started — the caller must capture it first, because by the time this runs the
+    store has already been updated and the gap always reads as zero. It is how a
+    skipped schedule becomes visible: a daily job whose last run was 90 hours ago
+    tells you the scheduler stopped, the first time it comes back.
     """
     lines: list[str] = []
+    if gap_hours is not None and gap_hours > expected_every_hours * 1.5:
+        days = gap_hours / 24
+        lines.append(
+            f"⚠️ First successful run in {days:.1f} days — expected every "
+            f"{expected_every_hours:.0f}h. The scheduler was not running."
+        )
     failed = [r for r in report.results if r.error]
     if failed:
         lines.append(f"⚠️ {len(failed)} source(s) failed this run:")

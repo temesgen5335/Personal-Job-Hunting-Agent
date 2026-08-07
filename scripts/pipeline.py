@@ -55,6 +55,10 @@ def main() -> None:
         return
     print(f"[run] {run_id}")
     try:
+        # Age of the previous successful ingest, measured before this run touches the
+        # store. Afterwards it always reads as zero, so it must be captured here — this
+        # is what makes a skipped schedule visible when it eventually recovers.
+        gap_hours = store.pipeline_health()["hours_since_ingest"]
 
         # 1) Ingest — the gate rejects postings before they are stored.
         gate = IngestGate.from_settings(settings)
@@ -77,7 +81,7 @@ def main() -> None:
 
         # 3) Digest — carries a health banner so a degraded run announces itself.
         health = store.pipeline_health()
-        banner = health_banner(report, health)
+        banner = health_banner(report, health, gap_hours=gap_hours)
         # Quiet applications ride along with the digest rather than needing their own run.
         followups = format_followups(store.applications_needing_followup())
         if banner:
@@ -104,6 +108,7 @@ def main() -> None:
         store.log_event(Event(kind="run", payload={
             "run_id": run_id,
             "duration_s": round(time.monotonic() - started, 1),
+            "gap_hours_before_run": round(gap_hours, 1) if gap_hours is not None else None,
             "ingest": {"fetched": report.total_fetched, "new": report.total_new,
                        "dropped": report.total_dropped, "drops": report.drops_by_reason,
                        "gate": gate.describe(),

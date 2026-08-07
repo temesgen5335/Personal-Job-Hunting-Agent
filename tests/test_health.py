@@ -138,3 +138,40 @@ def test_banner_flags_sources_gone_quiet():
                           {"source": "remoteok", "hours_since": 1.0}]}
     out = health_banner(r, health)
     assert "telegram" in out and "remoteok" not in out.split("48h+")[-1]
+
+
+# --- Phase 0b: the silence alarm ---------------------------------------------------
+
+def test_banner_flags_a_skipped_schedule():
+    """A daily job whose previous run was 90 hours ago means the scheduler stopped.
+    This is the only signal that survives 'nothing ran at all' — it fires the first
+    time the pipeline comes back."""
+    r = _report(AdapterResult(source="remoteok", fetched=10, new=2))
+    out = health_banner(r, {"sources": []}, gap_hours=90, expected_every_hours=24)
+    assert "First successful run in 3.8 days" in out
+    assert "scheduler was not running" in out
+
+
+def test_banner_silent_on_a_normal_gap():
+    """A daily job running ~daily must not warn — routine noise gets ignored."""
+    r = _report(AdapterResult(source="remoteok", fetched=10, new=2))
+    assert health_banner(r, {"sources": []}, gap_hours=25, expected_every_hours=24) == ""
+
+
+def test_first_ever_run_is_not_a_missed_schedule():
+    """No previous ingest → gap is None. A fresh install must not be reported as a
+    broken scheduler."""
+    r = _report(AdapterResult(source="remoteok", fetched=10, new=2))
+    assert health_banner(r, {"sources": []}, gap_hours=None) == ""
+
+
+def test_gap_warning_is_opt_in():
+    """Callers that don't pass gap_hours keep the old behavior exactly."""
+    r = _report(AdapterResult(source="remoteok", fetched=10, new=2))
+    assert health_banner(r, {"sources": []}) == ""
+
+
+def test_gap_warning_combines_with_other_warnings():
+    r = _report(AdapterResult(source="lever", error="ConnectTimeout: dead"))
+    out = health_banner(r, {"sources": []}, gap_hours=100)
+    assert "scheduler was not running" in out and "lever" in out

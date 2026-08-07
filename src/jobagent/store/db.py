@@ -90,6 +90,66 @@ class Store:
     def count_jobs(self) -> int:
         return self.conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
 
+    def prune_jobs(self, *, older_than_days: int, vacuum: bool = False) -> dict:
+        """Drop stale postings to bound store growth. Returns what was removed.
+
+        Retention, not filtering — distinct from the ingest gate (R4a), which decides
+        what to store in the first place. A job board posting is dead within weeks, so
+        keeping every one forever costs disk and matching time for nothing.
+
+        Two hard rules:
+        - **Anything you acted on is never pruned.** Jobs referenced by `applications`
+          or `cv_variants` are kept regardless of age; that is your own history, and
+          deleting it would orphan the application record (and violate the FK).
+        - Dependent `matches`/`triage` rows are removed first, because
+          `PRAGMA foreign_keys = ON` would otherwise reject the delete.
+
+        `last_seen_at` is the age basis, not `posted_at`: a posting still appearing in
+        a feed today is live even if it was first published months ago.
+        """
+        self._ensure_triage()
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=older_than_days)).isoformat()
+        # Computed before the early return: "stale but spared" is the interesting
+        # number even on a pass that deletes nothing.
+        kept = self.conn.execute(
+            """
+            SELECT COUNT(*) AS n FROM jobs
+            WHERE last_seen_at < ?
+              AND (id IN (SELECT job_id FROM applications)
+                   OR id IN (SELECT job_id FROM cv_variants))
+            """,
+            (cutoff,),
+        ).fetchone()["n"]
+
+        doomed = [
+            r["id"] for r in self.conn.execute(
+                """
+                SELECT id FROM jobs
+                WHERE last_seen_at < ?
+                  AND id NOT IN (SELECT job_id FROM applications)
+                  AND id NOT IN (SELECT job_id FROM cv_variants)
+                """,
+                (cutoff,),
+            )
+        ]
+        if not doomed:
+            return {"jobs": 0, "matches": 0, "triage": 0, "kept_acted_on": kept}
+
+        marks = ",".join("?" for _ in doomed)
+        matches = self.conn.execute(
+            f"DELETE FROM matches WHERE job_id IN ({marks})", doomed).rowcount
+        triage = self.conn.execute(
+            f"DELETE FROM triage WHERE job_id IN ({marks})", doomed).rowcount
+        jobs = self.conn.execute(
+            f"DELETE FROM jobs WHERE id IN ({marks})", doomed).rowcount
+        self.conn.commit()
+
+        if vacuum:
+            # Reclaims the file space DELETE only marks free. Rewrites the whole db,
+            # so it is opt-in rather than automatic.
+            self.conn.execute("VACUUM")
+        return {"jobs": jobs, "matches": matches, "triage": triage, "kept_acted_on": kept}
+
     def stats(self) -> dict:
         by_source = {
             r["source"]: r["n"]

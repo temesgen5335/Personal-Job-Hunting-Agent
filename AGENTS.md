@@ -34,7 +34,7 @@ make check          # preflight: env vars, free ports, store presence
 make run            # API (:8077) + dashboard (:4321), one Ctrl-C stops both
 make run_bot        # Telegram bot (separate long-lived process)
 make pipeline       # one ingest → match pass, no Telegram push
-make test           # 234 offline tests, no credentials needed
+make test           # 247 offline tests, no credentials needed
 
 # Single test file
 .venv/bin/python -m pytest tests/test_api.py -v
