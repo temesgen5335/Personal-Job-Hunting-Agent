@@ -98,6 +98,14 @@ def _from_body(text: str) -> Verdict:
     t = text.lower()
     if "context length" in t or "context_length" in t or "too many tokens" in t:
         return Verdict.CONTEXT
+    # Groq returns 400 tool_use_failed when the model emits a malformed call. That is a
+    # *generation* failure, not a missing capability — observed live on
+    # llama-3.3-70b-versatile, which is measured 5/5 on tool loops. Classifying it as
+    # CAPABILITY was wrong twice over: it never retries, and it blames a model that can
+    # in fact do the job. Generation is non-deterministic, so a retry usually succeeds,
+    # and the attempt budget bounds it.
+    if "tool_use_failed" in t or "failed to call a function" in t:
+        return Verdict.TRANSIENT
     if "tool" in t or "function calling" in t:
         return Verdict.CAPABILITY
     if "content" in t and ("filter" in t or "policy" in t):

@@ -81,7 +81,8 @@ Two interfaces, one backend:
 | Ingest gate | Done — age/locations/drop-keywords + source selection, editable in Settings, applied before storage with per-reason drop counts |
 | Dashboard v3 | Done — sidebar shell, health-first Overview, triage queue + focus mode, fit-check states, nudge banner, locked Settings (from the Claude Design project) |
 | agentkit (Phase 2) | **Complete.** Permission tiers (READ/ACT/ADMIN + structural exclusion), argument-bound single-use confirmations, FTS5 knowledge index with per-chunk provenance and trust, fail-closed audit on the run_id spine, and `GuardedToolBox` — same shape as `ToolBox`, so it drops into the Runner and there is no ungoverned path |
-| Test suite | 426 tests, 33 test files, zero network, injectable fakes throughout |
+| assistant (Phase 3) | **Complete.** `src/jobagent/assistant/`: 14 in-process tools, R2 exclusions as absences (no send/approve/ats tool exists), `CONFIG_WRITABLE` allow-list with frozen as the computed complement, impact previews dry-run over real stored rows, config snapshots + rollback, and FTS5 search over postings fenced as UNTRUSTED |
+| Test suite | 463 tests, 34 test files, zero network, injectable fakes throughout |
 
 ## Known Gaps (from the July 2026 audit)
 
@@ -119,5 +120,5 @@ pipeline health, retry/backoff, docs truth-pass). Still open:
 
 - **11,700+** jobs scored in a live run (8,253 fetched in a single pass across 6 adapters)
 - **40** companies in the ATS watchlist (Greenhouse/Lever/Ashby)
-- **426** tests across 33 files — all run offline, no network, no credentials
+- **463** tests across 34 files — all run offline, no network, no credentials
 - **6** LLM providers with automatic failover (3 free, 3 paid)

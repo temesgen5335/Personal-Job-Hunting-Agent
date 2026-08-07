@@ -357,3 +357,24 @@ def test_events_are_emitted_for_the_audit_trail():
            sleep=lambda s: None,
            on_event=lambda k, p: seen.append(k)).run(TaskSpec("say"), prompt="hi")
     assert "plans" in seen and "attempt_failed" in seen and "attempt_ok" in seen
+
+
+def test_a_malformed_tool_call_is_transient_not_a_capability_verdict():
+    """Observed live on Groq: a 400 `tool_use_failed` from llama-3.3-70b-versatile,
+    a model measured 5/5 on tool loops.
+
+    Classifying it as CAPABILITY was wrong twice — it never retries, and it blames a
+    model that can do the job. Generation is non-deterministic, so a retry usually
+    succeeds; the attempt budget bounds it.
+    """
+    from agentkit.llm.errors import Verdict, classify
+
+    exc = Boom("Error code: 400 - {'error': {'message': \"Failed to call a function. "
+               "Please adjust your prompt.\", 'code': 'tool_use_failed'}}", 400)
+    verdict = classify(exc)
+    assert verdict.verdict is Verdict.TRANSIENT
+    assert verdict.retryable_same_backend
+
+    # A genuine capability gap must still be classified as one.
+    assert classify(Boom("this model does not support function calling", 400)).verdict \
+        is Verdict.CAPABILITY
