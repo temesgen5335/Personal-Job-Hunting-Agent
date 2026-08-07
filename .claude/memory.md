@@ -189,6 +189,36 @@ Gemini's tool support is *still* unmeasured: every attempt has hit the free-tier
 Its card says `native_tools=True` from the family pattern and its `notes` field says
 "unverified". Leave that honest until a call actually succeeds.
 
+## Phase 2: what the tests caught that review did not (Aug 2026)
+
+The governed tool seam landed with permission tiers, an FTS5 index, a fail-closed audit
+trail and `GuardedToolBox`. Three things are worth remembering, and none of them came
+from writing the code — they came from trying to break it afterwards.
+
+1. **A safety test passed with its own property broken.** The first version of
+   "intent is recorded before the policy runs" asserted the *order of audit events*.
+   Moving `intent()` to sit after the policy check still produces intent-then-decision
+   in the sink, so the test stayed green while the property was gone. What actually
+   pins it: a dead sink must stop the call *before the gatekeeper is asked anything*,
+   proven with a spy gate. **Assert the consequence, not the sequence** — a test that
+   only observes ordering of side effects is often observing nothing.
+2. **The import cycle bit twice.** `agentkit.tools` imports `agentkit.llm.types`, which
+   executes `agentkit/llm/__init__.py`, which imported the Runner, which imported
+   `agentkit.tools`. It only failed depending on which module was imported first, so it
+   looked fixed once. The real fix was better design: the Runner is duck-typed against
+   the seam (`specs()`/`execute()`) instead of the concrete class — which is exactly why
+   a governed box can substitute for a plain one. Now guarded by a topological-sort test
+   that counts module-level imports only (a lazy import inside a function is the
+   legitimate escape hatch, and `chain.py` uses one).
+3. **General-purpose tools are excluded for every host, not per host.** `execute_sql`,
+   `run_shell`, `http_fetch`, `eval`, filesystem access — dangerous because they are
+   *general*: any one of them collapses every other restriction into a suggestion.
+   `PolicyBook` unions `UNIVERSALLY_EXCLUDED` into whatever the host passes, so a host
+   cannot drop them by overwriting the field. Codified as R25-R29.
+
+Every adversarial check was run in both directions: break the property, confirm the
+test goes red, restore, confirm green. The one that did not go red got rewritten.
+
 ## Known Limitations
 
 - **No LinkedIn/Indeed/Glassdoor adapter.** These sites are aggressively anti-bot with

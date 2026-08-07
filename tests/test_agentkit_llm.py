@@ -488,3 +488,54 @@ def test_backends_are_constructed_without_importing_any_sdk():
     from agentkit.llm import build_chain
     chain = build_chain(_settings(anthropic_api_key="k", openai_api_key="k"))
     assert len(chain) == 2 and all(b._client is None for b in chain)
+
+
+def test_no_agentkit_module_imports_are_cyclic():
+    """Import order must never decide whether the package loads.
+
+    This bit twice while building the guarded seam: `agentkit.tools` imports
+    `agentkit.llm.types`, which executes `agentkit/llm/__init__.py`, which imported the
+    Runner, which imported `agentkit.tools` — a cycle that only failed when `tools` was
+    imported first. The Runner is now duck-typed against the seam instead, which is
+    better design anyway: it is why a governed toolbox can substitute for a plain one.
+
+    Only *module-level* imports count. A lazy import inside a function is the accepted
+    way out of a cycle (chain.py uses one for the provider backends), and treating it
+    as a violation would flag working code.
+    """
+    import ast
+    import graphlib
+
+    root = Path(__file__).resolve().parent.parent / "src"
+
+    def module_name(path):
+        parts = path.relative_to(root).with_suffix("").parts
+        return ".".join(parts[:-1] if parts[-1] == "__init__" else parts)
+
+    graph = {}
+    for path in _agentkit_modules():
+        name = module_name(path)
+        deps = set()
+        for node in ast.parse(path.read_text()).body:      # top level only
+            targets = []
+            if isinstance(node, ast.Import):
+                targets = [a.name for a in node.names]
+            elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+                targets = [node.module]
+            for target in targets:
+                if not target.startswith("agentkit"):
+                    continue
+                deps.add(target)
+                # Importing a submodule executes its package __init__ first — the
+                # indirection that made the original cycle invisible. Only counts from
+                # OUTSIDE that package: a sibling import happens while the package is
+                # already initializing, so it forces nothing.
+                package = target.rsplit(".", 1)[0] if "." in target else ""
+                if package and not name.startswith(f"{package}."):
+                    deps.add(package)
+        graph[name] = deps - {name}
+
+    try:
+        graphlib.TopologicalSorter(graph).prepare()
+    except graphlib.CycleError as exc:
+        raise AssertionError(f"agentkit has an import cycle: {exc.args[1]}") from None

@@ -40,7 +40,6 @@ from agentkit.llm.tasks import (
     TaskSpec,
 )
 from agentkit.llm.types import Usage
-from agentkit.tools import ToolBox
 
 # A rate limit whose Retry-After is longer than this is not worth waiting for — another
 # backend will answer sooner.
@@ -87,7 +86,11 @@ class Runner:
     """Executes a `TaskSpec` against the best backend that can serve it."""
 
     backends: list = field(default_factory=list)
-    toolbox: ToolBox = field(default_factory=ToolBox)
+    # Duck-typed against the seam — anything with `specs()` and `execute()` — rather
+    # than the concrete ToolBox. That is what lets a governed box substitute for a plain
+    # one without the Runner learning that permissions exist, and it keeps the import
+    # graph acyclic (agentkit.tools imports agentkit.llm.types).
+    toolbox: object = None
     breaker: Breaker = field(default_factory=Breaker)
     # Injected so tests never actually sleep and never actually read the clock.
     sleep: Callable[[float], None] = time.sleep
@@ -95,6 +98,11 @@ class Runner:
     # Optional observability sink: on_event(kind, payload). Deliberately not required —
     # agentkit must stay usable with no host wiring at all.
     on_event: Callable[[str, dict], None] | None = None
+
+    def __post_init__(self):
+        if self.toolbox is None:
+            from agentkit.tools import ToolBox
+            self.toolbox = ToolBox()
 
     def _emit(self, kind: str, **payload) -> None:
         if self.on_event is not None:

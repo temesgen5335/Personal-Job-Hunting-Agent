@@ -113,6 +113,49 @@ Do not add a send endpoint for follow-ups.
 
 ---
 
+## Agent Harness (agentkit)
+
+**R25 — No general-purpose tool exists at any permission tier, ever.**
+No `execute_sql`, `run_shell`, `http_fetch`, `eval`, or filesystem read/write tool may
+be registered for any agent. These are dangerous not because of what they do but
+because they are *general*: one of them collapses every other restriction into a
+suggestion — excluded tools become reachable through it, frozen config becomes
+writable, and the audit trail records one opaque line instead of the action that
+actually happened. Expose narrow, named operations instead: `set_max_age(days)` can be
+reviewed on a confirmation card; `execute_sql(query)` cannot. Enforced structurally by
+`UNIVERSALLY_EXCLUDED` in `agentkit/permissions.py`, which `PolicyBook` unions into
+every host's exclusion set so a host cannot drop it by overwriting the field.
+
+**R26 — Excluded means absent, not gated.**
+A tool the agent must never have does not get a policy that denies it — it is never
+registered. A gate is a runtime check an attacker has to defeat once; absence has no
+code path to attack. `PolicyBook.guard()` turns an attempt to register one into an
+exception at wiring time. This is the same call R24 already made for follow-ups.
+
+**R27 — Intent is audited before the policy runs, and audit failure aborts the call.**
+`tool_intent` is written first, so a *refused* attempt survives in the trail — that is
+the line you most want after something goes wrong. If the sink raises, the tool does
+not run: an agent that keeps acting while its trail is broken produces actions nobody
+can reconstruct. Note that asserting event *order* does not hold this property; the
+test must show the policy was never consulted.
+
+**R28 — The policy input carries no transcript and no retrieved text.**
+`SessionContext` holds the actor, the surface and prior grants — nothing the model
+wrote and nothing retrieval returned. Fences and provenance labels reduce the odds a
+model is *talked into* asking for something; they cannot make it impossible. So the
+component that answers "may this run?" is given no access to the text doing the
+talking. An injection can make the model request a config rewrite; it cannot make the
+gatekeeper approve one.
+
+**R29 — Confirmations are server-side, single-use, and bound to the exact arguments.**
+The nonce is minted server-side and never derived from model output. It expires, it is
+consumed on sight, and it carries `sha256` of the arguments — because the interesting
+attack is not getting a dangerous tool approved, it is getting a harmless one approved
+and then changing what it does. Confirmation cards render from validated arguments and
+computed diffs, never from model prose.
+
+---
+
 ## API Security
 
 **R19 — Every state-changing API route is auth-gated, and fails closed.**

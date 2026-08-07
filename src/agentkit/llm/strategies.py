@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import time
 
-from agentkit.llm import jsonx
+from agentkit.llm.jsonx import loads_object
 from agentkit.llm.tasks import Budget, Strategy
 from agentkit.llm.types import ChatRequest, Message, ToolCall
 
@@ -86,7 +86,7 @@ def json_native(task, backend, toolbox, inputs, budget) -> str:
     messages = [Message("user", _user_message(inputs))]
     result = backend.chat(ChatRequest(system=system, messages=messages))
 
-    if jsonx.loads_object(result.text) is not None:
+    if loads_object(result.text) is not None:
         return result.text
 
     # One repair turn, quoting what was wrong. Cheaper than failing over.
@@ -223,7 +223,7 @@ def prompted_tool_json(task, backend, toolbox, inputs, budget) -> str:
     for _ in range(2):
         guard.check_clock()
         text = backend.chat(ChatRequest(system=system, messages=messages)).text
-        parsed = jsonx.loads_object(text)
+        parsed = loads_object(text)
         if parsed is None:
             return text                       # not protocol-shaped; take it at face value
         if "final" in parsed:
