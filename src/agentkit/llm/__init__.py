@@ -2,6 +2,7 @@
 classified failover."""
 
 from agentkit.llm.capabilities import ModelCard, Tier, resolve_card
+from agentkit.llm.chain import DEFAULT_ORDER, DEFAULT_PROVIDERS, ProviderSpec, build_chain
 from agentkit.llm.errors import Classified, Verdict, classify
 from agentkit.llm.health import Breaker
 from agentkit.llm.router import choose_strategy, describe, plans_for
@@ -32,5 +33,6 @@ __all__ = [
     "ModelCard", "Tier", "resolve_card",
     "Classified", "Verdict", "classify",
     "Breaker", "choose_strategy", "describe", "plans_for",
+    "build_chain", "ProviderSpec", "DEFAULT_PROVIDERS", "DEFAULT_ORDER",
     "Budget", "NoCapableModel", "Plan", "Rejection", "Strategy", "TaskOutcome", "TaskSpec",
 ]

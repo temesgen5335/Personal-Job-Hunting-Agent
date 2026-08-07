@@ -349,3 +349,142 @@ def test_unrecognized_failures_are_unknown_not_permanent():
 def test_tool_spec_json_schema_survives_a_round_trip():
     """The schema goes over the wire verbatim; it must be plain JSON."""
     assert json.loads(json.dumps(SEARCH.parameters)) == SEARCH.parameters
+
+
+# --- adding a provider key must Just Work -------------------------------------------
+# A registry that only knows the strings someone happened to test degrades every new
+# model to the slow path. These pin the layered resolution that prevents that.
+
+@pytest.mark.parametrize("model,tier,tools", [
+    # Anthropic
+    ("claude-sonnet-4-6", Tier.STRONG, True),
+    ("claude-3-5-sonnet-latest", Tier.STRONG, True),
+    ("claude-opus-4-1-20250805", Tier.STRONG, True),
+    ("claude-3-5-haiku-latest", Tier.STANDARD, True),
+    # OpenAI
+    ("gpt-4o", Tier.STRONG, True),
+    ("gpt-4.1", Tier.STRONG, True),
+    ("gpt-4o-mini", Tier.STANDARD, True),
+    ("gpt-4.1-mini", Tier.STANDARD, True),
+    # Google
+    ("gemini-2.0-flash", Tier.STANDARD, True),
+    ("gemini-2.5-flash", Tier.STANDARD, True),
+    ("gemini-2.5-pro", Tier.STRONG, True),
+    # Qwen
+    ("qwen-max", Tier.STRONG, True),
+    ("qwen-plus", Tier.STANDARD, True),
+    ("qwen-turbo", Tier.WEAK, True),
+    # others reachable through OpenRouter or locally
+    ("deepseek-chat", Tier.STANDARD, True),
+    ("mistral-large-latest", Tier.STRONG, True),
+])
+def test_every_named_provider_family_resolves_without_being_measured(model, tier, tools):
+    card = resolve_card("someprovider", model)
+    assert card.tier is tier, f"{model} → {card.tier}"
+    assert card.native_tools is tools
+    assert card.source != "default", f"{model} fell through to UNKNOWN"
+
+
+@pytest.mark.parametrize("model,tier", [
+    ("llama-3.2-3b", Tier.TINY),
+    ("qwen2.5-7b-instruct", Tier.WEAK),
+    ("qwen/qwen3.6-27b", Tier.STANDARD),
+    ("meta-llama/llama-3.3-70b-instruct", Tier.STANDARD),
+    ("some-vendor-13b-chat", Tier.WEAK),
+])
+def test_tier_is_inferred_from_parameter_size_for_open_models(model, tier):
+    """So an unseen open model — a new Qwen, a local Ollama build — routes sensibly
+    instead of falling to UNKNOWN and being permanently degraded."""
+    assert resolve_card("local", model).tier is tier
+
+
+def test_open_family_supplies_capability_while_size_supplies_tier():
+    """A llama-3 at 8B and at 70B are the same family and very different models: tool
+    support is a family fact, tier is a size fact."""
+    big = resolve_card("local", "meta-llama/llama-3.3-70b-instruct")
+    small = resolve_card("local", "qwen2.5-7b-instruct")
+    assert big.native_tools is True and big.tier is Tier.STANDARD and big.tool_loop is True
+    assert small.native_tools is True and small.tier is Tier.WEAK
+    assert small.tool_loop is False       # derived: emitting a call ≠ using a result
+
+
+def test_version_bumps_and_vendor_prefixes_do_not_regress_a_model():
+    """Model ids churn; a date stamp or an Ollama tag must not drop a known model to
+    UNKNOWN the day a provider renames it."""
+    for spelling in ("claude-sonnet-4-6-20260101", "anthropic/claude-sonnet-4-6",
+                     "claude-sonnet-4-6-latest"):
+        assert resolve_card("anthropic", spelling).tier is Tier.STRONG, spelling
+    assert resolve_card("custom", "qwen2.5-72b-instruct@q4").tier is Tier.STANDARD
+
+
+def test_reasoning_models_do_not_claim_unverified_tool_support():
+    """o-series and deepseek-r1 vary by version; claiming tools would route real work
+    to a model that may reject the parameter."""
+    for m in ("o1-mini", "o3", "deepseek-reasoner"):
+        assert resolve_card("x", m).native_tools is None, m
+
+
+def test_a_measurement_always_beats_a_derivation():
+    """llama-3.1-8b would derive tool_loop=False from its tier anyway — but the point
+    is that an explicit measurement is authoritative, not coincidentally agreeing."""
+    card = resolve_card("groq", "llama-3.1-8b-instant")
+    assert card.source == "measured"
+    assert card.tool_loop_measured is False and card.tool_loop is False
+
+
+# --- chain assembly ----------------------------------------------------------------
+
+def _settings(**kw):
+    from types import SimpleNamespace
+    base = dict(llm_provider="groq", groq_api_key="", gemini_api_key="", openai_api_key="",
+                anthropic_api_key="", qwen_api_key="", openrouter_api_key="",
+                custom_llm_base_url="", custom_llm_api_key="", custom_llm_model="")
+    base.update(kw)
+    return SimpleNamespace(**base)
+
+
+def test_a_provider_appears_as_soon_as_it_has_a_key():
+    from agentkit.llm import build_chain
+    assert build_chain(_settings()) == []
+    chain = build_chain(_settings(anthropic_api_key="k"))
+    assert [b.name for b in chain] == ["anthropic"]
+    assert chain[0].model == "claude-sonnet-4-6"      # spec default when unset
+
+
+def test_all_five_providers_assemble_together():
+    from agentkit.llm import build_chain
+    chain = build_chain(_settings(groq_api_key="k", gemini_api_key="k", openai_api_key="k",
+                                  anthropic_api_key="k", qwen_api_key="k"))
+    assert {b.name for b in chain} == {"groq", "gemini", "openai", "anthropic", "qwen"}
+    assert all(b.card.tier.name != "UNKNOWN" for b in chain), \
+        "a configured provider resolving to UNKNOWN would be permanently degraded"
+
+
+def test_the_configured_primary_leads_the_chain():
+    from agentkit.llm import build_chain
+    chain = build_chain(_settings(llm_provider="anthropic", groq_api_key="k",
+                                  anthropic_api_key="k"))
+    assert chain[0].name == "anthropic"
+
+
+def test_a_local_endpoint_needs_a_url_not_a_key():
+    from agentkit.llm import build_chain
+    assert build_chain(_settings(custom_llm_api_key="k")) == []          # url is what matters
+    chain = build_chain(_settings(custom_llm_base_url="http://localhost:11434/v1",
+                                  custom_llm_model="qwen2.5-32b-instruct"))
+    assert [b.name for b in chain] == ["custom"]
+    assert chain[0].card.tier.name == "STANDARD"      # inferred from 32b
+
+
+def test_the_report_explains_why_a_provider_was_skipped():
+    from agentkit.llm import build_chain
+    rep = build_chain(_settings(groq_api_key="k"), report=True)
+    skipped = dict(rep.skipped)
+    assert "anthropic" in skipped and "anthropic_api_key" in skipped["anthropic"]
+
+
+def test_backends_are_constructed_without_importing_any_sdk():
+    """build_chain must work on a bare install — the SDK is only needed to CALL."""
+    from agentkit.llm import build_chain
+    chain = build_chain(_settings(anthropic_api_key="k", openai_api_key="k"))
+    assert len(chain) == 2 and all(b._client is None for b in chain)

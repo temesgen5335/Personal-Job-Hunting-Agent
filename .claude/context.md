@@ -74,12 +74,13 @@ Two interfaces, one backend:
 | CI | Done — tests.yml runs the offline suite + F821 gate on every push/PR |
 | Dependability (Phase 0) | Actions workflow hardened: ingest gate applied in CI, store pruned+vacuumed so the 10GB cache limit can't be hit, failure notifies Telegram. Silence alarm warns when a schedule was skipped. **Still needs repo secrets set to actually run.** |
 | Store retention | Done — `prune_jobs(older_than_days)`; jobs you applied to are never pruned |
+| Provider coverage | groq · gemini · openai · anthropic · qwen · openrouter · custom, all assembled by `build_chain(settings)`. Families resolve by pattern and open models by parameter size, so adding a key needs no code change |
 | agentkit (Phase 1) | `src/agentkit/llm`: chat+tools IR, provider translation, measured tier registry, classified errors, circuit breaker, and the router (`plans_for`/`choose_strategy`). The strategy *implementations* and the loop itself are still to come |
 | Triage respected everywhere | Done — dismissed/snoozed jobs leave the digest, bot `/jobs` and `/apply` numbering; the dashboard opts out (`hide_triaged=False`) so it can still render Undo |
 | Triage | Done — dismiss/snooze/note per job (triage table, POST /triage, queue count) |
 | Ingest gate | Done — age/locations/drop-keywords + source selection, editable in Settings, applied before storage with per-reason drop counts |
 | Dashboard v3 | Done — sidebar shell, health-first Overview, triage queue + focus mode, fit-check states, nudge banner, locked Settings (from the Claude Design project) |
-| Test suite | 322 tests, 31 test files, zero network, injectable fakes throughout |
+| Test suite | 353 tests, 31 test files, zero network, injectable fakes throughout |
 
 ## Known Gaps (from the July 2026 audit)
 
@@ -113,5 +114,5 @@ pipeline health, retry/backoff, docs truth-pass). Still open:
 
 - **11,700+** jobs scored in a live run (8,253 fetched in a single pass across 6 adapters)
 - **40** companies in the ATS watchlist (Greenhouse/Lever/Ashby)
-- **322** tests across 31 files — all run offline, no network, no credentials
+- **353** tests across 31 files — all run offline, no network, no credentials
 - **6** LLM providers with automatic failover (3 free, 3 paid)

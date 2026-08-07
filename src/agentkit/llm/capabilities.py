@@ -1,21 +1,21 @@
-"""What a model can actually do — and how confidently we know it.
+"""What a model can do — and how confidently we know it.
 
-The registry below is seeded from a measured spike (Aug 2026, n=5-6 against real
-prompts), not from vendor marketing. The finding that shaped the design:
-`llama-3.1-8b-instant` emits well-formed tool calls 5/5 and picks the right tool 5/5,
-then fails 5/5 to use the tool *result* to answer. It can call a tool; it cannot run a
-loop.
+Resolution is deliberately layered so an unrecognized model still lands somewhere
+sensible instead of UNKNOWN. Adding a provider key should just work; a registry that
+only knows the exact strings someone happened to test is a registry that degrades every
+new model to the slow path.
 
-That is why capability booleans are TRI-STATE and why a probe may never set `tier`:
+    settings override  → the user knows what they installed
+    exact entry        → measured, wins over everything derived
+    family pattern     → gpt-4o / claude-sonnet / gemini-flash / qwen-max …
+    parameter size     → "…-72b-instruct" ⇒ STANDARD; covers open models generically
+    UNKNOWN            → treated as WEAK at routing time, never assumed capable
 
-    native_tools=True   proven to emit usable tool calls
-    native_tools=False  proven not to
-    native_tools=None   unproven — pick a strategy that works either way
-
-A cheap probe can observe "does it accept the tools parameter and emit a call". It
-cannot observe "can it carry state across a tool result", which is the thing that
-actually decides whether an agent loop works. Tier encodes that judgement and only a
-human or a real eval sets it.
+`tool_loop` is DERIVED, not guessed per model: emitting a tool call and carrying state
+across a tool *result* are different abilities, and they come apart. Measured on
+llama-3.1-8b — emits 5/5, selects 5/5, uses the result 0/5. The derivation
+(`native_tools and tier >= STANDARD`) reproduces that measurement, which is the reason
+to trust it for models nobody has measured yet. An explicit measurement always wins.
 """
 
 from __future__ import annotations
@@ -31,8 +31,8 @@ class Tier(IntEnum):
 
     UNKNOWN = -1
     TINY = 0        # <=4B or heavily quantized
-    WEAK = 1        # 7-9B — can answer, cannot orchestrate
-    STANDARD = 2    # ~70B / flagship-mini — reliable single-loop tool use
+    WEAK = 1        # 5-13B — can answer, cannot orchestrate
+    STANDARD = 2    # ~14B-100B / flagship-mini — reliable single-loop tool use
     STRONG = 3      # frontier — multi-step planning
 
 
@@ -42,75 +42,136 @@ class ModelCard:
     tier: Tier = Tier.UNKNOWN
     context_tokens: int = 0            # 0 = unknown
     max_output_tokens: int = 4096
-    native_tools: bool | None = None   # tri-state; see module docstring
-    tool_loop: bool | None = None      # can it USE a tool result? the loop-critical one
+    native_tools: bool | None = None   # None = unproven, False = proven absent
     json_object: bool | None = None
-    source: str = "default"            # settings | registry | probe | default
+    # Set ONLY from a real measurement; otherwise `tool_loop` derives it.
+    tool_loop_measured: bool | None = None
+    source: str = "default"            # settings | measured | family | size | default
     notes: str = ""
+
+    @property
+    def tool_loop(self) -> bool | None:
+        """Can this model use a tool RESULT, not merely emit a call?
+
+        Derived unless measured. A model that cannot emit calls certainly cannot loop;
+        one whose tool support is unproven has an unproven loop; and below STANDARD the
+        loop is where small models fall over — which is what the 8B measurement showed.
+        """
+        if self.tool_loop_measured is not None:
+            return self.tool_loop_measured
+        if self.native_tools is None:
+            return None
+        if not self.native_tools:
+            return False
+        return self.tier >= Tier.STANDARD
 
 
 def _normalize(model: str) -> str:
-    """Fold the many spellings of one model into a registry key.
-
-    `meta-llama/llama-3.3-70b-instruct:free` and `llama-3.3-70b-versatile` are the same
-    family reached through different providers, and OpenRouter suffixes/vendor prefixes
-    would otherwise each need their own entry.
-    """
+    """Fold the many spellings of one model into a registry key."""
     m = model.strip().lower()
-    m = re.sub(r":(free|nitro|beta|extended)$", "", m)
+    m = re.sub(r":(free|nitro|beta|extended|thinking)$", "", m)
     m = m.split("/")[-1]                      # strip vendor prefix
     m = re.sub(r"-\d{8}$", "", m)             # strip trailing date stamp
+    m = re.sub(r"@\d+$", "", m)               # strip Ollama tag
     return re.sub(r"-latest$", "", m)
 
 
-# Measured, not assumed. See .claude/memory.md "Free-model capability spike".
-_EXACT: dict[str, ModelCard] = {
+# --- measured entries: these override anything derived -----------------------------
+# See .claude/memory.md "Free-model capability spike".
+_MEASURED: dict[str, ModelCard] = {
     "llama-3.1-8b-instant": ModelCard(
         "llama-3.1-8b-instant", Tier.WEAK, 131072, 8192,
-        native_tools=True, tool_loop=False, json_object=True, source="registry",
-        notes="MEASURED: emits tool calls 5/5, selects correctly 5/5, uses tool RESULT 0/5"),
+        native_tools=True, json_object=True, tool_loop_measured=False, source="measured",
+        notes="MEASURED: emits 5/5, selects 5/5, uses tool result 0/5"),
     "llama-3.3-70b-versatile": ModelCard(
         "llama-3.3-70b-versatile", Tier.STANDARD, 131072, 32768,
-        native_tools=True, tool_loop=True, json_object=True, source="registry",
+        native_tools=True, json_object=True, tool_loop_measured=True, source="measured",
         notes="MEASURED 5/5 loop; over-calls tools on conversational closings"),
-    "llama-3.3-70b-instruct": ModelCard(
-        "llama-3.3-70b-instruct", Tier.STANDARD, 131072, 8192,
-        native_tools=True, tool_loop=True, json_object=True, source="registry"),
     "gpt-oss-120b": ModelCard(
         "gpt-oss-120b", Tier.STANDARD, 131072, 32768,
-        native_tools=True, tool_loop=True, json_object=True, source="registry",
-        notes="MEASURED 20/20 across emit/loop/select/restraint; ~3x slower than 70b"),
-    "gpt-oss-20b": ModelCard("gpt-oss-20b", Tier.WEAK, 131072, 8192,
-                             native_tools=True, json_object=True, source="registry"),
-    "gemini-2.0-flash": ModelCard(
-        "gemini-2.0-flash", Tier.STANDARD, 1_048_576, 8192,
-        native_tools=None, json_object=True, source="registry",
-        notes="tools UNPROVEN through the OpenAI-compat endpoint — spike before trusting"),
-    "gpt-4o-mini": ModelCard("gpt-4o-mini", Tier.STANDARD, 128000, 16384,
-                             native_tools=True, tool_loop=True, json_object=True,
-                             source="registry"),
-    "claude-sonnet-4-6": ModelCard("claude-sonnet-4-6", Tier.STRONG, 200000, 8192,
-                                   native_tools=True, tool_loop=True, source="registry"),
+        native_tools=True, json_object=True, tool_loop_measured=True, source="measured",
+        notes="MEASURED 20/20 emit/loop/select/restraint; ~3x slower than llama-3.3-70b"),
 }
 
-_PATTERNS: tuple[tuple[re.Pattern, ModelCard], ...] = (
-    (re.compile(r"^gpt-4o"), ModelCard("gpt-4o", Tier.STRONG, 128000, 16384,
-                                       native_tools=True, tool_loop=True, json_object=True,
-                                       source="registry")),
-    (re.compile(r"^claude-.*opus"), ModelCard("claude-opus", Tier.STRONG, 200000, 8192,
-                                              native_tools=True, tool_loop=True,
-                                              source="registry")),
-    (re.compile(r"^claude-.*haiku"), ModelCard("claude-haiku", Tier.STANDARD, 200000, 8192,
-                                               native_tools=True, tool_loop=True,
-                                               source="registry")),
-    (re.compile(r"^gemini-.*pro"), ModelCard("gemini-pro", Tier.STRONG, 1_048_576, 8192,
-                                             native_tools=None, source="registry")),
-    (re.compile(r"^llama-3\.1-70b"), ModelCard("llama-3.1-70b", Tier.STANDARD, 131072, 8192,
-                                               native_tools=True, source="registry")),
+
+def _f(tier, ctx, out, *, tools=True, json_obj=True, notes=""):
+    """Family-pattern card factory — model name is filled in by the resolver."""
+    return ModelCard("", tier, ctx, out, native_tools=tools, json_object=json_obj,
+                     source="family", notes=notes)
+
+
+# Ordered: first match wins, so put the more specific pattern first.
+_FAMILIES: tuple[tuple[re.Pattern, ModelCard], ...] = (
+    # --- OpenAI ---
+    (re.compile(r"^o[1-9](-|$)"), _f(Tier.STRONG, 200000, 100000, tools=None,
+                                     notes="reasoning model; tool support varies by version")),
+    (re.compile(r"^gpt-4[.\-]?1?-?(mini|nano)"), _f(Tier.STANDARD, 128000, 16384)),
+    (re.compile(r"^gpt-4o-mini"), _f(Tier.STANDARD, 128000, 16384)),
+    (re.compile(r"^gpt-4"), _f(Tier.STRONG, 128000, 16384)),
+    (re.compile(r"^gpt-3\.5"), _f(Tier.WEAK, 16385, 4096)),
+    # --- Anthropic ---
+    (re.compile(r"^claude.*(opus|sonnet)"), _f(Tier.STRONG, 200000, 8192, json_obj=False)),
+    (re.compile(r"^claude.*haiku"), _f(Tier.STANDARD, 200000, 8192, json_obj=False)),
+    (re.compile(r"^claude"), _f(Tier.STANDARD, 200000, 8192, json_obj=False)),
+    # --- Google ---
+    (re.compile(r"^gemini.*flash-lite"), _f(Tier.WEAK, 1_048_576, 8192)),
+    (re.compile(r"^gemini.*pro"), _f(Tier.STRONG, 1_048_576, 8192)),
+    (re.compile(r"^gemini.*flash"), _f(
+        Tier.STANDARD, 1_048_576, 8192,
+        notes="function calling documented; unverified here through the OpenAI-compat endpoint")),
+    (re.compile(r"^gemini"), _f(Tier.STANDARD, 1_048_576, 8192)),
+    # --- Qwen (DashScope, Groq, OpenRouter, or local) ---
+    (re.compile(r"^qwen.*max"), _f(Tier.STRONG, 131072, 8192)),
+    (re.compile(r"^qwen.*plus"), _f(Tier.STANDARD, 131072, 8192)),
+    (re.compile(r"^qwen.*turbo"), _f(Tier.WEAK, 131072, 8192)),
+    (re.compile(r"^qwen.*coder"), _f(Tier.STANDARD, 131072, 8192)),
+    # --- others reachable via OpenRouter / local ---
+    (re.compile(r"^deepseek.*(reasoner|r1)"), _f(Tier.STRONG, 65536, 8192, tools=None,
+                                                 notes="reasoning model; tool support varies")),
+    (re.compile(r"^deepseek"), _f(Tier.STANDARD, 65536, 8192)),
+    (re.compile(r"^mistral.*large"), _f(Tier.STRONG, 131072, 8192)),
+    (re.compile(r"^(mistral|mixtral|ministral)"), _f(Tier.STANDARD, 32768, 8192)),
+    (re.compile(r"^command-?r"), _f(Tier.STANDARD, 131072, 4096)),
+    (re.compile(r"^grok"), _f(Tier.STRONG, 131072, 8192)),
 )
 
-# Tier is a property of (provider, model), not model alone: the same weights reached
-# through a router can behave differently per request.
+# Open-weight families where the CAPABILITY is known but the TIER depends on the
+# parameter count: a llama-3 at 8B and at 70B are the same family and very different
+# models. Capabilities come from here, tier from the size token.
+_OPEN_FAMILIES: tuple[tuple[re.Pattern, dict], ...] = (
+    (re.compile(r"^llama-3"),
+     {"native_tools": True, "json_object": True, "context_tokens": 131072,
+      "max_output_tokens": 8192}),
+    (re.compile(r"^qwen[\d.]"),
+     {"native_tools": True, "json_object": True, "context_tokens": 131072,
+      "max_output_tokens": 8192}),
+    (re.compile(r"^(gemma|phi|granite)"),
+     {"native_tools": None, "json_object": True, "context_tokens": 8192}),
+)
+
+
+# "…-72b-instruct" → 72. Anchored on a separator so the 2.5 in qwen2.5 is not a size.
+_SIZE_RE = re.compile(r"[-_](\d+(?:\.\d+)?)\s*b(?:[-_]|$)")
+
+
+def _tier_from_size(key: str) -> tuple[Tier, float] | None:
+    """Infer tier from a parameter count in the model name.
+
+    This is what lets an unseen open model — a new Qwen, a local Ollama build — route
+    sensibly instead of falling to UNKNOWN. Deliberately caps at STANDARD: only a named
+    family earns STRONG, because size alone does not prove frontier reasoning.
+    """
+    matches = _SIZE_RE.findall(key)
+    if not matches:
+        return None
+    billions = max(float(m) for m in matches)
+    if billions < 5:
+        return Tier.TINY, billions
+    if billions < 14:
+        return Tier.WEAK, billions
+    return Tier.STANDARD, billions
+
+
 _PROVIDER_OVERLAYS: dict[str, dict] = {
     "openrouter": {
         "native_tools": None,
@@ -124,8 +185,7 @@ _TIER_NAMES = {t.name.lower(): t for t in Tier}
 def parse_tier_overrides(raw: str) -> dict[str, Tier]:
     """`"custom=standard,groq:llama-3.3-70b-versatile=strong"` → lookup table.
 
-    Keys are matched most-specific first: `provider:model`, then bare `provider`.
-    Unparseable entries are skipped rather than raising — a typo in config should not
+    Unparseable entries are skipped rather than raising: a typo in config should not
     take the whole agent down.
     """
     out: dict[str, Tier] = {}
@@ -140,28 +200,50 @@ def parse_tier_overrides(raw: str) -> dict[str, Tier]:
 
 
 def resolve_card(provider: str, model: str, settings=None) -> ModelCard:
-    """Settings override → static registry → provider overlay → UNKNOWN.
+    """Best available knowledge about (provider, model).
 
-    Every settings read uses getattr with a default: the LLM test fixtures pass a
-    SimpleNamespace with a handful of attributes, and this must not require more.
+    Every settings read uses getattr with a default — the existing LLM test fixtures
+    pass a SimpleNamespace with a handful of attributes and must keep working.
     """
     key = _normalize(model)
-    card = _EXACT.get(key)
+
+    card = _MEASURED.get(key)
+
     if card is None:
-        for pattern, candidate in _PATTERNS:
+        # Open families first: their capability is known, their tier is not.
+        sized = _tier_from_size(key)
+        for pattern, caps in _OPEN_FAMILIES:
+            if pattern.match(key) and sized is not None:
+                tier, billions = sized
+                card = ModelCard("", tier, source="family+size", **caps,
+                                 notes=f"{pattern.pattern} family at ~{billions:g}B")
+                break
+
+    if card is None:
+        for pattern, family in _FAMILIES:
             if pattern.match(key):
-                card = candidate
+                card = family
                 break
     if card is None:
-        card = ModelCard(model=model, tier=Tier.UNKNOWN, source="default",
+        sized = _tier_from_size(key)
+        if sized is not None:
+            tier, billions = sized
+            card = ModelCard(
+                "", tier, native_tools=None, source="size",
+                notes=f"tier inferred from ~{billions:g}B parameters; "
+                      f"set LLM_TIER_OVERRIDES to correct it")
+    if card is None:
+        card = ModelCard("", Tier.UNKNOWN, source="default",
                          notes="unrecognized model — set LLM_TIER_OVERRIDES to declare its tier")
+
     card = replace(card, model=model)
 
     overlay = _PROVIDER_OVERLAYS.get(provider.lower())
     if overlay:
         card = replace(card, **overlay)
 
-    overrides = parse_tier_overrides(getattr(settings, "llm_tier_overrides", "") if settings else "")
+    overrides = parse_tier_overrides(
+        getattr(settings, "llm_tier_overrides", "") if settings is not None else "")
     for candidate in (f"{provider.lower()}:{model.lower()}", provider.lower()):
         if candidate in overrides:
             card = replace(card, tier=overrides[candidate], source="settings")

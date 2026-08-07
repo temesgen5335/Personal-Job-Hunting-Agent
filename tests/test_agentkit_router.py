@@ -19,6 +19,10 @@ TOOL = ToolSpec("search", "Search things.",
 
 
 def card(tier, **kw):
+    """`tool_loop=` here means "pretend this was measured" — the real field is
+    tool_loop_measured, since tool_loop is derived unless a measurement exists."""
+    if "tool_loop" in kw:
+        kw["tool_loop_measured"] = kw.pop("tool_loop")
     defaults = dict(model="m", tier=tier, context_tokens=128000)
     defaults.update(kw)
     return ModelCard(**defaults)

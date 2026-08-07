@@ -44,6 +44,9 @@ class Settings(BaseSettings):
     openai_api_key: str = Field("", alias="OPENAI_API_KEY")
     gemini_api_key: str = Field("", alias="GEMINI_API_KEY")
     anthropic_api_key: str = Field("", alias="ANTHROPIC_API_KEY")
+    # Qwen via DashScope's OpenAI-compatible endpoint (also reachable through
+    # OpenRouter or a local server, which the custom provider covers).
+    qwen_api_key: str = Field("", alias="QWEN_API_KEY")
 
     # Per-provider model (sensible free defaults).
     # llama-3.3-70b-versatile over llama-3.1-8b-instant, measured on this project's own
@@ -65,6 +68,7 @@ class Settings(BaseSettings):
     openai_model: str = Field("gpt-4o-mini", alias="OPENAI_MODEL")
     gemini_model: str = Field("gemini-2.0-flash", alias="GEMINI_MODEL")
     anthropic_model: str = Field("claude-sonnet-4-6", alias="ANTHROPIC_MODEL")
+    qwen_model: str = Field("qwen-plus", alias="QWEN_MODEL")
 
     # Custom OpenAI-compatible endpoint (Ollama / vLLM / any local or hosted server).
     custom_llm_base_url: str = Field("", alias="CUSTOM_LLM_BASE_URL")
