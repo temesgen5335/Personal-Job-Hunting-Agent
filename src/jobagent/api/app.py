@@ -208,6 +208,9 @@ def create_app(settings=None, profile=None, llm: Any = _UNSET, cv_master: str | 
             keywords=[w for w in (q or "").replace(",", " ").split() if w],
             exclude_locations=split(exclude), include_locations=split(include),
             sources=split(sources),
+            # The dashboard renders dismissed/snoozed rows with an Undo control, so
+            # unlike every other consumer it wants them in the result set.
+            hide_triaged=False,
         )
         s = store()
         try:

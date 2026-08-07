@@ -32,6 +32,10 @@ class MatchFilter:
     exclude_locations: list[str] = field(default_factory=list)  # drop if location matches
     include_locations: list[str] = field(default_factory=list)  # keep-only if set
     sources: list[str] = field(default_factory=list)            # keep-only if set
+    # Defaults to True: this filter shapes shortlists you act on (digest, /jobs,
+    # /apply), and re-offering a job you already dismissed is the bug. The dashboard
+    # sets it False so it can still render the "Dismissed · Undo" row.
+    hide_triaged: bool = True
     min_score: float = 0.0
 
     @classmethod
@@ -84,7 +88,7 @@ def ranked_matches(store: Store, n: int = 10, flt: MatchFilter | None = None, of
         limit=max(n * 8, 40), min_score=flt.min_score,
         max_age_days=flt.max_age_days, location=flt.location, keywords=flt.keywords,
         exclude_locations=flt.exclude_locations, include_locations=flt.include_locations,
-        sources=flt.sources, offset=offset,
+        sources=flt.sources, hide_triaged=flt.hide_triaged, offset=offset,
     )
     return diversify(pool, n, max_per_company=2)
 

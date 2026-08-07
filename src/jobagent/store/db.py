@@ -308,12 +308,18 @@ class Store:
         exclude_locations: list[str] | None = None,
         include_locations: list[str] | None = None,
         sources: list[str] | None = None,
+        hide_triaged: bool = False,
         offset: int = 0,
     ) -> list[dict]:
         """Ranked matches with filters: recency, location mode (remote/hybrid/any),
         keyword OR-match, exclude_locations (drop), include_locations (keep-only),
-        sources (keep-only, for the dashboard's per-source visibility toggle), and
-        pagination via offset."""
+        sources (keep-only, for the dashboard's per-source visibility toggle),
+        hide_triaged (drop jobs you already dismissed or snoozed), and pagination
+        via offset.
+
+        `hide_triaged` exists because two consumers want opposite things: a shortlist
+        for action (digest, bot, /apply) must not re-offer what you already decided,
+        while the dashboard deliberately shows those rows so it can render Undo."""
         where = ["m.score >= ?"]
         params: list = [min_score]
 
@@ -351,6 +357,14 @@ class Store:
             # select a future "lever-eu".
             where.append("j.source IN (" + ",".join("?" for _ in sources) + ")")
             params += [s.lower() for s in sources]
+
+        if hide_triaged:
+            # Same lapsed-snooze predicate stats() uses for the queue count, so the
+            # badge and the digest can never disagree about what is still live. A
+            # note-only row (state NULL) stays visible — annotating is not deciding.
+            where.append("(t.state IS NULL OR "
+                         " (t.state='snoozed' AND COALESCE(t.snoozed_until,'') <= ?))")
+            params.append(_now())
 
         self._ensure_triage()
         sql = (

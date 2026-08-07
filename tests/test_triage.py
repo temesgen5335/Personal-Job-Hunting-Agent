@@ -137,3 +137,77 @@ def test_triage_endpoint_roundtrip(tmp_path, monkeypatch):
     c.post(f"/triage/{jid}", json={"action": "dismiss"})
     row = c.get("/jobs").json()["jobs"][0]
     assert row["triage_state"] == "dismissed"
+
+
+# --- the digest/bot must not re-offer what you already decided --------------------
+
+def _ranked_titles(store, **kw):
+    from jobagent.bot.service import MatchFilter, ranked_matches
+    return [r["title"] for r in ranked_matches(store, 10, MatchFilter(**kw))]
+
+
+def test_dismissed_jobs_leave_the_shortlist(tmp_path):
+    """The bug: a job dismissed on the dashboard still arrived in the next morning's
+    Telegram digest, because ranked_matches never looked at triage."""
+    s = _store(tmp_path)
+    _job(s, "Keep Me")
+    drop = _job(s, "Dismiss Me")
+    assert set(_ranked_titles(s)) == {"Keep Me", "Dismiss Me"}
+    s.set_triage(drop, state="dismissed")
+    assert _ranked_titles(s) == ["Keep Me"]
+    s.close()
+
+
+def test_active_snooze_leaves_the_shortlist_and_comes_back_when_it_lapses(tmp_path):
+    s = _store(tmp_path)
+    jid = _job(s, "Snoozed")
+    future = (datetime.now(timezone.utc) + timedelta(days=3)).isoformat()
+    s.set_triage(jid, state="snoozed", snoozed_until=future)
+    assert _ranked_titles(s) == []
+    past = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+    s.set_triage(jid, state="snoozed", snoozed_until=past)
+    assert _ranked_titles(s) == ["Snoozed"]      # lapsed → live again, no manual step
+    s.close()
+
+
+def test_a_note_alone_does_not_remove_a_job_from_the_shortlist(tmp_path):
+    """Annotating is not deciding — a noted job is still awaiting your call."""
+    s = _store(tmp_path)
+    jid = _job(s, "Noted")
+    s.set_triage(jid, note="ask about equity")
+    assert _ranked_titles(s) == ["Noted"]
+    s.close()
+
+
+def test_the_dashboard_deliberately_still_sees_triaged_jobs(tmp_path):
+    """It renders the 'Dismissed · Undo' row, so it opts out of the filter."""
+    s = _store(tmp_path)
+    jid = _job(s, "Dismissed")
+    s.set_triage(jid, state="dismissed")
+    assert _ranked_titles(s, hide_triaged=False) == ["Dismissed"]
+    s.close()
+
+
+def test_apply_rank_numbering_matches_what_the_digest_showed(tmp_path):
+    """/jobs and /apply <rank> share ranked_matches; if they disagreed about triage,
+    `/apply 2` would send the wrong application."""
+    from jobagent.bot.service import resolve_ranked_job
+    s = _store(tmp_path)
+    _job(s, "First", score=0.95)
+    drop = _job(s, "Second", score=0.90)
+    _job(s, "Third", score=0.85)
+    s.set_triage(drop, state="dismissed")
+    assert _ranked_titles(s) == ["First", "Third"]
+    assert resolve_ranked_job(s, 2)["title"] == "Third"    # not the dismissed one
+    s.close()
+
+
+def test_queue_count_and_shortlist_agree(tmp_path):
+    """stats()['queue'] drives the nav badge; the shortlist drives the digest. If they
+    used different predicates the badge would promise jobs the digest never shows."""
+    s = _store(tmp_path)
+    _job(s, "Live")
+    drop = _job(s, "Gone")
+    s.set_triage(drop, state="dismissed")
+    assert s.stats()["queue"] == len(_ranked_titles(s)) == 1
+    s.close()
