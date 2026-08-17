@@ -3,7 +3,7 @@
 # Entry points verified from the repo (not assumed):
 #   backend API : scripts/run_api.py   → uvicorn, HOST/PORT env, default 127.0.0.1:8077
 #   telegram bot: scripts/run_bot.py   → long-polling Bot API process
-#   dashboard   : dashboard/ npm run dev → astro dev, default port 4321
+#   dashboard   : dashboard/ npm run dev → astro dev, default port 1234
 #   pipeline    : scripts/pipeline.py  → ingest → match → digest (systemd/cron entry)
 #
 # No n8n / external orchestrator exists in this system — scheduling is systemd
@@ -16,7 +16,7 @@ SHELL        := /bin/bash
 VENV         := .venv
 PY           := $(VENV)/bin/python
 API_PORT     ?= 8077
-DASH_PORT    ?= 4321
+DASH_PORT    ?= 1234
 
 .PHONY: install run run_backend run_bot run_dashboard check test pipeline ask doctor eval_assistant
 

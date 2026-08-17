@@ -14,7 +14,7 @@ Backend and dashboard both default to port **8077**, so no env var is needed loc
 # 2) dashboard (defaults to API at http://127.0.0.1:8077)
 cd dashboard
 npm install
-npm run dev            # http://localhost:4321
+npm run dev            # http://localhost:1234
 ```
 Production:
 ```bash

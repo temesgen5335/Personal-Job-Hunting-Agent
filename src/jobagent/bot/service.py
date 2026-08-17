@@ -83,9 +83,16 @@ def is_owner(chat_id: int | None, owner_id: int | None) -> bool:
     return owner_id is not None and chat_id == owner_id
 
 
-def ranked_matches(store: Store, n: int = 10, flt: MatchFilter | None = None, offset: int = 0) -> list[dict]:
+def ranked_matches(store: Store, n: int = 10, flt: MatchFilter | None = None, offset: int = 0,
+                   max_per_company: int | None = 2) -> list[dict]:
     """The diversified, ranked, FILTERED shortlist. /jobs and /apply <rank> share this
-    so the numbering a user sees maps to the right job."""
+    so the numbering a user sees maps to the right job.
+
+    `max_per_company=None` disables the cap. A *shortlist* wants it — one employer with
+    forty openings must not fill a top-10. A *browsable list* does not: the cap silently
+    drops jobs you still have to decide on, so the dashboard's count would disagree with
+    the queue count in stats(). Measured on a real store: 231 strong untriaged matches
+    collapsed to 46 under the cap."""
     flt = flt or MatchFilter()
     pool = store.get_matches(
         limit=max(n * 8, 40), min_score=flt.min_score,
@@ -93,7 +100,9 @@ def ranked_matches(store: Store, n: int = 10, flt: MatchFilter | None = None, of
         exclude_locations=flt.exclude_locations, include_locations=flt.include_locations,
         sources=flt.sources, hide_triaged=flt.hide_triaged, offset=offset,
     )
-    return diversify(pool, n, max_per_company=2)
+    if max_per_company is None:
+        return pool[:n]
+    return diversify(pool, n, max_per_company=max_per_company)
 
 
 def jobs_text(store: Store, n: int = 10, flt: MatchFilter | None = None) -> str:

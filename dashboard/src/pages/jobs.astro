@@ -5,12 +5,15 @@
 // persist via POST /triage. Filters live in the URL (shareable) and are mirrored to
 // localStorage so a bare /jobs visit restores your last view.
 import Layout from "../layouts/Layout.astro";
-import { getMatches, getSources, apiBase, publicApiBase,
+import { getMatches, getSources, getStats, apiBase, publicApiBase,
          type MatchRow, type SourceInfo } from "../lib/api";
 
 const url = Astro.url;
 const q = url.searchParams.get("q") ?? "";
-const within = url.searchParams.get("within") ?? "7d";
+// Default to "any", NOT a 7-day window. The queue count in the sidebar and on the
+// Overview has no date filter, so a windowed default made a bare /jobs visit show
+// fewer rows than the badge promised — with a stale pipeline, zero of them.
+const within = url.searchParams.get("within") ?? "any";
 const remote = url.searchParams.get("remote") ?? "any";
 const exclude = url.searchParams.get("exclude") ?? "";
 const page = Math.max(1, parseInt(url.searchParams.get("page") ?? "1", 10) || 1);
@@ -22,15 +25,24 @@ const PAGE = 25;
 const days = within === "24h" ? 1 : within === "3d" ? 3 : within === "7d" ? 7 : 0;
 const excludeParam = exclude === "US-only" ? "US only" : exclude === "On-site" ? "on-site,onsite" : "";
 
+// Deep enough that the whole triage queue fits: the API no longer caps per company,
+// so this is the real ceiling on what the page can show. If the queue ever outgrows
+// it, the header below says so rather than silently truncating (R32).
+const FETCH = 400;
+
 let rows: MatchRow[] = [];
 let sourceInfo: SourceInfo | null = null;
+let trueQueue: number | null = null;
 let error: string | null = null;
 try {
   rows = await getMatches({
     days, location: remote as "any" | "remote" | "hybrid", q,
-    exclude: excludeParam, sources: pickedSources.join(","), limit: 200, offset: 0,
+    exclude: excludeParam, sources: pickedSources.join(","), limit: FETCH, offset: 0,
   });
   sourceInfo = await getSources();
+  // The store's own count of strong ∧ untriaged — the number the sidebar badge shows.
+  // Only comparable when nothing is filtering, so that is the only case we compare in.
+  trueQueue = (await getStats()).queue;
 } catch (e) {
   error = (e as Error).message;
 }
@@ -43,6 +55,11 @@ const live = (j: MatchRow) => !j.triage_state;
 const queue = rows.filter((j) => j.score >= 0.7 && live(j));
 const strongTotal = rows.filter((j) => j.score >= 0.7).length;
 const rest = rows.filter((j) => !(j.score >= 0.7 && live(j)));
+// A filtered view is legitimately smaller than the store-wide count; an unfiltered
+// one is not, so only then does a shortfall mean the fetch ceiling truncated us.
+const unfiltered = !q && within === "any" && remote === "any" && !exclude && !pickedSources.length;
+const queueShortfall =
+  unfiltered && trueQueue !== null && trueQueue > queue.length ? trueQueue - queue.length : 0;
 const pages = Math.max(1, Math.ceil(rest.length / PAGE));
 const restPage = rest.slice((page - 1) * PAGE, page * PAGE);
 
@@ -185,7 +202,9 @@ const queueData = queue.map((j) => ({
               <span class="q-dot"></span>
               <span style="font-size:12.5px;color:var(--strong);letter-spacing:-.01em">Awaiting your call</span>
               <span class="mono" style="font-size:11.5px;color:var(--accent)">{queue.length}</span>
-              <span class="muted" style="font-size:11.5px;margin-left:auto">strong matches, untriaged</span>
+              <span class="muted" style="font-size:11.5px;margin-left:auto">
+                strong matches, untriaged{queueShortfall > 0 ? ` · ${queueShortfall} more beyond this page's ${FETCH}-row fetch` : ""}
+              </span>
             </div>
             {queue.map((j) => (
               <div class="q-row trow" data-id={j.id}>
@@ -307,8 +326,11 @@ const queueData = queue.map((j) => ({
     if (![...params.keys()].length) {
       try {
         const saved = JSON.parse(localStorage.getItem(FKEY) || "null");
+        // "any" is now the default for both `within` and `remote`, so anything else
+        // is a real choice worth restoring — including "7d", which used to be the
+        // default and was therefore skipped here.
         if (saved && Object.entries(saved).some(([k, v]) =>
-              k === "sources" ? (v || []).length : v && v !== "7d" && v !== "any")) {
+              k === "sources" ? (v || []).length : v && v !== "any")) {
           const p = new URLSearchParams();
           for (const [k, v] of Object.entries(saved)) {
             // sources is a repeated param (checkbox group), not a comma string.
@@ -321,7 +343,7 @@ const queueData = queue.map((j) => ({
     } else {
       try {
         localStorage.setItem(FKEY, JSON.stringify({
-          q: params.get("q") || "", within: params.get("within") || "7d",
+          q: params.get("q") || "", within: params.get("within") || "any",
           remote: params.get("remote") || "any", exclude: params.get("exclude") || "",
           sources: params.getAll("sources").filter(Boolean),
         }));

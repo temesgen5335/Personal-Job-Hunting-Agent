@@ -117,9 +117,9 @@ def test_an_error_is_reported_plainly_rather_than_as_an_empty_answer():
 def test_the_confirmation_card_carries_the_computed_diff():
     card = format_pending({"tool": "apply_config_change",
                            "card": "ingest_max_age_days: 0 → 30\nWould have dropped 4 of 6."},
-                          dashboard_url="http://localhost:4321/settings")
+                          dashboard_url="http://localhost:1234/settings")
     assert "0 → 30" in card and "4 of 6" in card
-    assert "localhost:4321/settings" in card       # chat points at the dashboard
+    assert "localhost:1234/settings" in card       # chat points at the dashboard
 
 
 def test_an_empty_question_is_refused_without_reaching_a_model(tmp_path):

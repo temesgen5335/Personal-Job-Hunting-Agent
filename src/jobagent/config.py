@@ -89,7 +89,7 @@ class Settings(BaseSettings):
     # honored if you set it deliberately, but is not the default — an open origin plus
     # a reachable port is how a stranger drives your apply endpoints.
     cors_origins: str = Field(
-        "http://localhost:4321,http://127.0.0.1:4321", alias="JOBAGENT_CORS_ORIGINS"
+        "http://localhost:1234,http://127.0.0.1:1234", alias="JOBAGENT_CORS_ORIGINS"
     )
 
     # --- Ingest gate (dashboard-editable; see ingestion/gate.py) -------------------

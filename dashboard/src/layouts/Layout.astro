@@ -4,9 +4,12 @@
 // when the pipeline is degraded — so the "do I need to look?" answer is visible from
 // any page. Badge data comes from the same API the pages use; a failed fetch just
 // hides the badges rather than breaking the page.
-import { getStats, getFollowups, type Stats } from "../lib/api";
+import { getStats, getFollowups, publicApiBase, type Stats } from "../lib/api";
 import AssistantBubble from "../components/AssistantBubble.astro";
 import "../styles/assistant.css";
+
+// The sign-in modal fetches from the visitor's browser, so it needs the public base.
+const authApiUrl = publicApiBase();
 
 const { title = "Job Agent" } = Astro.props;
 const path = Astro.url.pathname;
@@ -91,6 +94,101 @@ const isActive = (href: string) =>
     </div>
 
     <AssistantBubble />
+
+    <!--
+      Sign-in prompt for any page whose write hit a 401/403. Lives here rather than on
+      a page because every write surface (pull jobs, triage, fit check, status edits,
+      follow-up drafts) hits the same wall, and because the token it mints is the same
+      `jobagent_token` the Settings page writes — one session, not two. Settings keeps
+      its own inline gate: there the lock IS the page, here it is an interruption.
+    -->
+    <div id="ja-auth" class="ja-auth" hidden>
+      <div class="ja-auth-card" role="dialog" aria-modal="true" aria-labelledby="ja-auth-title">
+        <div id="ja-auth-title" class="ja-auth-title">Sign in to continue</div>
+        <p class="ja-auth-body" id="ja-auth-why">
+          This action changes data on the agent, so it needs the dashboard password —
+          the same one the Settings page asks for.
+        </p>
+        <form id="ja-auth-form" class="ja-auth-form">
+          <input type="password" id="ja-auth-pw" placeholder="Dashboard password"
+                 autocomplete="current-password" />
+          <button type="submit" class="btn primary" id="ja-auth-go">Sign in</button>
+          <button type="button" class="btn quiet" id="ja-auth-cancel">Cancel</button>
+        </form>
+        <div class="ja-auth-msg" id="ja-auth-msg"></div>
+      </div>
+    </div>
+
+    <script is:inline define:vars={{ authApiUrl }}>
+      // Extends the window.JA defined in <head>. Kept separate from that block because
+      // this half needs the DOM; the headers()/explain() half must run before any page
+      // script, so it cannot wait for it.
+      (function () {
+        const el = (id) => document.getElementById(id);
+        const modal = el("ja-auth");
+        let pending = null;      // resolve fn of the in-flight signIn() promise
+
+        function close(result) {
+          modal.hidden = true;
+          el("ja-auth-pw").value = "";
+          el("ja-auth-msg").textContent = "";
+          const done = pending;
+          pending = null;
+          if (done) done(result);
+        }
+
+        /**
+         * Prompt for the dashboard password. Resolves true once a token is stored,
+         * false if the user cancels. Concurrent callers share one prompt rather than
+         * stacking modals.
+         */
+        window.JA.signIn = function signIn(why) {
+          if (why) el("ja-auth-why").textContent = why;
+          if (pending) return new Promise((r) => { const prev = pending; pending = (v) => { prev(v); r(v); }; });
+          modal.hidden = false;
+          setTimeout(() => el("ja-auth-pw").focus(), 0);
+          return new Promise((resolve) => { pending = resolve; });
+        };
+
+        el("ja-auth-form").addEventListener("submit", async (e) => {
+          e.preventDefault();
+          const msg = el("ja-auth-msg");
+          const go = el("ja-auth-go");
+          go.disabled = true;
+          msg.dataset.kind = "";
+          msg.textContent = "Checking…";
+          try {
+            const r = await fetch(`${authApiUrl}/auth/login`, {
+              method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ password: el("ja-auth-pw").value }),
+            });
+            if (!r.ok) {
+              msg.dataset.kind = "bad";
+              // 403 is not a wrong password — it means the API has no password set at
+              // all, so no amount of retrying here will help. Say which it is.
+              msg.textContent = r.status === 401 ? "Wrong password."
+                : r.status === 403 ? "Editing is disabled on the API — set DASHBOARD_PASSWORD and restart it."
+                : `Sign-in failed (HTTP ${r.status}).`;
+              return;
+            }
+            // Same key the Settings page writes, so signing in here unlocks there too.
+            localStorage.setItem("jobagent_token", (await r.json()).token);
+            close(true);
+          } catch (err) {
+            msg.dataset.kind = "bad";
+            msg.textContent = `Can't reach the API at ${authApiUrl} — ${err.message}`;
+          } finally {
+            go.disabled = false;
+          }
+        });
+
+        el("ja-auth-cancel").addEventListener("click", () => close(false));
+        modal.addEventListener("click", (e) => { if (e.target === modal) close(false); });
+        document.addEventListener("keydown", (e) => {
+          if (e.key === "Escape" && !modal.hidden) close(false);
+        });
+      })();
+    </script>
 
     <style is:global>
       :root {
@@ -188,6 +286,29 @@ const isActive = (href: string) =>
       .btn.sm:hover { color: var(--text); background: var(--hover); }
       .btn.sm.danger-hover:hover { color: var(--danger); background: rgba(248, 113, 113, 0.08); border-color: rgba(248, 113, 113, 0.3); }
       .btn:disabled { opacity: 0.55; cursor: default; }
+
+      /* Sign-in prompt (window.JA.signIn) */
+      .ja-auth[hidden] { display: none; }
+      .ja-auth {
+        position: fixed; inset: 0; z-index: 60; display: flex;
+        align-items: center; justify-content: center; padding: 20px;
+        background: rgba(0, 0, 0, 0.62);
+      }
+      .ja-auth-card {
+        width: 100%; max-width: 400px; background: var(--panel);
+        border: 1px solid var(--border); border-radius: var(--radius); padding: 22px 22px 18px;
+      }
+      .ja-auth-title { font-size: 16px; color: var(--strong); letter-spacing: -0.01em; }
+      .ja-auth-body { font-size: 12.5px; color: var(--muted); line-height: 1.6; margin: 8px 0 16px; }
+      .ja-auth-form { display: flex; gap: 8px; flex-wrap: wrap; }
+      .ja-auth-form input {
+        flex: 1; min-width: 150px; background: #0d0d0d; border: 1px solid var(--border);
+        border-radius: 8px; padding: 8px 11px; font-size: 13px; color: var(--text);
+      }
+      .ja-auth-form input:focus { outline: none; border-color: rgba(125, 211, 252, 0.45); }
+      .ja-auth-form .btn { padding: 8px 14px; }
+      .ja-auth-msg { font-size: 12px; color: var(--muted); margin-top: 10px; min-height: 1em; }
+      .ja-auth-msg[data-kind="bad"] { color: var(--danger); }
       .linkish {
         border: 0; background: transparent; color: var(--muted); font-size: 12px; cursor: pointer;
         text-decoration: underline; text-underline-offset: 3px; padding: 0;

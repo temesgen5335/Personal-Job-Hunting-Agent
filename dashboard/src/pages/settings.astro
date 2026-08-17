@@ -1,10 +1,13 @@
 ---
-// Settings (design: Job Agent.dc.html). Locked gate first — these fields hold live
-// credentials — then grouped editors with set / not-set badges. Secrets are never
-// echoed by the API; a blank field keeps the stored value.
+// Settings — tabbed. One locked gate, then a tab bar over cards.
+//
+// Two backends sit behind the tabs and the UI hides the seam: profile/CV/search/
+// sources tabs read and write /profile (the gitignored data/ overlay — the operator's
+// own identity, background and preferences, never committed); ingestion/LLM/Telegram/
+// email tabs read and write /config (the encrypted secret store). Each tab saves on
+// its own, so editing your CV never risks your API keys and vice versa.
 import Layout from "../layouts/Layout.astro";
 import { publicApiBase } from "../lib/api";
-// Browser-facing URL: these fetches run in the visitor's browser, not on the server.
 const apiUrl = publicApiBase();
 ---
 
@@ -12,7 +15,7 @@ const apiUrl = publicApiBase();
   <div id="login" class="lock" style="display:none">
     <div style="font-size:16px;color:var(--strong)">Settings are locked</div>
     <p style="font-size:13px;color:var(--muted);margin:8px 0 18px">
-      These fields hold live credentials. Enter the dashboard password to edit them.
+      These hold your identity, CV and live credentials. Enter the dashboard password to edit them.
     </p>
     <form id="login-form" style="display:flex;gap:8px">
       <input type="password" id="password" placeholder="Password" autocomplete="current-password"
@@ -22,69 +25,114 @@ const apiUrl = publicApiBase();
     <div id="login-msg" class="muted" style="font-size:12px;margin-top:10px"></div>
   </div>
 
-  <div id="config" style="display:none;max-width:620px">
-    <div style="margin-bottom:18px">
-      <h1 class="page">Settings</h1>
-      <div class="page-sub">Secrets are never returned by the API. Leave a field blank to keep the stored value.</div>
-    </div>
-    <div id="form"></div>
-    <div style="display:flex;gap:8px;margin-top:16px;align-items:center">
-      <button id="save" class="btn primary" style="padding:8px 15px">Save changes</button>
-      <button id="logout" class="btn quiet" style="padding:8px 15px">Lock</button>
-      <span id="save-msg" class="muted" style="font-size:12.5px"></span>
-    </div>
+  <div id="config" style="display:none">
+    <header class="s-head">
+      <div>
+        <h1 class="page">Settings</h1>
+        <div class="page-sub">Your profile lives in a gitignored file, never in the repo. Secrets are never returned — leave a field blank to keep the stored value.</div>
+      </div>
+      <button id="logout" class="btn quiet" style="padding:7px 13px">Lock</button>
+    </header>
+
+    <nav id="tabs" class="s-tabs" role="tablist"></nav>
+    <div id="panel" class="s-panel"></div>
   </div>
 
   <div id="error" class="panel" style="display:none;margin-top:14px"></div>
 
   <script is:inline define:vars={{ apiUrl }}>
     const TOKEN_KEY = "jobagent_token";
-    const GROUPS = [
-      // First group on purpose: this is the knob that decides what ever reaches the
-      // store, so it should not be buried under credential fields.
-      { title: "Ingestion filter", note:
-          "Applied between fetch and store — filtered postings never enter your store " +
-          "and never cost matching time. Blank = no filter. Fit judgment (skills, " +
-          "seniority) is deliberately NOT here: the scorer does that reversibly.",
-        fields: [
-          { k: "ingest_sources", label: "Sources to fetch", type: "multi",
-            hint: "Unchecking all falls back to [sources] in preferences.toml." },
-          { k: "ingest_max_age_days", label: "Max posting age (days)",
-            hint: "0 or blank = no age limit. Postings with no date are always kept." },
-          { k: "ingest_locations", label: "Keep only these locations", type: "list",
-            hint: "Comma-separated, any-match, e.g. remote, EMEA, Africa. \"remote\" also accepts the structured remote flag." },
-          { k: "ingest_drop_keywords", label: "Drop if it mentions", type: "list",
-            hint: "Comma-separated, e.g. unpaid, clearance required, US citizens only." },
-        ]},
-      { title: "LLM", fields: [
-        { k: "llm_provider", label: "Primary provider", type: "select",
-          options: ["groq", "gemini", "openrouter", "custom", "openai", "anthropic"] },
-        { k: "groq_api_key", secret: true }, { k: "gemini_api_key", secret: true },
-        { k: "openrouter_api_key", secret: true }, { k: "openai_api_key", secret: true },
-        { k: "anthropic_api_key", secret: true },
-        { k: "groq_model" }, { k: "gemini_model" }, { k: "openrouter_model" },
-        { k: "openai_model" }, { k: "anthropic_model" },
-        { k: "custom_llm_base_url", label: "Custom base URL" },
-        { k: "custom_llm_api_key", secret: true }, { k: "custom_llm_model" },
-      ]},
-      { title: "Telegram", fields: [
-        { k: "telegram_bot_token", secret: true }, { k: "telegram_chat_id" },
-        { k: "telegram_api_id" }, { k: "telegram_api_hash", secret: true },
-        { k: "telegram_phone" }, { k: "telegram_channels" },
-      ]},
-      { title: "SMTP", fields: [
-        { k: "smtp_host" }, { k: "smtp_port" }, { k: "smtp_user" },
-        { k: "smtp_password", secret: true }, { k: "apply_from_email" },
-      ]},
-    ];
-    const ALL = GROUPS.flatMap((g) => g.fields);
-    const SECRET = new Set(ALL.filter((f) => f.secret).map((f) => f.k));
-    const labelOf = (f) => f.label || f.k.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
-
     const $ = (id) => document.getElementById(id);
     const token = () => localStorage.getItem(TOKEN_KEY);
     const headers = () => ({ "Content-Type": "application/json", Authorization: `Bearer ${token()}` });
+    const esc = (t) => String(t == null ? "" : t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
+    const labelOf = (f) => f.label || f.k.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+
+    // Each tab declares its backend ("profile" | "cv" | "config") and its fields.
+    // Field kinds: text | select | secret | list | weights | textarea | toggles | multi.
+    const SENIORITY = ["", "intern", "junior", "mid", "mid-to-senior", "senior", "staff", "principal", "lead"];
+    const WORKMODE = ["", "remote", "hybrid", "onsite", "any"];
+
+    const TABS = [
+      { id: "profile", title: "Profile", backend: "profile", note:
+          "Who you are. Used to fill application forms and to sign drafted messages. Stored in your gitignored data/ folder.",
+        fields: [
+          { k: "name", section: "profile" }, { k: "headline", section: "profile", hint: "One line, e.g. “AI / full-stack engineer”." },
+          { k: "email", section: "profile" }, { k: "phone", section: "profile" },
+          { k: "location", section: "profile" }, { k: "timezone", section: "profile", hint: "e.g. UTC+3, EAT." },
+          { k: "seniority", section: "profile", type: "select", options: SENIORITY },
+          { k: "work_mode", section: "profile", type: "select", options: WORKMODE },
+          { k: "links", section: "profile", type: "weights", label: "Links",
+            hint: "One per line, e.g. github = https://github.com/you" },
+        ]},
+      { id: "cv", title: "CV & background", backend: "cv", note:
+          "Your master CV in Markdown. It is the ONLY source of claims when the agent tailors a CV, cover letter or email — nothing outside it is ever invented (R1).",
+        fields: [ { k: "cv_master", type: "textarea", label: "Master CV (Markdown)",
+                    hint: "Paste your full CV. The agent reframes what is here; it never adds skills, titles or dates you did not list." } ]},
+      { id: "search", title: "Search & matching", backend: "profile", note:
+          "What a good job looks like for you. Matching scores every posting against these.",
+        fields: [
+          { k: "target_roles", section: "profile", type: "list", hint: "One role per line. Titles are matched against these." },
+          { k: "core_skills", section: "profile", type: "list", hint: "One skill per line." },
+          { k: "skill_weights", section: "profile", type: "weights", label: "Skill weights",
+            hint: "Optional. One per line, e.g. Rust = 2.0. Unlisted skills weigh 1.0. This is what separates your differentiators from generic tools." },
+          { k: "domains", section: "profile", type: "list", hint: "Industries / problem areas you want." },
+          { k: "must_haves", section: "profile", type: "list", hint: "A posting missing any of these scores lower." },
+          { k: "nice_to_haves", section: "profile", type: "list" },
+          { k: "keywords", section: "profile", type: "list", hint: "Extra terms that signal a fit." },
+          { k: "preferred_locations", section: "profile", type: "list", hint: "If set, keep only jobs matching one." },
+          { k: "exclude_locations", section: "profile", type: "list", hint: "Always drop jobs whose location matches, e.g. “US only”." },
+          { k: "exclude_keywords", section: "profile", type: "list", hint: "Drop postings mentioning any of these." },
+        ]},
+      { id: "sources", title: "Sources & watchlist", backend: "profile", note:
+          "Which boards to pull from, and which companies to watch on the ATS boards.",
+        fields: [
+          { k: "toggles", section: "sources", type: "toggles", label: "Fetch from",
+            hint: "Turn a source off to stop ingesting it without losing its config." },
+          { k: "greenhouse", section: "watchlist", type: "list", label: "Greenhouse companies", hint: "One slug per line, e.g. stripe." },
+          { k: "lever", section: "watchlist", type: "list", label: "Lever companies" },
+          { k: "ashby", section: "watchlist", type: "list", label: "Ashby companies" },
+        ]},
+      { id: "ingestion", title: "Ingestion filter", backend: "config", note:
+          "Applied between fetch and store — filtered postings never enter your store. Fit judgment (skills, seniority) is deliberately NOT here; the scorer does that reversibly.",
+        fields: [
+          { k: "ingest_sources", label: "Sources to fetch", type: "multi", hint: "Unchecking all falls back to your Sources tab." },
+          { k: "ingest_max_age_days", label: "Max posting age (days)", hint: "0 or blank = no limit. Undated postings are always kept." },
+          { k: "ingest_locations", label: "Keep only these locations", type: "csv", hint: "Comma-separated, any-match, e.g. remote, EMEA. “remote” also accepts the structured flag." },
+          { k: "ingest_drop_keywords", label: "Drop if it mentions", type: "csv", hint: "Comma-separated, e.g. unpaid, clearance required." },
+        ]},
+      { id: "llm", title: "LLM", backend: "config", note:
+          "The provider chain. Free providers stay as backups even after you add a paid one. `make doctor` explains routing.",
+        fields: [
+          { k: "llm_provider", label: "Primary provider", type: "select", options: ["groq", "gemini", "openrouter", "qwen", "custom", "openai", "anthropic"] },
+          { k: "groq_api_key", secret: true }, { k: "gemini_api_key", secret: true },
+          { k: "openrouter_api_key", secret: true }, { k: "qwen_api_key", secret: true },
+          { k: "openai_api_key", secret: true }, { k: "anthropic_api_key", secret: true },
+          { k: "groq_model" }, { k: "gemini_model" }, { k: "openrouter_model" },
+          { k: "qwen_model" }, { k: "openai_model" }, { k: "anthropic_model" },
+          { k: "custom_llm_base_url", label: "Custom base URL" },
+          { k: "custom_llm_api_key", secret: true }, { k: "custom_llm_model" },
+        ]},
+      { id: "telegram", title: "Telegram", backend: "config", fields: [
+          { k: "telegram_bot_token", secret: true }, { k: "telegram_chat_id" },
+          { k: "telegram_api_id" }, { k: "telegram_api_hash", secret: true },
+          { k: "telegram_phone" }, { k: "telegram_channels" },
+        ]},
+      { id: "email", title: "Email", backend: "config", fields: [
+          { k: "smtp_host" }, { k: "smtp_port" }, { k: "smtp_user" },
+          { k: "smtp_password", secret: true }, { k: "apply_from_email" },
+        ]},
+    ];
+    const SECRET = new Set(TABS.flatMap((t) => t.fields).filter((f) => f.secret).map((f) => f.k));
+
+    let cfg = {};          // /config map
+    let prof = {};         // { profile, watchlist, sources, cv }
+    let cvText = null;     // lazily fetched full CV
+    let sourceInfo = null; // /sources (available + counts)
+    let active = "profile";
+
     function showError(msg) { const e = $("error"); e.style.display = "block"; e.textContent = "⚠️ " + msg; }
+    function gate() { $("config").style.display = "none"; $("login").style.display = "block"; }
 
     async function login(ev) {
       ev.preventDefault();
@@ -96,125 +144,223 @@ const apiUrl = publicApiBase();
         });
         if (!r.ok) {
           $("login-msg").textContent = r.status === 401 ? "Wrong password."
-            : r.status === 403 ? "Editing is disabled — set DASHBOARD_PASSWORD on the API."
-            : `error ${r.status}`;
+            : r.status === 403 ? "Editing is disabled — set DASHBOARD_PASSWORD on the API." : `error ${r.status}`;
           return;
         }
         localStorage.setItem(TOKEN_KEY, (await r.json()).token);
         $("login-msg").textContent = "";
-        await loadConfig();
+        await loadAll();
       } catch (e) { showError(`Can't reach API at ${apiUrl} — ${e.message}`); }
     }
 
-    function renderForm(cfg, sourceInfo) {
-      const esc = (t) => String(t == null ? "" : t).replace(/"/g, "&quot;");
-      const html = GROUPS.map((g) => `
-        <section class="s-group"><div class="s-title">${g.title}</div>
-        ${g.note ? `<p class="s-note">${g.note}</p>` : ""}
-        <div class="s-fields">
-        ${g.fields.map((f) => {
-          const v = cfg[f.k];
-          let input, badge = "";
-          if (f.type === "multi") {
-            // Checkbox chips rather than a <select multiple>: the whole point is
-            // seeing at a glance which sources are on.
-            const available = (sourceInfo && sourceInfo.available) || [];
-            const chosen = new Set(String(v || "").split(",").map((x) => x.trim()).filter(Boolean));
-            // Nothing stored → show what is actually resolved (the TOML fallback),
-            // so the boxes reflect the run that would happen right now.
-            const effective = chosen.size ? chosen : new Set((sourceInfo && sourceInfo.enabled) || []);
-            const counts = (sourceInfo && sourceInfo.in_store) || {};
-            input = `<span class="src-picker" id="f_${f.k}">` + available.map((o) => `
-              <label class="src-chip">
-                <input type="checkbox" value="${esc(o)}" ${effective.has(o) ? "checked" : ""} />
-                <span>${esc(o)}</span>
-                <span class="src-n mono">${counts[o] ? counts[o] : ""}</span>
-              </label>`).join("") + `</span>`;
-          } else if (f.type === "select") {
-            input = `<select id="f_${f.k}">${f.options.map((o) =>
-              `<option value="${o}" ${o === v ? "selected" : ""}>${o}</option>`).join("")}</select>`;
-          } else if (f.secret) {
-            const set = v && v.set;
-            badge = `<span class="set-badge ${set ? "" : "no"}">${set ? "set" : "not set"}</span>`;
-            input = `<input id="f_${f.k}" type="password" placeholder="${set ? "blank to keep" : "not set"}" autocomplete="off" />`;
-          } else {
-            input = `<input id="f_${f.k}" type="text" value="${esc(v)}" class="mono" placeholder="${esc(f.placeholder || "")}" />`;
-          }
-          return `<label class="field"><span>${labelOf(f)} ${badge}</span>${input}` +
-                 (f.hint ? `<span class="f-hint">${f.hint}</span>` : "") + `</label>`;
-        }).join("")}
-        </div></section>`).join("");
-      $("form").innerHTML = html;
-    }
-
-    async function loadConfig() {
+    async function loadAll() {
       try {
-        const r = await fetch(`${apiUrl}/config`, { headers: headers() });
-        if (r.status === 401 || r.status === 403) { localStorage.removeItem(TOKEN_KEY); return gate(); }
-        if (!r.ok) return showError(`config load failed (${r.status})`);
-        // /sources is a public read; a failure there must not block the config form.
-        const sourceInfo = await fetch(`${apiUrl}/sources`).then((x) => x.json()).catch(() => null);
-        renderForm((await r.json()).config, sourceInfo);
+        const [cfgR, profR, srcR] = await Promise.all([
+          fetch(`${apiUrl}/config`, { headers: headers() }),
+          fetch(`${apiUrl}/profile`, { headers: headers() }),
+          fetch(`${apiUrl}/sources`).catch(() => null),
+        ]);
+        if (cfgR.status === 401 || cfgR.status === 403) { localStorage.removeItem(TOKEN_KEY); return gate(); }
+        if (!cfgR.ok || !profR.ok) return showError(`load failed (${cfgR.status}/${profR.status})`);
+        cfg = (await cfgR.json()).config;
+        prof = await profR.json();
+        sourceInfo = srcR && srcR.ok ? await srcR.json() : null;
+        cvText = null;
         $("login").style.display = "none";
         $("config").style.display = "block";
+        renderTabs();
+        renderPanel();
       } catch (e) { showError(`Can't reach API at ${apiUrl} — ${e.message}`); }
     }
 
-    async function save() {
-      const patch = {};
-      for (const f of ALL) {
-        const el = $(`f_${f.k}`); if (!el) continue;
-        if (f.type === "multi") {
-          patch[f.k] = [...el.querySelectorAll("input:checked")].map((c) => c.value).join(",");
-          continue;
-        }
-        const val = el.value.trim();
-        if (SECRET.has(f.k)) { if (val) patch[f.k] = val; }   // blank secret = keep existing
-        else patch[f.k] = val;
+    function renderTabs() {
+      $("tabs").innerHTML = TABS.map((t) =>
+        `<button class="s-tab ${t.id === active ? "on" : ""}" role="tab" data-tab="${t.id}">${t.title}</button>`
+      ).join("");
+      $("tabs").querySelectorAll(".s-tab").forEach((b) =>
+        b.addEventListener("click", () => { active = b.dataset.tab; renderTabs(); renderPanel(); }));
+    }
+
+    // Current stored value for a field, from whichever backend owns it.
+    function currentValue(tab, f) {
+      if (tab.backend === "cv") return cvText || "";
+      if (tab.backend === "config") return cfg[f.k];
+      const src = f.section === "profile" ? (prof.profile || {}) : f.section === "watchlist" ? (prof.watchlist || {}) : (prof.sources || {});
+      return f.section === "sources" ? prof.sources || {} : src[f.k];
+    }
+
+    function fieldHTML(tab, f) {
+      const v = currentValue(tab, f);
+      const hint = f.hint ? `<span class="f-hint">${f.hint}</span>` : "";
+      let control = "";
+      if (f.type === "textarea") {
+        control = `<textarea id="f_${f.k}" class="mono s-cv" rows="18" placeholder="${esc(f.placeholder || "")}">${esc(v)}</textarea>`;
+      } else if (f.type === "select") {
+        control = `<select id="f_${f.k}">${(f.options || []).map((o) =>
+          `<option value="${esc(o)}" ${String(v || "") === o ? "selected" : ""}>${o || "—"}</option>`).join("")}</select>`;
+      } else if (f.type === "list") {
+        control = `<textarea id="f_${f.k}" class="s-list" rows="4" placeholder="one per line">${esc((Array.isArray(v) ? v : []).join("\n"))}</textarea>`;
+      } else if (f.type === "csv") {
+        control = `<input id="f_${f.k}" type="text" class="mono" value="${esc(v || "")}" placeholder="${esc(f.placeholder || "")}" />`;
+      } else if (f.type === "weights") {
+        const obj = v && typeof v === "object" ? v : {};
+        const lines = Object.entries(obj).map(([k, val]) => `${k} = ${val}`).join("\n");
+        control = `<textarea id="f_${f.k}" class="mono s-list" rows="4" placeholder="key = value">${esc(lines)}</textarea>`;
+      } else if (f.type === "toggles") {
+        const avail = (sourceInfo && sourceInfo.available) || Object.keys(prof.sources || {});
+        control = `<div class="src-picker">${avail.map((s) =>
+          `<label class="src-chip"><input type="checkbox" data-src="${esc(s)}" ${(prof.sources || {})[s] !== false ? "checked" : ""}/><span>${esc(s)}</span></label>`).join("")}</div>`;
+      } else if (f.type === "multi") {
+        const avail = (sourceInfo && (sourceInfo.available || sourceInfo.all)) || [];
+        const chosen = new Set(String(cfg[f.k] || "").split(",").map((s) => s.trim()).filter(Boolean));
+        const counts = (sourceInfo && sourceInfo.counts) || {};
+        control = `<div class="src-picker">${avail.map((o) =>
+          `<label class="src-chip"><input type="checkbox" value="${esc(o)}" ${chosen.has(o) ? "checked" : ""}/><span>${esc(o)}</span><span class="src-n mono">${counts[o] || ""}</span></label>`).join("")}</div>`;
+      } else {
+        const badge = f.secret ? `<span class="set-badge ${v && v.set ? "" : "no"}">${v && v.set ? "set" : "not set"}</span>` : "";
+        const val = f.secret ? "" : (v == null ? "" : v);
+        control = `<span class="lbl-badge">${badge}</span><input id="f_${f.k}" type="text" class="mono" value="${esc(val)}" placeholder="${f.secret ? "•••• leave blank to keep" : esc(f.placeholder || "")}" />`;
       }
+      return `<label class="field"><span class="f-label">${labelOf(f)}</span>${control}${hint}</label>`;
+    }
+
+    function renderPanel() {
+      const tab = TABS.find((t) => t.id === active);
+      const note = tab.note ? `<p class="s-note">${tab.note}</p>` : "";
+      $("panel").innerHTML = `
+        <section class="s-group">
+          <div class="s-title">${tab.title}</div>${note}
+          <div class="s-fields">${tab.fields.map((f) => fieldHTML(tab, f)).join("")}</div>
+          <div class="s-actions">
+            <button class="btn primary" id="save-tab" style="padding:8px 15px">Save ${tab.title}</button>
+            <span id="save-msg" class="muted" style="font-size:12.5px"></span>
+          </div>
+        </section>`;
+      // The CV tab lazily fetches its (potentially large) text the first time it opens.
+      if (tab.backend === "cv" && cvText === null) {
+        fetch(`${apiUrl}/profile/cv`, { headers: headers() })
+          .then((r) => r.ok ? r.json() : { cv_master: "" })
+          .then((d) => { cvText = d.cv_master || ""; const el = $("f_cv_master"); if (el) el.value = cvText; });
+      }
+      $("save-tab").addEventListener("click", () => saveTab(tab));
+    }
+
+    const splitLines = (s) => s.split("\n").map((x) => x.trim()).filter(Boolean);
+
+    function parseWeights(s) {
+      const out = {};
+      for (const line of splitLines(s)) {
+        const [k, ...rest] = line.split("=");
+        if (!k.trim() || !rest.length) continue;
+        const raw = rest.join("=").trim();
+        const num = Number(raw);
+        out[k.trim()] = Number.isFinite(num) && raw !== "" && !raw.includes("/") ? num : raw;
+      }
+      return out;
+    }
+
+    async function saveTab(tab) {
       $("save-msg").textContent = "saving…";
       try {
-        const r = await fetch(`${apiUrl}/config`, { method: "PUT", headers: headers(), body: JSON.stringify({ values: patch }) });
-        if (!r.ok) { $("save-msg").textContent = `error ${r.status}`; return; }
-        const sourceInfo = await fetch(`${apiUrl}/sources`).then((x) => x.json()).catch(() => null);
-        renderForm((await r.json()).config, sourceInfo);
-        $("save-msg").textContent = "saved ✓ · applies to the next fetch";
-        setTimeout(() => { $("save-msg").textContent = ""; }, 2500);
+        let url, body;
+        if (tab.backend === "config") {
+          const patch = {};
+          for (const f of tab.fields) {
+            const el = $(`f_${f.k}`);
+            if (f.type === "multi") {
+              const box = $("panel").querySelector(`#f_${f.k}, .src-picker`);
+              patch[f.k] = [...$("panel").querySelectorAll(".src-picker input:checked")].map((c) => c.value).join(",");
+              continue;
+            }
+            if (!el) continue;
+            const val = el.value.trim();
+            if (SECRET.has(f.k)) { if (val) patch[f.k] = val; } else patch[f.k] = val;
+          }
+          url = `${apiUrl}/config`; body = { values: patch };
+        } else if (tab.backend === "cv") {
+          url = `${apiUrl}/profile`; body = { cv_master: $("f_cv_master").value };
+        } else {
+          // profile-backed: gather fields by their section.
+          const sections = {};
+          for (const f of tab.fields) {
+            const sec = f.section;
+            sections[sec] = sections[sec] || {};
+            if (f.type === "toggles") {
+              const t = {};
+              $("panel").querySelectorAll('.src-chip input[data-src]').forEach((c) => { t[c.dataset.src] = c.checked; });
+              Object.assign(sections[sec], t);
+              continue;
+            }
+            const el = $(`f_${f.k}`); if (!el) continue;
+            if (f.type === "list") sections[sec][f.k] = splitLines(el.value);
+            else if (f.type === "weights") sections[sec][f.k] = parseWeights(el.value);
+            else sections[sec][f.k] = el.value.trim();
+          }
+          url = `${apiUrl}/profile`; body = sections;
+        }
+        const r = await fetch(url, { method: "PUT", headers: headers(), body: JSON.stringify(body) });
+        if (!r.ok) {
+          const d = await r.json().catch(() => ({}));
+          $("save-msg").textContent = d.detail || `error ${r.status}`;
+          return;
+        }
+        const data = await r.json();
+        if (tab.backend === "config") cfg = data.config;
+        else if (tab.backend === "cv") { cvText = $("f_cv_master").value; }
+        else { prof = data; }
+        $("save-msg").textContent = "saved ✓";
+        setTimeout(() => { const m = $("save-msg"); if (m) m.textContent = ""; }, 2500);
       } catch (e) { showError(e.message); }
     }
 
-    function gate() {
-      $("config").style.display = "none";
-      $("login").style.display = "block";
-    }
-
     $("login-form").addEventListener("submit", login);
-    $("save").addEventListener("click", save);
     $("logout").addEventListener("click", () => { localStorage.removeItem(TOKEN_KEY); gate(); });
-    token() ? loadConfig() : gate();
+    token() ? loadAll() : gate();
   </script>
 </Layout>
 
 <style is:global>
   .lock { max-width: 340px; margin: 16vh auto; text-align: center; }
-  .s-group {
-    border: 1px solid var(--border); background: var(--panel);
-    border-radius: var(--radius); padding: 16px 18px; margin-bottom: 14px;
+  .s-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
+  .s-head .page-sub { max-width: 68ch; }
+
+  .s-tabs { display: flex; flex-wrap: wrap; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 16px; }
+  .s-tab {
+    background: none; border: none; color: var(--muted); cursor: pointer;
+    padding: 9px 14px; font-size: 13px; border-bottom: 2px solid transparent; margin-bottom: -1px;
+    border-radius: 6px 6px 0 0;
   }
-  .s-title { font-size: 12px; color: var(--strong); margin-bottom: 14px; }
-  .s-fields { display: grid; gap: 12px; }
-  .s-note { font-size: 12px; color: var(--muted); line-height: 1.55; margin: -6px 0 14px; }
+  .s-tab:hover { color: var(--text); background: var(--hover); }
+  .s-tab.on { color: var(--accent); border-bottom-color: var(--accent); }
+
+  .s-panel { max-width: 720px; }
+  .s-group { border: 1px solid var(--border); background: var(--panel); border-radius: var(--radius); padding: 18px 20px; }
+  .s-title { font-size: 13px; color: var(--strong); margin-bottom: 10px; font-weight: 600; }
+  .s-note { font-size: 12px; color: var(--muted); line-height: 1.55; margin: 0 0 16px; }
+  .s-fields { display: grid; gap: 15px; }
+  .field { display: block; }
+  .f-label { display: block; font-size: 12.5px; color: var(--text); margin-bottom: 6px; }
   .f-hint { display: block; font-size: 11.5px; color: var(--faint); margin-top: 5px; line-height: 1.5; }
+  .field input, .field select, .field textarea {
+    width: 100%; background: #0d0d0d; border: 1px solid var(--border); border-radius: 8px;
+    padding: 8px 11px; font-size: 13px; color: var(--text);
+  }
+  .field input:focus, .field select:focus, .field textarea:focus { border-color: var(--accent); outline: none; }
+  .field textarea { resize: vertical; line-height: 1.5; }
+  .s-cv { min-height: 320px; }
+  .s-list { min-height: 84px; }
+  .lbl-badge { float: right; }
+  .set-badge { font-size: 10.5px; font-family: var(--mono); color: var(--good); border: 1px solid var(--border); border-radius: 999px; padding: 1px 8px; }
+  .set-badge.no { color: var(--faint); }
+  .s-actions { display: flex; gap: 10px; align-items: center; margin-top: 18px; }
+
   .src-picker { display: flex; flex-wrap: wrap; gap: 6px; }
   .src-chip {
     display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
     border: 1px solid var(--border); background: #0d0d0d; border-radius: 999px;
     padding: 4px 11px 4px 9px; font-size: 12.5px; font-family: var(--mono);
   }
-  .src-chip:hover { border-color: var(--border-2, #404040); }
-  .src-chip:has(input:checked) {
-    border-color: rgba(125, 211, 252, 0.4); background: var(--accent-dim); color: var(--accent);
-  }
+  .src-chip:has(input:checked) { border-color: rgba(125, 211, 252, 0.4); background: var(--accent-dim); color: var(--accent); }
   .src-chip input { accent-color: var(--accent); margin: 0; }
   .src-n { color: var(--faint); font-size: 10.5px; }
 </style>

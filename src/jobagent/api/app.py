@@ -31,7 +31,15 @@ from jobagent.ingestion.registry import build_adapters
 from jobagent.ingestion.runner import run_ingestion
 from jobagent.llm_client import build_llm
 from jobagent.matching import run_matching
-from jobagent.preferences import load_preferences
+from jobagent.preferences import (
+    Profile,
+    Sources,
+    Watchlist,
+    load_cv_master,
+    load_preferences,
+    save_cv_master,
+    save_overlay,
+)
 from jobagent.secrets_store import MANAGED_FIELDS, SecretStore, masked_view
 from jobagent.store import Store
 
@@ -60,7 +68,12 @@ def _llm_unavailable(exc: Exception) -> HTTPException:
 # declare it, and neither the bot nor the assistant touches it. It was 63% of a default
 # /jobs response — ~640 KB of dead weight on every dashboard page load. Storage rule,
 # not a transport one.
-_WIRE_OMIT = ("raw",)
+# Stripped from the /jobs LIST only — the store keeps both forever, and /job/{id}
+# still serves the description because the detail page renders it. `raw` is the
+# untouched source payload nothing reads. `description` is the full posting text:
+# measured at 95% of the list payload (136 KB of 143 KB over 20 rows) while the
+# dashboard's MatchRow does not even declare it. A storage rule is not a transport rule.
+_WIRE_OMIT = ("raw", "description")
 
 
 def _strip_heavy(rows: list[dict]) -> list[dict]:
@@ -95,6 +108,17 @@ class LoginReq(BaseModel):
 
 class ConfigPatch(BaseModel):
     values: dict
+
+
+class ProfilePatch(BaseModel):
+    """A partial profile update. Every section is optional so the UI can save one tab
+    without touching the others; a section left None is not modified, and the CV is
+    a separate large field kept out of the JSON overlay."""
+
+    profile: dict | None = None
+    watchlist: dict | None = None
+    sources: dict | None = None
+    cv_master: str | None = None
 
 
 class FollowupReq(BaseModel):
@@ -136,13 +160,15 @@ def _ingest_task(db_path: str, settings, profile, llm, run_id: str) -> None:
 
 def create_app(settings=None, profile=None, llm: Any = _UNSET, cv_master: str | None = None, mailer=None) -> FastAPI:
     settings = settings or get_settings()
-    profile = profile or load_preferences().profile
     mailer = mailer or send_email
     # Injected llm (tests) is fixed; otherwise build fresh per call so config edits apply.
     llm_injected = llm is not _UNSET
-    if cv_master is None:
-        p = Path("config/cv_master.md")
-        cv_master = p.read_text() if p.exists() else ""
+    # Profile and CV are injected in tests; in production they are loaded FRESH per
+    # request (see _profile()/_cv_master() below), so an edit in Settings → Profile
+    # takes effect immediately, the same way config edits do — never captured once at
+    # startup.
+    profile_injected = profile is not None
+    cv_injected = cv_master is not None
 
     app = FastAPI(title="Personal Job Agent API", version="2.0")
 
@@ -160,6 +186,12 @@ def create_app(settings=None, profile=None, llm: Any = _UNSET, cv_master: str | 
 
     def _llm():
         return llm if llm_injected else build_llm(get_settings())
+
+    def _profile():
+        return profile if profile_injected else load_preferences().profile
+
+    def _cv_master() -> str:
+        return cv_master if cv_injected else load_cv_master()
 
     # --- auth -----------------------------------------------------------------
     # Gates EVERY state-changing or cost-incurring route, not just /config. These
@@ -212,6 +244,62 @@ def create_app(settings=None, profile=None, llm: Any = _UNSET, cv_master: str | 
         reload_settings()   # so other endpoints (build_llm) pick up new keys this process
         return {"config": masked_view(_effective_managed())}
 
+    # --- profile: identity, background, search preferences, CV ---------------------
+    # Auth-gated on BOTH verbs: unlike /config's non-secret read, the profile carries
+    # personal data (name, email, phone, CV), so even reading it requires the token.
+    # Persisted to the gitignored data/ overlay, never to a committed file (R22).
+
+    @app.get("/profile", dependencies=auth)
+    def get_profile():
+        prefs = load_preferences()
+        return {
+            "profile": prefs.profile.model_dump(),
+            "watchlist": prefs.watchlist.model_dump(),
+            "sources": prefs.sources.model_dump(),
+            # Presence + size, not the text — the CV can be large and this is a summary.
+            "cv": {"present": bool(_cv_master()), "chars": len(_cv_master())},
+        }
+
+    @app.put("/profile", dependencies=auth)
+    def put_profile(patch: ProfilePatch):
+        # Validate each supplied section against its model so a bad field is a 422 here
+        # rather than a surprise the next time matching runs. Unknown profile keys are
+        # allowed (Profile has extra="allow") but the known ones must type-check.
+        # exclude_unset is the load-bearing detail: it persists ONLY the keys the
+        # client actually sent. Without it, model_dump() emits every field's default,
+        # so saving one tab writes name="", email="" … over the whole profile section —
+        # shadowing the real values from the lower layers. (Caught in a browser: saving
+        # the Search tab blanked the identity fields.) Section-wise merge in
+        # save_overlay then leaves untouched fields exactly as they were.
+        overlay: dict = {}
+        try:
+            if patch.profile is not None:
+                overlay["profile"] = Profile(**patch.profile).model_dump(exclude_unset=True)
+            if patch.watchlist is not None:
+                overlay["watchlist"] = Watchlist(**patch.watchlist).model_dump(exclude_unset=True)
+            if patch.sources is not None:
+                overlay["sources"] = Sources(**patch.sources).model_dump(exclude_unset=True)
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(422, f"Invalid profile data: {exc}")
+
+        if patch.cv_master is not None:
+            save_cv_master(patch.cv_master)
+        if overlay:
+            save_overlay(overlay)
+
+        prefs = load_preferences()
+        return {
+            "profile": prefs.profile.model_dump(),
+            "watchlist": prefs.watchlist.model_dump(),
+            "sources": prefs.sources.model_dump(),
+            "cv": {"present": bool(_cv_master()), "chars": len(_cv_master())},
+        }
+
+    @app.get("/profile/cv", dependencies=auth)
+    def get_cv():
+        """The full CV text, for the editor. Auth-gated — it is personal data."""
+        return {"cv_master": _cv_master()}
+
     @app.get("/health")
     def health():
         chain = _llm()
@@ -246,8 +334,12 @@ def create_app(settings=None, profile=None, llm: Any = _UNSET, cv_master: str | 
         )
         s = store()
         try:
-            return {"jobs": _strip_heavy(
-                _decode_gaps(ranked_matches(s, limit, flt, offset=offset)))}
+            # No per-company cap: this route feeds a browsable triage list, not a
+            # shortlist. Capping here made the dashboard queue disagree with the
+            # queue count in stats() — the number you are asked to clear must be
+            # the number of rows you are given. The bot keeps its cap.
+            return {"jobs": _strip_heavy(_decode_gaps(
+                ranked_matches(s, limit, flt, offset=offset, max_per_company=None)))}
         finally:
             s.close()
 
@@ -361,7 +453,7 @@ def create_app(settings=None, profile=None, llm: Any = _UNSET, cv_master: str | 
                 raise HTTPException(404, "Job not found.")
             days = (body.days_waiting if body and body.days_waiting is not None else 7)
             try:
-                subject, text = draft_followup(profile.name or "", job, days, current_llm)
+                subject, text = draft_followup(_profile().name or "", job, days, current_llm)
             except RuntimeError as exc:
                 if _ALL_PROVIDERS_FAILED in str(exc):
                     raise _llm_unavailable(exc) from exc
@@ -389,7 +481,7 @@ def create_app(settings=None, profile=None, llm: Any = _UNSET, cv_master: str | 
             # No wrapper here: llm_score swallows provider failures and matching
             # falls back to heuristic scoring, so this path degrades rather than
             # failing. Asserted in tests/test_api.py so nobody "fixes" it into a 503.
-            r = run_matching(s, profile, llm=_llm())
+            r = run_matching(s, _profile(), llm=_llm())
             return {"scored": r.scored, "used_llm": r.used_llm, "llm_reranked": r.llm_reranked}
         finally:
             s.close()
@@ -407,7 +499,7 @@ def create_app(settings=None, profile=None, llm: Any = _UNSET, cv_master: str | 
                 raise HTTPException(409, "An ingestion pass is already running.")
         finally:
             s.close()
-        bg.add_task(_ingest_task, settings.db_path, settings, profile, _llm(), run_id)
+        bg.add_task(_ingest_task, settings.db_path, settings, _profile(), _llm(), run_id)
         return {"status": "started", "run_id": run_id}
 
     @app.get("/sources")
@@ -456,7 +548,7 @@ def create_app(settings=None, profile=None, llm: Any = _UNSET, cv_master: str | 
         finally:
             s.close()
         try:
-            return assess_fit(job, profile, cv_master, _llm()).to_dict()
+            return assess_fit(job, _profile(), _cv_master(), _llm()).to_dict()
         except RuntimeError as exc:
             if _ALL_PROVIDERS_FAILED in str(exc):
                 raise _llm_unavailable(exc) from exc
@@ -467,15 +559,16 @@ def create_app(settings=None, profile=None, llm: Any = _UNSET, cv_master: str | 
         current_llm = _llm()
         if current_llm is None:
             raise HTTPException(400, "No LLM configured (set an LLM key).")
+        cv_master = _cv_master()
         if not cv_master:
-            raise HTTPException(400, "config/cv_master.md missing.")
+            raise HTTPException(400, "No master CV — add it in Settings → Profile.")
         s = store()
         try:
             job = s.get_job(req.job_id)
             if not job:
                 raise HTTPException(404, "Job not found.")
             try:
-                b = prepare_application(s, job, profile, cv_master, current_llm)
+                b = prepare_application(s, job, _profile(), cv_master, current_llm)
             except RuntimeError as exc:
                 if _ALL_PROVIDERS_FAILED in str(exc):
                     raise _llm_unavailable(exc) from exc
@@ -492,7 +585,7 @@ def create_app(settings=None, profile=None, llm: Any = _UNSET, cv_master: str | 
     def apply_approve(app_id: str):
         s = store()
         try:
-            return {"result": approve_and_send(s, app_id, settings, profile, mailer=mailer)}
+            return {"result": approve_and_send(s, app_id, settings, _profile(), mailer=mailer)}
         finally:
             s.close()
 
@@ -508,7 +601,7 @@ def create_app(settings=None, profile=None, llm: Any = _UNSET, cv_master: str | 
             app_id = create_ats_application(s, job)
             Path("artifacts").mkdir(exist_ok=True)
             shot = f"artifacts/ats_{app_id}.png"
-            res = run_ats(s, app_id, profile, shot, submit=False)
+            res = run_ats(s, app_id, _profile(), shot, submit=False)
         finally:
             s.close()
         return _ats_response(app_id, res)
@@ -519,7 +612,7 @@ def create_app(settings=None, profile=None, llm: Any = _UNSET, cv_master: str | 
         try:
             Path("artifacts").mkdir(exist_ok=True)
             shot = f"artifacts/ats_{app_id}_submit.png"
-            res = run_ats(s, app_id, profile, shot, submit=True)
+            res = run_ats(s, app_id, _profile(), shot, submit=True)
         finally:
             s.close()
         return _ats_response(app_id, res)

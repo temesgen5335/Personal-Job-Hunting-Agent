@@ -100,7 +100,7 @@ Two files, same split as `.env.example` / `.env`:
 
 ### 5. Use it
 ```bash
-make run                                        # API (:8077) + dashboard (:4321) together
+make run                                        # API (:8077) + dashboard (:1234) together
 make run_bot                                    # the interactive bot — then DM it /menu
 ```
 Or without make: `.venv/bin/python scripts/run_api.py`, then
@@ -151,7 +151,7 @@ Set `LLM_PROVIDER` to your primary; the others become automatic failover backups
 ```bash
 make install     # backend venv + dashboard node_modules (idempotent)
 make check       # preflight: .env, required vars, free ports, store presence
-make run         # API (:8077) + dashboard (:4321), prefixed logs, one Ctrl-C stops both
+make run         # API (:8077) + dashboard (:1234), prefixed logs, one Ctrl-C stops both
 make run_bot     # the Telegram bot (separate long-lived process)
 make pipeline    # one ingest → match pass, no Telegram push
 make test        # the offline test suite

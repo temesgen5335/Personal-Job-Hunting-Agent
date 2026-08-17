@@ -10,7 +10,6 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from pathlib import Path
 
 from jobagent.apply.email_send import send_email
 from jobagent.apply.generators import draft_email, tailor_cv, write_cover_letter
@@ -21,11 +20,18 @@ from jobagent.store import Store
 CV_MASTER_PATH = "config/cv_master.md"
 
 
-def load_cv_master(path: str = CV_MASTER_PATH) -> str:
-    p = Path(path)
-    if not p.exists():
-        raise FileNotFoundError(f"Master CV not found at {path} — needed to tailor applications")
-    return p.read_text()
+def load_cv_master(path: str | None = None) -> str:
+    """The master CV. Delegates to the preferences layer so there is one source of
+    truth — the writable `data/cv_master.md` wins over the legacy `config/` copy.
+    Still raises if none exists, since an application cannot be tailored without it."""
+    from jobagent.preferences import load_cv_master as _load
+
+    text = _load(path)
+    if not text:
+        raise FileNotFoundError(
+            "Master CV not found (data/cv_master.md or config/cv_master.md) — "
+            "needed to tailor applications. Add it in Settings → Profile.")
+    return text
 
 
 @dataclass

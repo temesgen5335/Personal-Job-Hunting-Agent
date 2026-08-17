@@ -1,17 +1,37 @@
-"""Load the job-search profile + company watchlist from config/preferences.toml.
+"""Load — and now write — the job-search profile, watchlist and source toggles.
 
-Uses stdlib tomllib (read-only) — no extra dependency. Phase 2 matching consumes
-Profile; ingestion consumes Watchlist.
+Three layers, lowest priority first, merged section-wise:
+
+  1. `config/preferences.toml`      committed placeholders — shareable, no PII
+  2. `config/preferences.local.toml` legacy gitignored overlay (kept for back-compat)
+  3. `data/profile.json`            the writable overlay the dashboard edits
+
+Only layer 3 is ever written, and it lives under the gitignored `data/` dir, so a
+person's real identity, background and preferences are *referenced* by the running
+system and never hardcoded into the tree. This matches the posture that already
+existed (the CV and `preferences.local.toml` were gitignored plaintext) — it just
+makes the overlay editable through the UI instead of only by hand.
+
+The CV master is the same idea: read from `data/cv_master.md` if present, else the
+legacy `config/cv_master.md`, and written only to the `data/` copy.
 """
 
 from __future__ import annotations
 
+import json
+import os
 import tomllib
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
 
 DEFAULT_PATH = "config/preferences.toml"
+# The writable overlay + CV. Env-overridable so tests are hermetic (a test must never
+# read or write the developer's real data/ — the same discipline SecretStore uses for
+# JOBAGENT_SECRETS_PATH).
+OVERLAY_PATH = "data/profile.json"
+CV_PATH = "data/cv_master.md"
+LEGACY_CV_PATH = "config/cv_master.md"
 
 
 class Profile(BaseModel):
@@ -84,17 +104,93 @@ def _merge(base: dict, overlay: dict) -> dict:
     return out
 
 
-def load_preferences(path: str = DEFAULT_PATH, local_path: str | None = None) -> Preferences:
-    """Load preferences, overlaid by a gitignored local file if present.
+def _overlay_path(explicit: str | None = None) -> Path:
+    return Path(explicit or os.environ.get("JOBAGENT_PROFILE_PATH", OVERLAY_PATH))
 
-    `preferences.toml` is committed and holds shareable search config (target roles,
-    skills, watchlist, source toggles). `preferences.local.toml` is gitignored and
-    holds identity — name, email, phone, cv_path — so a clone of this repo carries a
-    working search profile without carrying anyone's personal contact details.
-    Same split as `.env.example` vs `.env`.
+
+def _cv_paths(explicit: str | None = None) -> tuple[Path, Path | None]:
+    """(writable data path, legacy config path or None).
+
+    The legacy `config/cv_master.md` fallback applies ONLY on the default path. An
+    explicit override — `JOBAGENT_CV_PATH` or an argument — is authoritative and does
+    not fall back, so a test pointing at an empty tmp dir sees no CV, not the
+    developer's real one. Presence, not truthiness: the same discipline as R31.
+    """
+    override = explicit or os.environ.get("JOBAGENT_CV_PATH")
+    if override:
+        return Path(override), None
+    return Path(CV_PATH), Path(LEGACY_CV_PATH)
+
+
+def load_preferences(
+    path: str = DEFAULT_PATH,
+    local_path: str | None = None,
+    overlay_path: str | None = None,
+) -> Preferences:
+    """Load preferences, merging the three layers described in the module docstring.
+
+    Committed placeholders lose to the legacy `.local.toml`, which loses to the
+    writable `data/profile.json`. A clone with no overlays still yields a usable
+    (placeholder) profile; a configured install yields the operator's real one.
     """
     base = tomllib.loads(Path(path).read_text()) if Path(path).exists() else {}
+
     local = Path(local_path or str(path).replace(".toml", ".local.toml"))
     if local.exists():
         base = _merge(base, tomllib.loads(local.read_text()))
+
+    overlay = _overlay_path(overlay_path)
+    if overlay.exists():
+        try:
+            base = _merge(base, json.loads(overlay.read_text() or "{}"))
+        except (ValueError, TypeError):
+            pass  # a corrupt overlay must not brick every request; placeholders win
+
     return Preferences(**base) if base else Preferences()
+
+
+def load_overlay(overlay_path: str | None = None) -> dict:
+    """The raw writable overlay only (not merged), for the settings UI to edit."""
+    p = _overlay_path(overlay_path)
+    if not p.exists():
+        return {}
+    try:
+        return json.loads(p.read_text() or "{}")
+    except (ValueError, TypeError):
+        return {}
+
+
+def save_overlay(patch: dict, overlay_path: str | None = None) -> dict:
+    """Merge a patch into the writable overlay and persist it. Returns the new overlay.
+
+    Section-wise merge (profile / watchlist / sources), so saving one tab never wipes
+    another. A section value of null clears that section back to the lower layers.
+    """
+    p = _overlay_path(overlay_path)
+    current = load_overlay(overlay_path)
+    for section, value in (patch or {}).items():
+        if value is None:
+            current.pop(section, None)
+        elif isinstance(value, dict) and isinstance(current.get(section), dict):
+            current[section] = {**current[section], **value}
+        else:
+            current[section] = value
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps(current, indent=2, ensure_ascii=False))
+    return current
+
+
+def load_cv_master(cv_path: str | None = None) -> str:
+    """The CV master text: the writable `data/` copy if present, else the legacy one."""
+    data, legacy = _cv_paths(cv_path)
+    if data.exists():
+        return data.read_text()
+    if legacy is not None and legacy.exists():
+        return legacy.read_text()
+    return ""
+
+
+def save_cv_master(text: str, cv_path: str | None = None) -> None:
+    data, _ = _cv_paths(cv_path)
+    data.parent.mkdir(parents=True, exist_ok=True)
+    data.write_text(text or "")

@@ -66,7 +66,7 @@ PREFETCH_ROUTES: tuple[tuple[tuple[str, ...], str, object], ...] = (
 )
 
 
-def default_links(base_url: str = "http://localhost:4321"):
+def default_links(base_url: str = "http://localhost:1234"):
     """Deep links into the dashboard, so `request_human_action` hands over a place to
     go rather than an instruction to go looking."""
     def build(kind: str, target_id: str) -> str:
@@ -131,7 +131,7 @@ class Assistant:
 
 
 def build_assistant(*, store, settings, sink=None, surface: Surface = Surface.CLI,
-                    ask=None, actor: str = "operator", base_url: str = "http://localhost:4321",
+                    ask=None, actor: str = "operator", base_url: str = "http://localhost:1234",
                     admin_surfaces=frozenset({Surface.WEB, Surface.CLI}),
                     cost_budget: int | None = 20, search: bool = True) -> Assistant:
     """Wire one session.

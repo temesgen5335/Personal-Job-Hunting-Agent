@@ -211,3 +211,29 @@ def test_queue_count_and_shortlist_agree(tmp_path):
     s.set_triage(drop, state="dismissed")
     assert s.stats()["queue"] == len(_ranked_titles(s)) == 1
     s.close()
+
+
+def test_the_dashboard_queue_shows_every_job_the_badge_counts(tmp_path):
+    """The per-company cap that is right for a digest is wrong for a triage list.
+
+    `stats()['queue']` is the number the sidebar badge and the Overview stat promise.
+    The dashboard's list came from ranked_matches(), which diversifies to 2 per company
+    so one employer cannot fill a bot top-10. With a single employer posting many roles
+    those two numbers diverge silently — measured on a real store, 231 became 46.
+
+    test_queue_count_and_shortlist_agree above cannot catch this: every job in it has a
+    distinct company, so the cap never binds. This one gives them all the same one.
+    """
+    from jobagent.bot.service import MatchFilter, ranked_matches
+
+    s = _store(tmp_path)
+    for i in range(9):
+        jid = s.upsert_job(JobPosting(source=Source.remoteok, title=f"Engineer {i}",
+                                      company="Megacorp", is_remote=True, location="Remote"))
+        s.upsert_match(Match(job_id=jid, score=0.9))
+
+    flt = MatchFilter(hide_triaged=False)
+    assert s.stats()["queue"] == 9
+    assert len(ranked_matches(s, 50, flt, max_per_company=2)) == 2       # digest: capped
+    assert len(ranked_matches(s, 50, flt, max_per_company=None)) == 9    # dashboard: all
+    s.close()

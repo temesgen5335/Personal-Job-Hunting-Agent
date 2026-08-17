@@ -430,6 +430,41 @@ bug. Confirmed by screenshot and by reading the persisted inline style (540×600
 by trusting the number. When an automated measurement disagrees with a screenshot,
 believe the screenshot.
 
+## Profile & preferences are UI-editable now, and nothing personal is hardcoded (Aug 2026)
+
+The system was already PII-clean in the tree (identity lived in gitignored
+`preferences.local.toml` + `config/cv_master.md`), but those were read-only and
+hand-edited. Now the operator configures everything — identity, background, CV, search
+preferences (roles, skills, weighted, domains, must/nice-to-haves, locations,
+keywords), source toggles, and the ATS watchlist — through a tabbed Settings page.
+
+**Storage decision (delegated to me): a gitignored `data/profile.json` overlay +
+`data/cv_master.md`, not the encrypted store or a DB table.** Rationale: it matches the
+posture that already existed (gitignored plaintext overlays) and just makes them
+writable; the encrypted store is for credentials where plaintext-on-disk is the threat,
+and it is keyed on flat scalars, not the nested profile; a DB table adds a query per
+request and a migration for one small document read on nearly every request. Merge
+order, lowest first: committed `preferences.toml` → `preferences.local.toml` (legacy) →
+`data/profile.json` (writable, wins). Only the last is ever written.
+
+Two things the API layer had to get right, both about *layers*:
+- **`create_app` loaded profile + CV once at startup.** They are now loaded fresh per
+  request (`_profile()`/`_cv_master()`, gated by injected-for-tests flags like `_llm()`),
+  so an edit in Settings takes effect without a restart.
+- **exclude_unset is load-bearing — caught in a browser, not a test.** Saving the Search
+  tab wrote `name=""`, `email=""` … into the overlay, because `model_dump()` emits every
+  field's default, and those blanks then shadowed the real values from the lower layers.
+  Fixed with `model_dump(exclude_unset=True)` so a PUT persists only the keys the client
+  sent; the section-wise merge leaves everything else alone. The screenshot showed the
+  overlay had blanked identity — a green suite would not have, because no test yet saved
+  one section after another. Added that regression test.
+
+Hermetic-test discipline held again: `JOBAGENT_PROFILE_PATH` / `JOBAGENT_CV_PATH` isolate
+the overlay + CV, and an *explicit* CV path is authoritative (no legacy config fallback)
+so a test never reads the developer's real CV. Two profile-store tests tripped the
+existing guards (bare `load_preferences()` reading the real local.toml; stale file count)
+— both fixed by full isolation, exactly as the guards intend.
+
 ## The assistant is named "Baer" (Aug 2026)
 
 `ASSISTANT_NAME = "Baer"` in `jobagent/assistant/manifest.py` is the single source of
@@ -492,7 +527,9 @@ To rename, change the one constant; nothing else hardcodes it (asserted by test)
 | systest | `413272a` | Full-system exercise: /jobs payload, 503 on exhaustion, config-write UX. 512 tests |
 | secretfix | `bfe474a` | SecretStore reads .env; presence-not-truthiness override. 515 tests |
 | chat-bubble | `8bcaebf` | Floating assistant on every page; shared client + session with /assistant. Dashboard-only, no test-count change |
-| naming | (this) | Assistant named Baer; name-addressing in Telegram; 531 tests |
+| naming | `a1b06df` | Assistant named Baer; name-addressing in Telegram; 531 tests |
+| profile-config | | UI-editable profile/CV/prefs → gitignored data/ overlay; tabbed Settings; 554 tests |
+| queue-parity | (this) | Queue badge = queue rows (no digest cap, no date default); "Pull Jobs" → POST /ingest; `description` off the list wire; dashboard port 1234; 556 tests |
 
 ---
 
@@ -504,3 +541,96 @@ To rename, change the one constant; nothing else hardcodes it (asserted by test)
   substitutes paths. Designed for Oracle Cloud Always Free ARM VM. Not yet deployed
   to a live box.
 - **Dashboard** — Astro SSR, targeted for Vercel free tier or same VPS behind Caddy.
+
+## The queue promised 231 and delivered 46 (Aug 2026)
+
+"Start triage →" on the Overview was a plain `<a href="/jobs">` sitting beside the stat
+`{stats.queue} not yet triaged`. The link worked; the destination answered a different
+question than the number did. Three causes, found by tracing the button and then
+measuring against the real store rather than reasoning about it:
+
+1. **A digest cap on a browse list.** The dashboard reused `ranked_matches`, whose
+   `diversify(max_per_company=2)` is exactly right for a bot top-10 — one employer must
+   not fill it — and exactly wrong for a triage queue, where the cap hides work you still
+   have to decide on. 231 strong untriaged matches rendered as 46 (affirm 31, samsara 29,
+   openai 23 … all clipped to 2). `/jobs` now passes `max_per_company=None`; the bot is
+   untouched.
+2. **A windowed default against an unwindowed count.** `/jobs` defaulted to `within=7d`;
+   `stats()["queue"]` has no date filter at all. With the pipeline 243h stale, the button
+   promising 231 landed on "Nothing matches · 0 match your filters". Default is now `any`.
+3. **Pagination was decorative.** `offset` was hardcoded to 0 and `page` only sliced the
+   already-fetched array, so nothing beyond the first fetch was reachable.
+
+**Why the suite was green: the existing parity test gave every job a distinct company.**
+`test_queue_count_and_shortlist_agree` asserts `stats()["queue"] == len(shortlist)` over
+two jobs at two companies — where a per-company cap can never bind. The property it
+claims to protect was already broken when it was written. The new test gives nine jobs
+one employer, and was confirmed red against the old code before being kept. Same lesson
+as the Phase-2 audit ordering test: **a test whose fixture cannot express the failure is
+not protecting anything**, and "it passes" is not evidence it ever could fail.
+
+**And the fix re-priced the payload.** Removing the cap and fetching 400 rows took
+`/jobs` to 3.0 MB — the *same* defect as the `raw` strip, through a different field:
+`description` was 95% of the response (136 KB of 143 KB over 20 rows) for text the list
+never renders. Now in `_WIRE_OMIT`; 3.0 MB → 346 KB, less than the old 200-row response.
+Worth keeping: **widening a query re-prices every field on it.** A per-row cost that was
+tolerable at 92 rows is a different decision at 400, so the transport rule has to be
+re-checked whenever the row count moves — a fix in one dimension can regress another.
+
+Also confirmed while tracing: **no ingestion is scheduled anywhere, and until now no UI
+could start one.** `run_ingestion` has three non-test callers (`scripts/pipeline.py`,
+`scripts/ingest.py`, and `_ingest_task` behind `POST /ingest`); the systemd timers need
+the unprovisioned VPS and the GitHub Action needs repo secrets. The store shows it —
+ingest events on four scattered days, the shape of hand-run passes. The Overview's
+"Pull Jobs" button now drives `POST /ingest` (202 + run_id, lock taken
+synchronously so 409 is definite), polling `/runs/{id}` for progress.
+
+One bug caught in that polling code before it shipped, and it is the R32 pattern again:
+`events_for_run` **flattens** the payload into each event (`{kind, created_at, **payload}`),
+so `e.payload.fetched` is `undefined` and the progress line would have read
+"0 fetched · 0 new" forever while the run worked fine. Written from memory, corrected by
+reading `store/db.py`. The keys are `e.fetched` / `e.new` / `e.scored`.
+
+**Dashboard port moved 4321 → 1234** across the Makefile (`DASH_PORT`),
+`astro.config.mjs` (`server.port`, so a bare `npm run dev` agrees), the CORS default in
+`config.py`, the assistant's `base_url` default, `.env.example` and every doc. Nothing
+pinned the old port in `.env`, so no manual step was needed — but note that a CORS
+allow-list is the thing that breaks silently on a port change, and it breaks only in a
+browser, never in a test.
+
+Gotcha for anyone verifying by curl: Astro's dev server binds **IPv6 `localhost` only**.
+`curl http://127.0.0.1:1234/` returns nothing at all, which reads exactly like a broken
+page. Use `localhost`.
+
+### The sign-in prompt lives in the Layout, not on the page (Aug 2026)
+
+"Pull Jobs" is the first control on the dashboard that *writes* without the user having
+been anywhere near Settings first — reads need no token, so nothing had ever prompted
+for one. A 401 there is the normal first-run case, not an error.
+
+`window.JA.signIn(why)` sits in `Layout.astro` beside the `headers()`/`explain()` helpers
+that were already there, and returns a promise resolving `true` once a token is stored.
+The caller retries **once**: a second 401 means the token is genuinely bad, not missing.
+It lives in the Layout for two reasons — every write surface (pull, triage, fit check,
+status edits, follow-up drafts) hits the same wall, and the token it mints is the same
+`jobagent_token` key the Settings page writes, so the session is shared *by construction*
+rather than by two copies of the login logic agreeing. Settings keeps its own inline
+gate: there the lock **is** the page; here it is an interruption over one.
+
+Distinctions the prompt has to keep: 401 is "wrong password", **403 is "the API has no
+`DASHBOARD_PASSWORD` set at all"** — no amount of retyping fixes the second, so it must
+not be reported as a bad password. Cancel resolves `false` and the button says
+"Cancelled — not signed in" rather than silently doing nothing.
+
+Verified in a real browser (the API log is the trace): `POST /ingest 401` →
+`POST /auth/login 200` → `POST /ingest 202`, and separately a wrong password producing
+`/auth/login 401` before a correct one. The run it started fetched 8,363 postings across
+all six adapters with zero errors and cleared the stale banner.
+
+**Found while watching that run: two of the three LLM providers are dead defaults.**
+Groq's `llama-3.3-70b-versatile` now 404s ("does not exist or you do not have access")
+and Gemini's `gemini-2.0-flash` is retired ("use models/gemini-3.6-flash"). 14 failures
+each against 12 calls served by OpenRouter. Failover works exactly as designed — the
+answer still arrives — which is precisely why this rots unnoticed: the only symptom is
+latency. Third time this pitfall has landed in this project. **Re-verify model slugs
+whenever the chain looks short, and read the API log after any real run.**

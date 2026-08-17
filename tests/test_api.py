@@ -415,15 +415,22 @@ def test_the_job_list_does_not_ship_the_untouched_source_payload(client):
     load — and nothing reads it: the dashboard's MatchRow does not declare it, and
     neither the bot nor the assistant touches it.
 
-    The store still keeps it (JobPosting.raw is never discarded); this is about what
-    goes on the wire.
+    `description` joined it once the route stopped diversifying and the dashboard
+    started asking for 400 rows: 95% of the list payload (136 KB of 143 KB over 20
+    rows) for text the list never renders.
+
+    The store still keeps both (JobPosting.raw is never discarded); this is about what
+    goes on the wire. The detail route still serves the description — asserted below.
     """
     rows = client.get("/jobs").json()["jobs"]
     assert rows, "fixture should seed jobs"
     assert all("raw" not in r for r in rows)
+    assert all("description" not in r for r in rows)
     # The fields consumers actually render must survive the strip.
     for field in ("id", "title", "company", "score", "source", "url"):
         assert field in rows[0], f"stripping removed {field!r}, which the UI renders"
+    # ...but the detail page renders the description, so that route must keep it.
+    assert "description" in client.get(f"/job/{rows[0]['id']}").json()
 
 
 def test_provider_exhaustion_is_a_503_not_a_500(client, monkeypatch):
@@ -466,3 +473,21 @@ def test_provider_exhaustion_is_a_503_not_a_500(client, monkeypatch):
     fit = c.post("/fit", json={"job_id": job_id})
     assert fit.status_code == 200 and fit.json()["source"] == "heuristic"
     assert c.post("/match", json={}).status_code == 200
+
+
+def test_jobs_route_does_not_cap_per_company(client, tmp_path):
+    """GET /jobs feeds a browsable triage list, so it must not diversify. The bot's
+    shortlist keeps its cap; this route passes max_per_company=None. Without it the
+    dashboard renders fewer rows than the queue badge promises, and nothing says so."""
+    s = Store(str(tmp_path / "api.db"))
+    for i in range(8):
+        jid = s.upsert_job(JobPosting(source=Source.remoteok, title=f"Role {i}",
+                                      company="Megacorp", is_remote=True))
+        s.upsert_match(Match(job_id=jid, score=0.9))
+    queue = s.stats()["queue"]
+    s.close()
+
+    rows = client.get("/jobs", params={"limit": 100}).json()["jobs"]
+    mega = [j for j in rows if j["company"] == "Megacorp"]
+    assert len(mega) == 8                       # all of them, not diversify's 2
+    assert len([j for j in rows if j["score"] >= 0.7]) == queue
