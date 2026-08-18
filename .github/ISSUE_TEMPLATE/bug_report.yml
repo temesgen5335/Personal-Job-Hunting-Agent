@@ -1,0 +1,56 @@
+name: Bug report
+description: Something behaves differently from what the docs say
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before filing: this project's failures are usually **data-shaped or
+        environment-shaped** rather than logic-shaped, so the version, the source of
+        the data, and whether an LLM was reachable matter more than usual.
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: "From the dashboard sidebar, or `curl localhost:8077/health`"
+      placeholder: "3.2.0"
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what you expected instead
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. make run
+        2. open /jobs
+        3. ...
+    validations:
+      required: true
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Where
+      multiple: true
+      options: [Dashboard, Telegram bot, API, CLI script, Assistant (Baer), Ingestion, Matching, Apply flow]
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: "`make doctor` output helps for anything LLM-related. Redact keys."
+      render: shell
+  - type: checkboxes
+    id: hygiene
+    attributes:
+      label: Checks
+      options:
+        - label: "I have removed API keys, tokens, and personal details from everything pasted above"
+          required: true
+        - label: "`make test` passes on my checkout"

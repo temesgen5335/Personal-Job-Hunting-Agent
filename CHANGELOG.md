@@ -12,6 +12,37 @@ scoped in [docs/VERSIONING.md](docs/VERSIONING.md) — which is worth reading, b
 Planned work is tracked in [docs/ROADMAP.md](docs/ROADMAP.md), grouped by the release
 that will carry it.
 
+## [3.2.0] — 2026-08-18
+
+*Theme: a stranger can legally use this, and gets their own job search rather than mine.*
+
+### Added
+- **`LICENSE`** (MIT). `pyproject.toml` had claimed MIT for months with no license file,
+  which legally means all rights reserved — nobody could use the code.
+- **`config/preferences.example.toml`** — a neutral, commented template. The loader falls
+  back to it, so a fresh clone runs before it is edited.
+- **`scripts/check_profile.py`**, wired into `make check`: warns while the search profile
+  is still template values, naming the fields.
+- `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`, issue forms, and a PR template.
+- `uv.lock` and `dashboard/package-lock.json` are now committed.
+- `tests/test_packaging.py` — nine invariants covering every finding above.
+
+### Changed
+- **`config/preferences.toml` is no longer committed.** It carried a real search profile:
+  location, timezone, 9 target roles, 37 core skills, 26 tuned skill weights and a
+  40-company watchlist. Identity had been scrubbed to placeholders long ago, but that
+  work framed "personal" as contact details — a PII scrub is not a personalization scrub.
+- README truth-pass: profile setup now describes the Settings UI (the real path since
+  3.0.0), the CV lives at `data/cv_master.md`, and the "nothing is hard-coded to one
+  person" claim is replaced with one that is true.
+- `.gitignore` uses case-class patterns (`*[Cc][Vv]*.pdf`, `[Rr]esume`) — matching is
+  case-sensitive on Linux, which macOS hides.
+
+### Upgrade
+
+None required. Your existing `config/preferences.toml` is untouched on disk; it is simply
+no longer tracked by git.
+
 ## [3.1.0] — 2026-08-18
 
 ### Added
@@ -95,7 +126,8 @@ that will carry it.
   Telegram bot, Tier-1 email applications, Tier-2 ATS form-fill, and VPS deployment
   units.
 
-[Unreleased]: https://github.com/temesgen5335/personalAgent/compare/v3.1.0...HEAD
+[Unreleased]: https://github.com/temesgen5335/personalAgent/compare/v3.2.0...HEAD
+[3.2.0]: https://github.com/temesgen5335/personalAgent/compare/v3.1.0...v3.2.0
 [3.1.0]: https://github.com/temesgen5335/personalAgent/compare/v3.0.0...v3.1.0
 [3.0.0]: https://github.com/temesgen5335/personalAgent/compare/v1.0.0...v3.0.0
 [2.4.0]: https://github.com/temesgen5335/personalAgent/releases/tag/v2.4.0

@@ -1,0 +1,105 @@
+# ─────────────────────────────────────────────────────────────────────────────
+#  Job-search profile — TEMPLATE
+#
+#  Copy this to `config/preferences.toml` (gitignored) and make it yours:
+#      cp config/preferences.example.toml config/preferences.toml
+#
+#  Or skip the file entirely: run the app and edit everything in the dashboard
+#  Settings page, which writes a gitignored `data/profile.json` overlay that wins
+#  over this file. Either way, nothing personal ends up in the repo.
+#
+#  THE VALUES BELOW ARE PLACEHOLDERS, NOT DEFAULTS. Matching scores every posting
+#  against your roles, skills and weights — leave these generic and every score
+#  will be generic too. `make check` will remind you while they are unedited.
+# ─────────────────────────────────────────────────────────────────────────────
+
+[profile]
+# Identity. Used to sign drafted emails and auto-fill ATS forms.
+name = "Your Name"
+headline = "Your one-line professional headline"
+cv_path = "docs/your_cv.pdf"        # PDF attached to email applications
+email = "you@example.com"
+phone = "+10000000000"
+
+# What to surface. Matching scores role titles against these, so be specific:
+# "Backend Engineer" and "Engineer" behave very differently.
+target_roles = [
+    "Software Engineer",
+    "Backend Engineer",
+]
+seniority = "mid"            # intern | junior | mid | mid-to-senior | senior | staff | principal | lead
+work_mode = "remote"         # remote | hybrid | onsite | any
+location = "Your City, Country"
+timezone = "UTC+0"
+
+# Strengths the matcher weights as positive signal. List what you actually want
+# to be hired for — not everything you have ever touched.
+core_skills = [
+    "Python",
+    "SQL",
+    "Docker",
+]
+
+# Industries or problem spaces you want. Boosts scoring when a posting matches.
+domains = [
+    "developer tools",
+]
+
+# Hard filters and strong preferences.
+must_haves = ["remote"]          # a posting missing one of these is penalised hard
+nice_to_haves = ["async-friendly team"]
+
+# Down-rank or drop postings containing these.
+exclude_keywords = [
+    "on-site only", "onsite required", "no remote",
+    "unpaid", "clearance required",
+]
+
+# Location filters.
+#   preferred_locations — if NON-EMPTY, only jobs matching one of these are shown.
+#   exclude_locations   — always drop jobs whose location contains any of these.
+preferred_locations = []                       # e.g. ["remote", "worldwide", "EMEA"]
+exclude_locations = ["US only", "United States only"]
+
+# Free-text positive keywords for the keyword prefilter.
+keywords = [
+    "backend", "Python", "API",
+]
+
+# Per-skill importance. Unlisted skills weigh 1.0. This is what stops a posting that
+# merely mentions Docker + AWS + Postgres from scoring like one built on your actual
+# differentiators. Raise what you want to be hired for; lower generic tooling you can
+# do but do not want to lead with.
+[profile.skill_weights]
+"Python" = 2.0
+"SQL" = 1.5
+"Docker" = 0.5
+
+[profile.links]
+portfolio = "https://example.com"
+github = "https://github.com/you"
+linkedin = "https://linkedin.com/in/you"
+
+# Turn whole job SOURCES on/off without deleting their config.
+# (Telegram channels are set via TELEGRAM_CHANNELS in .env.)
+[sources]
+remoteok = true
+remotive = true
+greenhouse = true
+lever = true
+ashby = true
+telegram = false     # needs a Telethon login — see README step 4
+aggregator = false   # LinkedIn/Indeed/Glassdoor — planned, see docs/ROADMAP.md
+
+# Companies to track directly on their ATS. These are the boards the adapters poll,
+# so put the employers you actually want to work for here — the examples below are
+# only to show the slug format (it is the name in the board URL).
+#
+#   greenhouse: boards.greenhouse.io/SLUG      lever: jobs.lever.co/SLUG
+#   ashby:      jobs.ashbyhq.com/SLUG
+#
+# An adapter silently skips a slug that stops resolving, so a stale entry is harmless.
+[watchlist]
+greenhouse = ["stripe", "gitlab"]
+lever = ["spotify"]
+ashby = ["notion"]

@@ -9,6 +9,6 @@
 # contributor who bumped the version would keep seeing the old one and have no idea
 # why. A literal cannot go stale. It is also how the API came to report "2.0" while
 # pyproject said "3.0.0"; the fix is one number, not a cleverer lookup.
-__version__ = "3.1.0"
+__version__ = "3.2.0"
 
 __all__ = ["__version__"]

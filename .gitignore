@@ -27,10 +27,21 @@ data/
 artifacts/
 cv_master.md
 
-# Personal identity + CV — the committed config carries placeholders only (C2).
+# Personal identity, search profile + CV. The repo ships templates only:
+# `config/preferences.example.toml` is committed; your real `preferences.toml` is not.
+# A PII scrub is not a personalization scrub — roles, skills, weights and a company
+# watchlist are just as much "yours" as a phone number, and a clone that inherits them
+# silently searches someone else's job market.
+config/preferences.toml
 config/preferences.local.toml
-docs/*CV*.pdf
-docs/*cv*.pdf
+!config/preferences.example.toml
+
+# CVs and resumes, any spelling, anywhere — case classes spelled out because gitignore
+# matching is case-SENSITIVE on Linux even though macOS hides that.
+*[Cc][Vv]*.pdf
+*[Rr]esume*.pdf
+*[Rr]esume*.docx
+*[Cc][Vv]*.docx
 
 
 
@@ -38,7 +49,6 @@ docs/*cv*.pdf
 dashboard/node_modules/
 dashboard/dist/
 dashboard/.astro/
-dashboard/package-lock.json
 
 # OS / editor
 .DS_Store

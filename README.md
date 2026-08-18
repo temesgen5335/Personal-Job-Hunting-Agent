@@ -10,7 +10,12 @@ fit checks, application tracking with follow-up nudges, and credential editing. 
 GitHub Actions.
 
 **Reusable by anyone:** clone it, add your own credentials, and run your own private
-instance. Nothing is hard-coded to one person — all identity lives in config.
+instance. No identity, search profile, or company watchlist is committed — the repo
+ships templates, and everything personal lives in gitignored config you own.
+
+**It runs with zero credentials.** Five of the six sources are public APIs and matching
+falls back to heuristics with no LLM key, so `make install && make pipeline` gives you
+real ranked jobs before you sign up for anything.
 
 ---
 
@@ -32,7 +37,7 @@ Anthropic, or any OpenAI-compatible endpoint). See [docs/ARCHITECTURE.md](docs/A
 A **FastAPI orchestrator** sits between the interfaces and the data: the dashboard
 calls it over REST, and the bot calls the same service layer in-process.
 
-## Status: v3.1 (576 tests passing, CI on every push)
+## Status: v3.2 (585 tests passing, CI on every push)
 Ingestion · matching · Telegram bot (menu + filters) · Tier-1 email apply · Tier-2
 ATS form-fill · multi-LLM failover · FastAPI orchestrator · Astro dashboard with
 config UI, fit-checker, analytics, and pipeline health · VPS + GitHub Actions deploy
@@ -75,21 +80,39 @@ Fill in what you'll use:
 - **Email apply (optional):** `SMTP_*`, `APPLY_FROM_EMAIL`.
 
 ### 3. Configure your profile
-Two files, same split as `.env.example` / `.env`:
-- **`config/preferences.local.toml`** (gitignored — create it) holds your identity:
-  `name`, `headline`, `cv_path`, `email`, `phone`, and `[profile.links]`. It is
-  overlaid section-by-section onto the committed file, so the repo never carries
-  anyone's contact details.
-- **`config/preferences.toml`** (committed) holds shareable search config:
-  target roles, skills, domains, must-haves, exclude-keywords, and
-  **`[profile.skill_weights]`** — per-skill importance (unlisted skills weigh 1.0).
+
+**This step is not optional.** Matching scores every posting against your roles, skills
+and weights, so an unedited profile gives generic results — `make check` will say so
+while it is still the template.
+
+Two ways, same destination:
+
+**A. In the browser (recommended).** Start the app (step 5) and open
+**Settings → Profile**. Every tab — identity, CV, search preferences, sources,
+watchlist — saves to a gitignored `data/profile.json` overlay. Nothing personal ever
+touches the repo.
+
+**B. In a file.**
+```bash
+cp config/preferences.example.toml config/preferences.toml   # gitignored
+```
+- `[profile]` — identity plus what defines the search: `target_roles`, `core_skills`,
+  `domains`, `must_haves`, `exclude_keywords`, `preferred_locations`.
+- **`[profile.skill_weights]`** — per-skill importance (unlisted skills weigh 1.0).
   Raise what you want to be hired for and lower generic tooling; this is what stops a
   posting that merely mentions Docker + AWS from ranking like one built on your
   differentiators.
 - `[sources]` — turn whole sources on/off (`remoteok`, `greenhouse`, `telegram`, …).
-- `[watchlist]` — Greenhouse/Lever/Ashby company slugs to track (add/remove freely).
-- Put your CV text in `config/cv_master.md` (and PDF at the `cv_path` you set) — used
-  to tailor applications. **Hard rule:** tailoring reframes real experience, never invents.
+- `[watchlist]` — Greenhouse/Lever/Ashby company slugs to track. **Replace the examples**
+  — these are the employers polled directly.
+
+Your CV text goes in **Settings → CV & background** (stored at `data/cv_master.md`), and
+the PDF at whatever `cv_path` you set — that PDF is what gets attached to email
+applications. **Hard rule:** tailoring reframes real experience, never invents.
+
+Layering, lowest priority first: `preferences.example.toml` (fallback for a fresh clone)
+→ `preferences.toml` → `preferences.local.toml` (legacy) → `data/profile.json` (what the
+UI writes, and the only layer ever written).
 
 ### 4. Initialize + first run
 ```bash

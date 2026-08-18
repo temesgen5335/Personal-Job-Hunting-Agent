@@ -2,7 +2,8 @@
 
 Three layers, lowest priority first, merged section-wise:
 
-  1. `config/preferences.toml`      committed placeholders — shareable, no PII
+  1. `config/preferences.toml`      your search profile (gitignored; falls back to
+                                     `config/preferences.example.toml` on a fresh clone)
   2. `config/preferences.local.toml` legacy gitignored overlay (kept for back-compat)
   3. `data/profile.json`            the writable overlay the dashboard edits
 
@@ -26,6 +27,11 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field
 
 DEFAULT_PATH = "config/preferences.toml"
+# Shipped template. `preferences.toml` is gitignored so nobody's tuned search profile
+# rides along in the repo — which means a fresh clone has no base layer at all, and
+# without this fallback every list would be empty and every posting would score zero.
+# The example is a working (if generic) profile, so a clone runs before it is edited.
+EXAMPLE_PATH = "config/preferences.example.toml"
 # The writable overlay + CV. Env-overridable so tests are hermetic (a test must never
 # read or write the developer's real data/ — the same discipline SecretStore uses for
 # JOBAGENT_SECRETS_PATH).
@@ -133,7 +139,14 @@ def load_preferences(
     writable `data/profile.json`. A clone with no overlays still yields a usable
     (placeholder) profile; a configured install yields the operator's real one.
     """
-    base = tomllib.loads(Path(path).read_text()) if Path(path).exists() else {}
+    base_file = Path(path)
+    if not base_file.exists() and str(path) == DEFAULT_PATH:
+        # Fresh clone: fall back to the committed template rather than an empty
+        # profile. Silent by design at import time — `make check` is where the
+        # operator is told to personalise it, because a warning printed on every
+        # request would train them to ignore it.
+        base_file = Path(EXAMPLE_PATH)
+    base = tomllib.loads(base_file.read_text()) if base_file.exists() else {}
 
     local = Path(local_path or str(path).replace(".toml", ".local.toml"))
     if local.exists():

@@ -43,8 +43,9 @@ check: ## preflight: env file, required vars, ports, db — fail fast per item
 		[ -z "$$DASHBOARD_PASSWORD" ] && echo "⚠️  DASHBOARD_PASSWORD unset — dashboard Settings page disabled (fail-closed)"; \
 	fi; \
 	[ -x "$(PY)" ] || { echo "❌ $(VENV) missing — run: make install"; fail=1; }; \
-	[ -f config/preferences.toml ] || { echo "❌ config/preferences.toml missing"; fail=1; }; \
-	[ -f config/cv_master.md ] || echo "⚠️  config/cv_master.md missing — CV tailoring will use empty CV text"; \
+	[ -f config/preferences.example.toml ] || { echo "❌ config/preferences.example.toml missing — broken checkout"; fail=1; }; \
+	[ -x "$(PY)" ] && $(PY) scripts/check_profile.py; \
+	[ -f data/cv_master.md ] || [ -f config/cv_master.md ] || echo "⚠️  no CV text (data/cv_master.md) — CV tailoring will use empty CV text; add it in Settings → CV"; \
 	if lsof -nP -iTCP:$(API_PORT) -sTCP:LISTEN >/dev/null 2>&1; then \
 		echo "❌ port $(API_PORT) already in use (API) — stop it or run: make run API_PORT=<other>"; fail=1; fi; \
 	if lsof -nP -iTCP:$(DASH_PORT) -sTCP:LISTEN >/dev/null 2>&1; then \

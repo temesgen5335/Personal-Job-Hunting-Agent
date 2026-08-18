@@ -6,6 +6,7 @@ description = "Personal autonomous job-hunting agent — ingests postings from T
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
+license-files = ["LICENSE"]
 
 # Core deps needed from Phase 0/1 onward. Heavier integrations live in extras
 # so a minimal install (schemas + store + config) stays fast.

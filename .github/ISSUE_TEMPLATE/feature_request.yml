@@ -1,0 +1,31 @@
+name: Feature request
+description: Suggest a capability
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Check [docs/ROADMAP.md](../blob/main/docs/ROADMAP.md) first — it lists what is
+        already planned, in priority order, with the reasoning. If your idea is there,
+        commenting on the existing issue is more useful than a new one.
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do that you currently cannot?
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: What you have in mind
+  - type: checkboxes
+    id: rules
+    attributes:
+      label: Constraints
+      description: "Some things are permanently out of scope — see `.claude/rules.md`."
+      options:
+        - label: "This does not require auto-submitting applications without approval (R2)"
+          required: true
+        - label: "This does not require fabricating CV content (R1) or solving CAPTCHAs (R3)"
+          required: true
