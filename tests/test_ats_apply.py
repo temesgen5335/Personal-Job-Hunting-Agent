@@ -34,7 +34,7 @@ class FakePage:
 
 
 APPLICANT = ApplicantInfo(
-    full_name="Temesgen Gebreabzgi", first_name="Temesgen", last_name="Gebreabzgi",
+    full_name="Ada Lovelace", first_name="Ada", last_name="Lovelace",
     email="me@example.com", phone="+251900000000",
     linkedin="https://linkedin.com/in/x", github="", cv_path="/tmp/cv.pdf",
 )
@@ -71,9 +71,9 @@ def test_apply_target_none_for_unsupported():
 
 
 def test_applicant_from_profile_splits_name():
-    a = ApplicantInfo.from_profile(Profile(name="Temesgen Gebreabzgi", email="e@x.com",
+    a = ApplicantInfo.from_profile(Profile(name="Ada Lovelace", email="e@x.com",
                                            phone="123", links={"github": "gh", "linkedin": "li"}))
-    assert a.first_name == "Temesgen" and a.last_name == "Gebreabzgi"
+    assert a.first_name == "Ada" and a.last_name == "Lovelace"
     assert a.github == "gh" and a.linkedin == "li"
 
 

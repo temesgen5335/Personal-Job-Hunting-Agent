@@ -69,7 +69,7 @@ cp .env.example .env && nano .env
 .venv/bin/python scripts/pipeline.py --no-send
 
 # 5. (Recommended) set the timezone so 07:00 means your local time
-sudo timedatectl set-timezone Africa/Addis_Ababa
+sudo timedatectl set-timezone <Region>/<City>   # e.g. Europe/Berlin
 
 # 6. Install + start all services
 sudo bash scripts/install_services.sh

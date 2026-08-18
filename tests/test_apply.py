@@ -10,7 +10,7 @@ from jobagent.core.schemas import ApplicationStatus, ApplyMethod, JobPosting, So
 from jobagent.preferences import Profile
 from jobagent.store import Store
 
-PROFILE = Profile(name="Temesgen G.", cv_path="docs/Temesgen_Gebreabzgi_CV.pdf")
+PROFILE = Profile(name="Ada Lovelace", cv_path="docs/example_cv.pdf")
 CV_MASTER = "# CV\nPython, FastAPI, Next.js. AI Engineer at 10 Academy."
 
 
@@ -61,13 +61,13 @@ def test_cv_prompt_enforces_no_fabrication():
 
 
 def test_draft_email_parses_json_then_falls_back():
-    subj, body = draft_email("Temesgen", {"title": "AI Engineer"}, FakeLLM())
+    subj, body = draft_email("Ada Lovelace", {"title": "AI Engineer"}, FakeLLM())
     assert subj == "Application: AI Engineer"
 
     class BadLLM:
         def complete(self, *a, **k):
             return "not json"
-    subj2, body2 = draft_email("Temesgen", {"title": "AI Engineer"}, BadLLM())
+    subj2, body2 = draft_email("Ada Lovelace", {"title": "AI Engineer"}, BadLLM())
     assert subj2 == "Application for AI Engineer"   # graceful fallback
     assert body2 == "not json"
 

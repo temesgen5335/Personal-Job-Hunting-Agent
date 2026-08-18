@@ -30,6 +30,6 @@ Bootstrap done. Remaining manual steps (see docs/DEPLOYMENT.md):
   4. Install services (bot + timers):
        sudo bash scripts/install_services.sh
   5. (Optional) Set server timezone so the 07:00 digest is your local time:
-       sudo timedatectl set-timezone Africa/Addis_Ababa
+       sudo timedatectl set-timezone <Region>/<City>
 
 NOTE

@@ -38,6 +38,13 @@ that will carry it.
 - `.gitignore` uses case-class patterns (`*[Cc][Vv]*.pdf`, `[Rr]esume`) — matching is
   case-sensitive on Linux, which macOS hides.
 
+### Fixed
+- **The maintainer's real name was still in tracked test fixtures**, along with their
+  actual CV filename, and a timezone example named their city. Replaced with neutral
+  values; `tests/test_packaging.py` now fails on maintainer identity in any tracked file
+  outside the authorship ones (a licence and a security contact must name a person).
+- Removed a personal URL from a dashboard CSS comment.
+
 ### Upgrade
 
 None required. Your existing `config/preferences.toml` is untouched on disk; it is simply

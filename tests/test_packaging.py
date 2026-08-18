@@ -145,3 +145,47 @@ def test_the_readme_and_context_claim_the_same_test_count():
         f"README claims {in_readme} tests, .claude/context.md claims {in_context} — "
         "they must state the same number"
     )
+
+
+def test_no_tracked_file_carries_the_maintainers_identity():
+    """Tier 1 scrubbed identity from config and git history, and v3.2.0 scrubbed the
+    search profile — but the maintainer's real name and CV filename were still sitting
+    in test fixtures, and a timezone example named their city.
+
+    Scoped to GIT-TRACKED files on purpose. The gitignored ones — `preferences.local.toml`,
+    `data/`, the CV — are *supposed* to hold a real identity; that is the whole design.
+    The property is that nothing published does.
+
+    Authorship files are exempt: a licence and a security contact must name a person.
+    """
+    import subprocess
+
+    EXEMPT = {
+        "LICENSE", "SECURITY.md", "CODE_OF_CONDUCT.md", "CONTRIBUTING.md",
+        "CHANGELOG.md", "README.md", "docs/ROADMAP.md",
+        ".claude/memory.md", ".claude/context.md",
+    }
+    # Deliberately the maintainer's own identifiers. A generic "looks like a name" check
+    # would fire on every fixture in the suite and get deleted within a week.
+    NEEDLES = ("temesgen", "gebreabzgi", "addis")
+
+    tracked = subprocess.run(
+        ["git", "ls-files"], cwd=ROOT, capture_output=True, text=True).stdout.split()
+    offenders = []
+    for rel in tracked:
+        if rel in EXEMPT or rel.endswith((".lock", ".json", ".pdf")):
+            continue
+        path = ROOT / rel
+        if not path.is_file() or path == Path(__file__):
+            continue          # this file names the needles by definition
+        # A repo URL legitimately carries the owner's GitHub handle; that is an address,
+        # not leaked identity. Drop those lines before scanning rather than exempting
+        # whole files, so a real leak in the same file is still caught.
+        text = "\n".join(line for line in path.read_text(errors="ignore").lower().splitlines()
+                         if "github.com" not in line)
+        offenders += [f"{rel} contains {n!r}" for n in NEEDLES if n in text]
+
+    assert not offenders, (
+        "maintainer identity in tracked files, outside the authorship ones:\n  "
+        + "\n  ".join(offenders)
+    )
