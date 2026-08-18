@@ -4,7 +4,7 @@
 // when the pipeline is degraded — so the "do I need to look?" answer is visible from
 // any page. Badge data comes from the same API the pages use; a failed fetch just
 // hides the badges rather than breaking the page.
-import { getStats, getFollowups, publicApiBase, type Stats } from "../lib/api";
+import { getStats, getFollowups, publicApiBase, apiBase, type Stats } from "../lib/api";
 import AssistantBubble from "../components/AssistantBubble.astro";
 import "../styles/assistant.css";
 
@@ -23,6 +23,12 @@ try {
   /* API down — pages render their own unreachable state; nav shows no badges */
 }
 const queueCount = stats?.queue ?? 0;
+// Version comes from the API's /health, which reads jobagent.__version__ — the
+// dashboard never carries its own copy, so the two can never disagree.
+let apiVersion: string | null = null;
+try {
+  apiVersion = (await (await fetch(`${apiBase()}/health`)).json()).version ?? null;
+} catch { /* API down — the page already renders its own unreachable state */ }
 const degraded =
   !!stats?.health &&
   (stats.health.is_stale ||
@@ -89,6 +95,7 @@ const isActive = (href: string) =>
             </a>
           ))}
         </div>
+        {apiVersion && <div class="side-version mono">v{apiVersion}</div>}
       </nav>
       <main class="content"><slot /></main>
     </div>
@@ -286,6 +293,8 @@ const isActive = (href: string) =>
       .btn.sm:hover { color: var(--text); background: var(--hover); }
       .btn.sm.danger-hover:hover { color: var(--danger); background: rgba(248, 113, 113, 0.08); border-color: rgba(248, 113, 113, 0.3); }
       .btn:disabled { opacity: 0.55; cursor: default; }
+
+      .side-version { margin-top: auto; padding: 12px 4px 4px; font-size: 10.5px; color: var(--faint); }
 
       /* Sign-in prompt (window.JA.signIn) */
       .ja-auth[hidden] { display: none; }

@@ -34,7 +34,7 @@ make check          # preflight: env vars, free ports, store presence
 make run            # API (:8077) + dashboard (:1234), one Ctrl-C stops both
 make run_bot        # Telegram bot (separate long-lived process)
 make pipeline       # one ingest → match pass, no Telegram push
-make test           # 570 offline tests, no credentials needed
+make test           # 576 offline tests, no credentials needed
 
 # Single test file
 .venv/bin/python -m pytest tests/test_api.py -v
@@ -146,6 +146,9 @@ Full architecture + module map: `.claude/agent.md`
 | Current state, known gaps, what is NOT built | `.claude/context.md` |
 | The binding rules, R1–R32 | `.claude/rules.md` |
 | Why a decision was made, and what it cost to learn | `.claude/memory.md` |
+| What ships next, and in which release | `docs/ROADMAP.md` |
+| What changed in each release | `CHANGELOG.md` |
+| How versions are decided and released | `docs/VERSIONING.md` |
 | Self-hosting from scratch | `README.md` |
 | VPS / systemd deploy | `docs/DEPLOYMENT.md` |
 | Free-tier hosting options | `docs/DEPLOYMENT_ALTERNATIVES.md` |

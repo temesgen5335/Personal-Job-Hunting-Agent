@@ -530,7 +530,8 @@ To rename, change the one constant; nothing else hardcodes it (asserted by test)
 | naming | `a1b06df` | Assistant named Baer; name-addressing in Telegram; 531 tests |
 | profile-config | | UI-editable profile/CV/prefs → gitignored data/ overlay; tabbed Settings; 554 tests |
 | queue-parity | `d1d94bb` | Queue badge = queue rows (no digest cap, no date default); "Pull Jobs" → POST /ingest; `description` off the list wire; dashboard port 1234; 556 tests |
-| job-cleanup | (this) | Filtered purge: shared predicate path, dry-run default, preview→confirm panel, notes/applications spared, index dropped on delete; 570 tests |
+| job-cleanup | `cbc18ae` | Filtered purge: shared predicate path, dry-run default, preview→confirm panel, notes/applications spared, index dropped on delete; 570 tests |
+| v3.1.0 | (this) | Single-source versioning + CHANGELOG + VERSIONING policy; OSS review → docs/ROADMAP.md; 576 tests |
 
 ---
 
@@ -678,3 +679,60 @@ still has that latent shape; it has never been called with enough rows to hit it
 
 Measured live before any real delete (all dry runs): under-50% would remove 13,412 of
 14,296, not-seen-in-60-days 3,417, lever-only-under-50% 703, unfiltered refused with 400.
+
+## Versioning, and the open-source review (Aug 2026)
+
+**The version was in three places and two of them were wrong.** `pyproject.toml` said
+`3.0.0`, the FastAPI app said `2.0`, `dashboard/package.json` said `0.1.0`, and
+`src/jobagent/__init__.py` said `0.1.0`. Nothing reconciled them, so `/health` reported a
+version a full major behind the package for months without anyone noticing — there was no
+surface where the two appeared together.
+
+Now one literal in `src/jobagent/__init__.py`; `pyproject.toml` derives it
+(`hatch.version.source = "code"`), the FastAPI app and `/health` import it, and the
+dashboard sidebar *reads it from `/health`* rather than carrying a copy.
+
+**The interesting part is why it is a literal and not `importlib.metadata`.** The first
+attempt read installed metadata — the textbook answer. It returned `0.1.0` while the code
+said `3.1.0`, because an editable install caches its dist-info until someone reinstalls.
+A contributor bumping the version would have seen the old number everywhere with no
+explanation. Inverting it (code is truth, packaging derives) removes the staleness class
+entirely. `tests/test_versioning.py` pins all of it: SemVer shape, no `version =` literal
+in pyproject, installed metadata agreeing with code, `/health` matching, no hardcoded
+version string anywhere under `src/`, and a CHANGELOG entry for the current version.
+
+**SemVer had to be redefined for this project.** The usual "public API" reading makes no
+sense for a single-user self-hosted app that nobody imports — every release would be a
+MAJOR. What a user actually depends on is *their data and their configuration*, so MAJOR
+means "you must do something before upgrading": a manual store migration, a config key
+removed or repurposed, an incompatible route change. Two categories outrank the diff and
+are always MAJOR: **anything touching the HITL gate (R2) or CV fabrication (R1)**, and
+**anything that widens what is reachable without authentication**. Both are properties a
+user trusts silently, so neither may change quietly.
+
+### What the open-source review found
+
+Ran against the tree, a fresh clone, and the running system. Two findings dominate:
+
+1. **No LICENSE file**, while `pyproject.toml` claims MIT. Default copyright is all
+   rights reserved, so nobody may legally use it. The cheapest and most blocking item on
+   the whole roadmap.
+2. **`config/preferences.toml` is the author's job search, not a template.** Identity was
+   scrubbed to placeholders in Tier 1 — but `location = "Ethiopia (Addis Ababa)"`,
+   `timezone`, 9 target roles, 37 core skills, 26 tuned skill weights and a 40-company
+   watchlist were never touched, because that work framed "personal" as *contact details*.
+   The README still claims nothing is hard-coded to one person. **A PII scrub is not the
+   same as a personalization scrub**, and the second is what makes a clone useless to a
+   stranger: every score is wrong and nothing says why.
+
+Worth recording as a genuine strength, because it was not designed for and turned out to
+matter most: **a fresh clone works with zero credentials.** Five of six adapters are
+public APIs and matching falls back to heuristics with no LLM key, so a stranger can
+clone, run one command, and see real ranked jobs. That is the best adoption property the
+project has.
+
+Also found: reads are unauthenticated by design (fine on `127.0.0.1`, which is the
+default bind) — but `PUBLIC_JOBAGENT_API_URL` exists for split deploys, and in that
+*documented* configuration `/applications` and `/followups` expose where the operator
+applied, what was rejected, and where they are interviewing, to anyone who asks. The
+mitigation is real and the docs never mention the exception. Tracked as roadmap item 10.

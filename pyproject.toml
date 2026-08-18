@@ -1,6 +1,7 @@
 [project]
 name = "personal-job-agent"
-version = "3.0.0"
+# Read from src/jobagent/__init__.py — one literal, no drift. See docs/VERSIONING.md.
+dynamic = ["version"]
 description = "Personal autonomous job-hunting agent — ingests postings from Telegram + job boards, matches them to your CV, and assists with applications. FastAPI orchestrator, Telegram bot, Astro dashboard."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -24,6 +25,11 @@ dev = ["pytest>=8.0", "ruff>=0.5", "pytest-asyncio>=0.23", "fastapi>=0.110", "cr
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.version]
+source = "code"
+path = "src/jobagent/__init__.py"
+expression = "__version__"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/jobagent", "src/agentkit"]

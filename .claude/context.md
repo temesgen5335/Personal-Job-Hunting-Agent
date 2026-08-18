@@ -90,7 +90,7 @@ Two interfaces, one backend:
 | assistant hardening (Phase 5) | **Complete.** 10-case eval set scoring tool *selection*, answer *grounding* and *in-bounds* separately; `scripts/eval_assistant.py` with floors; `scripts/llm_doctor.py` explaining the chain, every model card's provenance, and per-task routing offline. Degraded-path conformance run measured **100% / 100% / 100%** |
 | Profile & preferences | **Editable through the UI.** Identity, background, CV, search preferences, source toggles and the ATS watchlist all persist to a gitignored `data/profile.json` + `data/cv_master.md` overlay (three-layer merge: committed placeholders → legacy `preferences.local.toml` → writable overlay). `/profile` GET+PUT (both auth-gated — PII). Nothing personal is hardcoded; the tree carries placeholders only (R22) |
 | Settings UI | Tabbed: Profile · CV & background · Search & matching · Sources & watchlist · Ingestion · LLM · Telegram · Email. Each tab saves independently against the backend that owns it (`/profile` or `/config`) |
-| Test suite | 570 tests, 38 test files, zero network, injectable fakes throughout |
+| Test suite | 576 tests, 39 test files, zero network, injectable fakes throughout |
 
 ## Assistant cost characteristics (measured Aug 2026)
 
@@ -125,6 +125,15 @@ pipeline health, retry/backoff, docs truth-pass). Still open:
   the `/apply` fit-check path and crashed it with `NameError`
   (fixed in Tier 1). `tests/test_static_checks.py` now guards that class of bug, but
   it is a static check, not real coverage — a handler harness is still missing.
+
+## Where the gaps are tracked
+
+**`docs/ROADMAP.md` is the authoritative list** of what is missing and which release
+carries it, from the 2026-08-18 open-source review. The short version of what blocks a
+new user today: there is no LICENSE file (so nobody may legally use it), and
+`config/preferences.toml` ships the author's own search profile — roles, 37 skills,
+tuned weights, a 40-company watchlist, and a real `location`/`timezone` — so a stranger
+silently gets someone else's job search. Both are v3.2.0.
 
 ## What's NOT Built Yet
 
@@ -176,5 +185,5 @@ not-seen-in-60-days would remove 3,417.
 
 - **11,700+** jobs scored in a live run (8,253 fetched in a single pass across 6 adapters)
 - **40** companies in the ATS watchlist (Greenhouse/Lever/Ashby)
-- **570** tests across 38 files — all run offline, no network, no credentials
+- **576** tests across 39 files — all run offline, no network, no credentials
 - **6** LLM providers with automatic failover (3 free, 3 paid)

@@ -32,7 +32,7 @@ Anthropic, or any OpenAI-compatible endpoint). See [docs/ARCHITECTURE.md](docs/A
 A **FastAPI orchestrator** sits between the interfaces and the data: the dashboard
 calls it over REST, and the bot calls the same service layer in-process.
 
-## Status: v3 (515 tests passing, CI on every push)
+## Status: v3.1 (576 tests passing, CI on every push)
 Ingestion · matching · Telegram bot (menu + filters) · Tier-1 email apply · Tier-2
 ATS form-fill · multi-LLM failover · FastAPI orchestrator · Astro dashboard with
 config UI, fit-checker, analytics, and pipeline health · VPS + GitHub Actions deploy
@@ -172,6 +172,12 @@ origin to `JOBAGENT_CORS_ORIGINS`, which defaults to localhost only.
 .venv/bin/python scripts/apply_ats.py preview 3 # Tier-2 ATS fill + screenshot (no submit)
 .venv/bin/pytest -q                             # run the test suite
 ```
+
+## Versions & roadmap
+Current release and what changed: [CHANGELOG.md](CHANGELOG.md).
+What ships next and why, in priority order: [docs/ROADMAP.md](docs/ROADMAP.md).
+How versions are decided (SemVer, scoped to *your data and config* rather than a Python
+API): [docs/VERSIONING.md](docs/VERSIONING.md).
 
 ## Hard rules
 See [.claude/rules.md](.claude/rules.md) (and the original [.agent/rules.md](.agent/rules.md)):

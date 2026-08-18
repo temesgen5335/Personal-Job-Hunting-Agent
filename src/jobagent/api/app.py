@@ -17,6 +17,7 @@ from typing import Any
 from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel
 
+from jobagent import __version__
 from jobagent.apply import approve_and_send, prepare_application
 from jobagent.apply.generators import draft_followup
 from jobagent.apply.ats import apply_target
@@ -190,7 +191,7 @@ def create_app(settings=None, profile=None, llm: Any = _UNSET, cv_master: str | 
     profile_injected = profile is not None
     cv_injected = cv_master is not None
 
-    app = FastAPI(title="Personal Job Agent API", version="2.0")
+    app = FastAPI(title="Personal Job Agent API", version=__version__)
 
     # The dashboard runs on a different origin and calls the API from the browser.
     from fastapi.middleware.cors import CORSMiddleware
@@ -325,6 +326,7 @@ def create_app(settings=None, profile=None, llm: Any = _UNSET, cv_master: str | 
         chain = _llm()
         return {
             "status": "ok",
+            "version": __version__,
             "store_exists": Path(settings.db_path).exists(),
             "llm_chain": chain.chain if chain else [],
             "config_ui": bool(settings.dashboard_password),
