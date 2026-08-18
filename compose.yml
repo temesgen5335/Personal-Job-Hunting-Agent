@@ -1,0 +1,56 @@
+# Self-host with: docker compose up -d
+#
+# Everything personal lives in ./data (gitignored) and ./.env — both mounted, never
+# baked into an image. Copy .env.example to .env first, or run `make setup`.
+
+services:
+  api:
+    build: .
+    env_file: [.env]
+    environment:
+      # Inside the compose network the dashboard reaches the API by service name.
+      JOBAGENT_CORS_ORIGINS: "http://localhost:1234,http://127.0.0.1:1234"
+    volumes:
+      - ./data:/app/data
+    ports:
+      # 127.0.0.1 on the LEFT is deliberate: it binds the host port to loopback only,
+      # so the API is not reachable from the network. GET routes are unauthenticated
+      # (SECURITY.md) — change this only behind a proxy that authenticates.
+      - "127.0.0.1:8077:8077"
+    restart: unless-stopped
+
+  dashboard:
+    build: ./dashboard
+    environment:
+      # What the SSR server calls (inside the network) vs what the browser calls.
+      # These differ, and conflating them is the classic split-deploy bug.
+      JOBAGENT_API_URL: "http://api:8077"
+      PUBLIC_JOBAGENT_API_URL: "http://127.0.0.1:8077"
+    ports:
+      - "127.0.0.1:1234:1234"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Long-lived Telegram bot. Opt in: `docker compose --profile bot up -d`
+  # It needs TELEGRAM_BOT_TOKEN and TELEGRAM_OWNER_ID in .env, and will exit without them.
+  bot:
+    build: .
+    profiles: [bot]
+    env_file: [.env]
+    command: ["python", "scripts/run_bot.py"]
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
+
+  # One ingest → match → digest pass, then exit. Not a server:
+  #   docker compose run --rm pipeline
+  # For a schedule, drive this from the host's cron or systemd (see docs/DEPLOYMENT.md).
+  pipeline:
+    build: .
+    profiles: [tools]
+    env_file: [.env]
+    command: ["python", "scripts/pipeline.py", "--no-send"]
+    volumes:
+      - ./data:/app/data

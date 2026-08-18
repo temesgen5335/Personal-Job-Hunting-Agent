@@ -531,7 +531,9 @@ To rename, change the one constant; nothing else hardcodes it (asserted by test)
 | profile-config | | UI-editable profile/CV/prefs → gitignored data/ overlay; tabbed Settings; 554 tests |
 | queue-parity | `d1d94bb` | Queue badge = queue rows (no digest cap, no date default); "Pull Jobs" → POST /ingest; `description` off the list wire; dashboard port 1234; 556 tests |
 | job-cleanup | `cbc18ae` | Filtered purge: shared predicate path, dry-run default, preview→confirm panel, notes/applications spared, index dropped on delete; 570 tests |
-| v3.1.0 | (this) | Single-source versioning + CHANGELOG + VERSIONING policy; OSS review → docs/ROADMAP.md; 576 tests |
+| v3.1.0 | `06054ce` | Single-source versioning + CHANGELOG + VERSIONING policy; OSS review → docs/ROADMAP.md; 576 tests |
+| v3.2.0 | `6d14e3f`, `24eeaa3` | LICENSE, neutral profile template, lockfiles, community docs, identity guard; 586 tests |
+| v3.3.0 | (this) | `make setup` wizard, `make demo` seeder, Docker + compose; 604 tests |
 
 ---
 
@@ -736,3 +738,48 @@ default bind) — but `PUBLIC_JOBAGENT_API_URL` exists for split deploys, and in
 *documented* configuration `/applications` and `/followups` expose where the operator
 applied, what was rejected, and where they are interviewing, to anyone who asks. The
 mitigation is real and the docs never mention the exception. Tracked as roadmap item 10.
+
+## v3.2.0 / v3.3.0 — packaging, and what the review missed twice (Aug 2026)
+
+Two releases closing the open-source review. The mechanical items are in the CHANGELOG;
+what is worth keeping is the shape of what kept being missed.
+
+**A PII scrub is not a personalization scrub, and neither is a config scrub.** Tier 1
+scrubbed identity out of config and git history. v3.2.0 scrubbed the *search profile* —
+location, timezone, 9 roles, 37 skills, 26 tuned weights, a 40-company watchlist — which
+that earlier work had left alone because it framed "personal" as contact details. Then,
+verifying the v3.2.0 tag by cloning it and grepping as a stranger would, the maintainer's
+real name turned up **in test fixtures**, along with the exact filename of their CV, plus
+their city in three timezone examples. Three passes, three different hiding places, each
+one invisible from where the previous pass was looking. The guard now scans every
+git-tracked file, scoped to tracked on purpose: the gitignored ones are *supposed* to
+hold a real identity, and the property is that nothing published does.
+
+**The lesson is the method, not the finding.** Each miss was caught by changing vantage
+point — cloning the repo and looking at it as someone who had never seen it. Reading the
+diff would not have found any of them, because a fixture written a year ago is not in the
+diff.
+
+Smaller things worth keeping:
+
+- **`make setup` merges `.env` key-by-key rather than rewriting it.** A wizard that
+  regenerates the file silently drops the SMTP block someone spent an evening on — the
+  single most annoying thing a setup script can do. Unanswered prompts write nothing,
+  because an explicit empty value shadows a real one set elsewhere, which is worse than
+  not asking.
+- **The wizard writes `data/profile.json`, not `config/preferences.toml`.** That is the
+  same layer Settings edits, so answering in the terminal and editing in the browser are
+  the same act, and the shipped template stays pristine underneath as the fallback.
+- **`make demo` refuses a store that already has jobs.** Demo rows mixed into a real
+  store are indistinguishable afterwards without reading every description — so the
+  seeder defaults to `data/demo.db`, marks every posting in its text, and is
+  deterministic so two people following the README see the same screenshots.
+- **Compose publishes to `127.0.0.1` only, and a test asserts it.** GET routes are
+  unauthenticated; a compose file that published `0.0.0.0:8077` would expose the
+  operator's application history to their whole network the moment they ran
+  `docker compose up`. That is a one-character mistake with a large blast radius, which
+  is exactly the kind worth a test.
+- **`check_profile.py` warns rather than fails.** Blocking `make run` on a first clone is
+  precisely when someone wants to see the thing work at all. Its checked-field list also
+  omits `work_mode`/`must_haves`/`exclude_keywords`, where a real operator plausibly
+  lands on the template value unchanged — a check that cries wolf gets deleted.

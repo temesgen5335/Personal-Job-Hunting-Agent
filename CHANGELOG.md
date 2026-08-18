@@ -12,6 +12,30 @@ scoped in [docs/VERSIONING.md](docs/VERSIONING.md) — which is worth reading, b
 Planned work is tracked in [docs/ROADMAP.md](docs/ROADMAP.md), grouped by the release
 that will carry it.
 
+## [3.3.0] — 2026-08-18
+
+*Theme: fifteen minutes from clone to first ranked job, without editing TOML by hand.*
+
+### Added
+- **`make setup`** — an interactive first-run wizard. Writes `.env` and your profile
+  overlay, generates `JOBAGENT_MASTER_KEY` and (if you want) a dashboard password.
+  Safe to re-run: `.env` is merged key-by-key, so comments and anything you tuned by
+  hand survive, and unanswered prompts never overwrite an existing value.
+  Logic lives in `jobagent.setup_wizard` as pure functions; only `scripts/setup.py`
+  touches stdin, so it is tested without driving a terminal.
+- **`make demo`** — seeds `data/demo.db` with 40 fictional postings, strong matches, a
+  triaged row and three applications, so every dashboard page has something to render
+  before you commit any credentials. It refuses to write into a store that already has
+  jobs, and every seeded posting is marked as demo data in its description.
+- **Containers** — `Dockerfile` (API, bot, CLI), `dashboard/Dockerfile` (Astro SSR),
+  `compose.yml`, and `make docker_up` / `make docker_down`. Host ports bind to
+  `127.0.0.1` only, because GET routes are unauthenticated. Playwright is opt-in via
+  `--build-arg WITH_BROWSER=1` rather than a ~400 MB default.
+- README now opens with a five-command fast path and a Docker section.
+
+### Fixed
+- The `make test` target described a "99-test offline suite".
+
 ## [3.2.0] — 2026-08-18
 
 *Theme: a stranger can legally use this, and gets their own job search rather than mine.*
@@ -133,7 +157,8 @@ no longer tracked by git.
   Telegram bot, Tier-1 email applications, Tier-2 ATS form-fill, and VPS deployment
   units.
 
-[Unreleased]: https://github.com/temesgen5335/personalAgent/compare/v3.2.0...HEAD
+[Unreleased]: https://github.com/temesgen5335/personalAgent/compare/v3.3.0...HEAD
+[3.3.0]: https://github.com/temesgen5335/personalAgent/compare/v3.2.0...v3.3.0
 [3.2.0]: https://github.com/temesgen5335/personalAgent/compare/v3.1.0...v3.2.0
 [3.1.0]: https://github.com/temesgen5335/personalAgent/compare/v3.0.0...v3.1.0
 [3.0.0]: https://github.com/temesgen5335/personalAgent/compare/v1.0.0...v3.0.0

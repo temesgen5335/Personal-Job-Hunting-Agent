@@ -13,7 +13,7 @@ Status legend: 🔴 blocking · 🟠 high · 🟡 medium · 🟢 nice-to-have
 
 ---
 
-## v3.2.0 — "Cloneable"
+## v3.2.0 — "Cloneable" ✅ SHIPPED 2026-08-18
 
 *The theme: a stranger can legally use it, and gets their own job search rather than
 someone else's.* Nothing here is hard; all of it is blocking.
@@ -101,11 +101,11 @@ clean today — this is about the next accident.
 
 ---
 
-## v3.3.0 — "First run"
+## v3.3.0 — "First run" ✅ SHIPPED 2026-08-18
 
 *The theme: fifteen minutes from clone to first ranked job, without editing TOML by hand.*
 
-### 🟠 7. Onboarding is chicken-and-egg
+### ✅ 7. Onboarding is chicken-and-egg
 
 Settings can edit the whole profile — but `DASHBOARD_PASSWORD` must already be in `.env`
 before any write works, and the API must already be running. So the "no file editing"
@@ -119,7 +119,7 @@ asking.
 
 **Value:** the largest single drop-off point. Everything after it already works.
 
-### 🟠 8. No container
+### ✅ 8. No container
 
 No `Dockerfile`, no `docker-compose.yml`. For a self-hosted tool that is the first thing
 most people look for, and it also solves "Playwright needs a real browser", which is
@@ -130,7 +130,7 @@ dashboard and bot with a mounted `data/` volume. Publish to GHCR from a release 
 
 **Value:** turns a five-prerequisite setup into `docker compose up`.
 
-### 🟡 9. Nothing to look at before the first ingest
+### ✅ 9. Nothing to look at before the first ingest
 
 A fresh clone has an empty store, so every dashboard page renders empty states. The
 system looks broken before it looks useful.

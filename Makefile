@@ -18,7 +18,7 @@ PY           := $(VENV)/bin/python
 API_PORT     ?= 8077
 DASH_PORT    ?= 1234
 
-.PHONY: install run run_backend run_bot run_dashboard check test pipeline ask doctor eval_assistant
+.PHONY: install setup demo run run_backend run_bot run_dashboard check test pipeline ask doctor eval_assistant docker_up docker_down
 
 install: ## backend + dashboard deps (idempotent)
 	@if command -v uv >/dev/null 2>&1; then \
@@ -30,6 +30,23 @@ install: ## backend + dashboard deps (idempotent)
 	fi
 	@cd dashboard && npm install --silent
 	@echo "✅ install done. Optional Tier-2 ATS: $(PY) -m playwright install chromium"
+
+setup: ## interactive first-run config (.env + your profile) — safe to re-run
+	@$(PY) scripts/setup.py
+
+demo: ## seed a throwaway store so the UI has something to show (never touches yours)
+	@$(PY) scripts/seed_demo.py
+	@echo ""
+	@echo "  run it with:  JOBAGENT_DB_PATH=data/demo.db make run"
+
+docker_up: ## build + start API and dashboard in containers (needs .env)
+	@[ -f .env ] || { echo "❌ .env missing — run: make setup"; exit 1; }
+	docker compose up -d --build
+	@echo "  API       http://127.0.0.1:$(API_PORT)"
+	@echo "  dashboard http://127.0.0.1:$(DASH_PORT)"
+
+docker_down: ## stop the containers (data/ is a volume and survives)
+	docker compose down
 
 check: ## preflight: env file, required vars, ports, db — fail fast per item
 	@fail=0; \
@@ -80,5 +97,5 @@ run: check ## API + dashboard together; prefixed logs; one Ctrl-C tears both dow
 pipeline: ## one ingest → match pass, no Telegram push
 	$(PY) scripts/pipeline.py --no-send
 
-test: ## 99-test offline suite
+test: ## offline suite (604 tests, no credentials)
 	$(PY) -m pytest tests/ -q

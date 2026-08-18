@@ -37,7 +37,7 @@ Anthropic, or any OpenAI-compatible endpoint). See [docs/ARCHITECTURE.md](docs/A
 A **FastAPI orchestrator** sits between the interfaces and the data: the dashboard
 calls it over REST, and the bot calls the same service layer in-process.
 
-## Status: v3.2 (586 tests passing, CI on every push)
+## Status: v3.3 (604 tests passing, CI on every push)
 Ingestion · matching · Telegram bot (menu + filters) · Tier-1 email apply · Tier-2
 ATS form-fill · multi-LLM failover · FastAPI orchestrator · Astro dashboard with
 config UI, fit-checker, analytics, and pipeline health · VPS + GitHub Actions deploy
@@ -58,9 +58,31 @@ it — those routes can send email as you.
 - A Telegram account + a bot from [@BotFather](https://t.me/BotFather)
 - At least one LLM API key (free options below)
 
+### 0. The fast path
+
+```bash
+git clone https://github.com/temesgen5335/personalAgent && cd personalAgent
+make install       # venv + dashboard deps
+make setup         # interactive: .env + your profile (safe to re-run)
+make pipeline      # ingest + match — no credentials needed
+make run           # API :8077 + dashboard :1234
+```
+
+Just want to look at it first? `make demo` seeds a throwaway store with fictional
+postings so every page has something to show, without touching your real one:
+
+```bash
+make demo
+JOBAGENT_DB_PATH=data/demo.db make run
+```
+
+Prefer containers? `make docker_up` (see [step 6](#6-docker)).
+
+The rest of this section is what `make setup` does, for anyone who would rather do it
+by hand.
+
 ### 1. Install
 ```bash
-git clone <your-fork> PersonalAgent && cd PersonalAgent
 uv venv
 uv pip install -e ".[telegram,llm,apply]"   # telegram reader, LLM, Playwright ATS
 .venv/bin/playwright install chromium        # only if you want Tier-2 ATS form-fill
@@ -165,6 +187,21 @@ runs in Python and the model only writes the answer. Measured on the free tier a
 | Local/OSS (Ollama, vLLM) | ✅ self-run | *(v2: custom base_url)* | any OpenAI-compatible server |
 
 Set `LLM_PROVIDER` to your primary; the others become automatic failover backups.
+
+### 6. Docker
+
+```bash
+cp .env.example .env      # or: make setup
+make docker_up            # API + dashboard; data/ is a mounted volume
+make docker_down
+docker compose --profile bot up -d          # add the Telegram bot
+docker compose run --rm pipeline            # one ingest+match pass
+```
+
+Host ports bind to `127.0.0.1` only, because GET routes are unauthenticated — see
+[SECURITY.md](SECURITY.md) before changing that. Playwright is not installed by
+default (it adds ~400 MB); build with `--build-arg WITH_BROWSER=1` if you want
+Tier-2 ATS form-fill.
 
 ## Deploy
 - **Free daily digest (no server):** GitHub Actions — see [docs/DEPLOYMENT_ALTERNATIVES.md](docs/DEPLOYMENT_ALTERNATIVES.md).

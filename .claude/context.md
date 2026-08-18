@@ -80,6 +80,8 @@ Two interfaces, one backend:
 | Triage | Done — dismiss/snooze/note per job (triage table, POST /triage, queue count) |
 | Queue parity | Done (Aug 2026) — the number the badge shows and the rows `/jobs` renders are now the same set. `/jobs` passes `max_per_company=None` (the bot keeps its cap) and the page defaults to `within=any`. Verified live: 231 = 231 |
 | Manual ingestion trigger | Done (Aug 2026) — "Pull Jobs" on the Overview calls `POST /ingest`, then polls `/runs/{id}` for per-source progress and reloads. Until this, nothing in any UI could start a pass, and no scheduler is live (see below). Verified live: 8,363 fetched across all 6 adapters, zero errors |
+| First-run onboarding | Done (v3.3.0) — `make setup` wizard (pure logic in `jobagent.setup_wizard`, merges `.env` key-by-key so nothing hand-tuned is lost), `make demo` seeding a throwaway store, and containers (`Dockerfile`, `compose.yml`, `make docker_up`) |
+| OSS packaging | Done (v3.2.0) — LICENSE, `preferences.example.toml` with a loader fallback, lockfiles committed, SECURITY/CONTRIBUTING/CoC, issue+PR templates, and `tests/test_packaging.py` pinning all of it |
 | Job cleanup | Done (Aug 2026) — `purge_jobs()` + `POST /jobs/purge` + a preview→confirm panel on /jobs. Filters shared with the list via `_row_predicates`, `dry_run` default true, unfiltered purge refused, applications/CVs/notes spared unconditionally, knowledge index dropped on delete |
 | Shared sign-in prompt | Done (Aug 2026) — `window.JA.signIn()` in `Layout.astro`: any page's 401 raises a password modal and retries once. Writes the same `jobagent_token` the Settings page does, so one session covers both. 403 (no `DASHBOARD_PASSWORD` on the API) is reported as its own case, never as a wrong password |
 | Ingest gate | Done — age/locations/drop-keywords + source selection, editable in Settings, applied before storage with per-reason drop counts |
@@ -90,7 +92,7 @@ Two interfaces, one backend:
 | assistant hardening (Phase 5) | **Complete.** 10-case eval set scoring tool *selection*, answer *grounding* and *in-bounds* separately; `scripts/eval_assistant.py` with floors; `scripts/llm_doctor.py` explaining the chain, every model card's provenance, and per-task routing offline. Degraded-path conformance run measured **100% / 100% / 100%** |
 | Profile & preferences | **Editable through the UI.** Identity, background, CV, search preferences, source toggles and the ATS watchlist all persist to a gitignored `data/profile.json` + `data/cv_master.md` overlay (three-layer merge: committed placeholders → legacy `preferences.local.toml` → writable overlay). `/profile` GET+PUT (both auth-gated — PII). Nothing personal is hardcoded; the tree carries placeholders only (R22) |
 | Settings UI | Tabbed: Profile · CV & background · Search & matching · Sources & watchlist · Ingestion · LLM · Telegram · Email. Each tab saves independently against the backend that owns it (`/profile` or `/config`) |
-| Test suite | 586 tests, 40 test files, zero network, injectable fakes throughout |
+| Test suite | 604 tests, 41 test files, zero network, injectable fakes throughout |
 
 ## Assistant cost characteristics (measured Aug 2026)
 
@@ -185,5 +187,5 @@ not-seen-in-60-days would remove 3,417.
 
 - **11,700+** jobs scored in a live run (8,253 fetched in a single pass across 6 adapters)
 - **40** companies in the ATS watchlist (Greenhouse/Lever/Ashby)
-- **586** tests across 40 files — all run offline, no network, no credentials
+- **604** tests across 41 files — all run offline, no network, no credentials
 - **6** LLM providers with automatic failover (3 free, 3 paid)
