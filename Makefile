@@ -97,5 +97,5 @@ run: check ## API + dashboard together; prefixed logs; one Ctrl-C tears both dow
 pipeline: ## one ingest → match pass, no Telegram push
 	$(PY) scripts/pipeline.py --no-send
 
-test: ## offline suite (604 tests, no credentials)
+test: ## offline suite (617 tests, no credentials)
 	$(PY) -m pytest tests/ -q

@@ -533,7 +533,8 @@ To rename, change the one constant; nothing else hardcodes it (asserted by test)
 | job-cleanup | `cbc18ae` | Filtered purge: shared predicate path, dry-run default, preview→confirm panel, notes/applications spared, index dropped on delete; 570 tests |
 | v3.1.0 | `06054ce` | Single-source versioning + CHANGELOG + VERSIONING policy; OSS review → docs/ROADMAP.md; 576 tests |
 | v3.2.0 | `6d14e3f`, `24eeaa3` | LICENSE, neutral profile template, lockfiles, community docs, identity guard; 586 tests |
-| v3.3.0 | (this) | `make setup` wizard, `make demo` seeder, Docker + compose; 604 tests |
+| v3.3.0 | `a13a3b8` | `make setup` wizard, `make demo` seeder, Docker + compose; 604 tests |
+| v3.4.0 | (this) | Opt-in read auth + route-table net, per-class rate limits, exposure warnings in both deploy docs; 617 tests |
 
 ---
 
@@ -783,3 +784,50 @@ Smaller things worth keeping:
   precisely when someone wants to see the thing work at all. Its checked-field list also
   omits `work_mode`/`must_haves`/`exclude_keywords`, where a real operator plausibly
   lands on the template value unchanged — a check that cries wolf gets deleted.
+
+## v3.4.0 — the deployment the docs taught was the one that leaked (Aug 2026)
+
+Reads were unauthenticated by design, and the design was right: the API binds
+`127.0.0.1`, and the dashboard renders reads server-side with no token to offer. The
+problem was never the default — it was that `PUBLIC_JOBAGENT_API_URL` exists *for* the
+split deploy, `DEPLOYMENT.md` walks you through it, and in that configuration
+`/applications` and `/followups` tell anyone who asks where you applied, what was
+rejected, and where you are interviewing. **The documented path was the unsafe one, and
+nothing said so.**
+
+Fixed as an opt-in (`JOBAGENT_REQUIRE_AUTH_READS`) rather than a new default, because
+flipping it would break every existing install's dashboard silently. Flipping the default
+is queued for v4.0.0, where a threat-model change belongs — the versioning policy already
+says so.
+
+Things worth keeping:
+
+- **`/health` stays open even when reads are gated.** It is a liveness probe; the Docker
+  `HEALTHCHECK` calls it, and gating it would make every container report unhealthy the
+  moment someone hardened their install. It reports status, version and store-existence —
+  nothing about the job search.
+- **The API refuses to start with read-auth on and no password.** No token would exist,
+  so every page 403s forever. That reads as "the app is broken", and a config mistake
+  that presents as a bug costs far more than a startup error.
+- **A route-table test for reads**, mirroring the write one. A GET added next year
+  without `dependencies=read_auth` fails in CI rather than leaking quietly. The write
+  version of this test caught `/apply/{id}/approve` answering 200 to an anonymous caller;
+  this is the same net one layer out.
+- **Reads are deliberately NOT rate-limited.** The dashboard makes several per page load,
+  and a limiter that throttles normal use is one that gets switched off entirely — which
+  removes the protection from the expensive classes too.
+- **The purge cap defaults to unlimited**, settling the question the roadmap left open.
+  The purge UI already shows an exact count and requires a second click, so consent is
+  obtained before the delete; a cap would add friction without adding safety. It exists
+  as a knob for exposed deployments, not as a default.
+- **The limiter is in-process and per-worker**, so with N workers the effective limit is
+  N x the configured one. Documented rather than hidden: a limit that silently means
+  something else is worse than none. A shared store would mean running Redis for a
+  single-user app, which is the wrong trade.
+
+**A test made live network calls and only surfaced as a hang.** The first version of the
+rate-limit test hammered `POST /ingest`, which schedules a real ingestion pass — so it
+went out to six job boards. It did not fail; it timed out after two minutes, which reads
+as a slow test rather than an R17 violation. Now it exercises the `write` class through
+`/triage` (purely local) and stubs `_ingest_task` for the ingest class. **A hanging test
+deserves the same suspicion as a failing one** — offline suites do not hang.

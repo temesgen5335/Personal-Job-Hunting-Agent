@@ -20,8 +20,26 @@ export function publicApiBase(): string {
   );
 }
 
+// Server-side token, used only when the API has JOBAGENT_REQUIRE_AUTH_READS on.
+// These fetches run in the SSR process, which has no browser session to borrow — so
+// the dashboard carries a token of its own. Get it with `python scripts/api_token.py`.
+// Unset is the normal case and costs nothing: the header is simply omitted.
+const API_TOKEN = process.env.JOBAGENT_API_TOKEN || "";
+
+function serverHeaders(): Record<string, string> {
+  return API_TOKEN ? { Authorization: `Bearer ${API_TOKEN}` } : {};
+}
+
 async function getJSON(path: string): Promise<any> {
-  const res = await fetch(`${API}${path}`);
+  const res = await fetch(`${API}${path}`, { headers: serverHeaders() });
+  if (res.status === 401 || res.status === 403) {
+    // Distinguishable on purpose: "the API is up and refusing me" is a different
+    // problem from "the API is down", and the generic message sent people hunting
+    // the wrong one.
+    throw new Error(
+      `API ${res.status} for ${path} — reads are authenticated on this instance. ` +
+      `Set JOBAGENT_API_TOKEN for the dashboard (python scripts/api_token.py).`);
+  }
   if (!res.ok) throw new Error(`API ${res.status} ${res.statusText} for ${path}`);
   return res.json();
 }

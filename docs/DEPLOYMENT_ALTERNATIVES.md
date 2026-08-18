@@ -1,5 +1,25 @@
 # Deployment Alternatives — Hosting Options Compared
 
+> ### ⚠️ Before you expose this
+>
+> **GET routes are unauthenticated by default.** `/applications` and `/followups`
+> reveal where you applied, what was rejected, and where you are interviewing.
+>
+> That is safe on the default `127.0.0.1` bind. It is **not** safe the moment the API
+> is reachable from anywhere else — which includes setting `HOST=0.0.0.0` and the
+> split-deploy path below, where a hosted dashboard needs a publicly reachable API.
+>
+> Either put the API behind a proxy that authenticates, a VPN, or an IP allow-list —
+> or turn on read authentication:
+>
+> ```bash
+> JOBAGENT_REQUIRE_AUTH_READS=true      # on the API
+> JOBAGENT_API_TOKEN=$(python scripts/api_token.py)   # on the dashboard
+> ```
+>
+> See [SECURITY.md](../SECURITY.md).
+
+
 The primary deployment is a VPS (see [DEPLOYMENT.md](DEPLOYMENT.md)). This doc
 compares the alternatives you asked about and gives step-by-step setup for the ones
 that actually fit, with honest verdicts. Facts verified June 2026 (free tiers

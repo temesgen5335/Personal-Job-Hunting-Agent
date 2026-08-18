@@ -83,6 +83,24 @@ class Settings(BaseSettings):
 
     # v2.1 config UI: admin password (gates the config endpoints) + secret-store key.
     dashboard_password: str = Field("", alias="DASHBOARD_PASSWORD")
+    # Gate GET routes too. Default False preserves the historical posture, which is
+    # correct on a laptop: the API binds 127.0.0.1 and the dashboard renders reads
+    # server-side with no token to offer. Turn it ON whenever the API is reachable
+    # from anywhere else — /applications and /followups reveal where you applied,
+    # what was rejected, and where you are interviewing. See SECURITY.md.
+    require_auth_reads: bool = Field(False, alias="JOBAGENT_REQUIRE_AUTH_READS")
+
+    # Bounded requests per hour, per client, per class. Generous by default — these
+    # exist to stop a runaway loop or an exposed port draining an LLM quota, not to
+    # police normal single-user work. 0 disables a class.
+    rate_limit_enabled: bool = Field(True, alias="JOBAGENT_RATE_LIMIT_ENABLED")
+    rate_limit_assistant: int = Field(60, alias="JOBAGENT_RATE_LIMIT_ASSISTANT")
+    rate_limit_ingest: int = Field(20, alias="JOBAGENT_RATE_LIMIT_INGEST")
+    rate_limit_write: int = Field(600, alias="JOBAGENT_RATE_LIMIT_WRITE")
+    # Safety valve for an exposed deployment. 0 = unlimited, which is the default
+    # because the purge UI already shows an exact count and requires a second click —
+    # consent is obtained before the delete, so a cap would only add friction.
+    max_purge_rows: int = Field(0, alias="JOBAGENT_MAX_PURGE_ROWS")
     master_key: str = Field("", alias="JOBAGENT_MASTER_KEY")
     # Comma-separated browser origins allowed to call the API. Defaults to the local
     # dashboard only; set explicitly when the dashboard is deployed elsewhere. "*" is

@@ -14,7 +14,9 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException
+from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Request
+
+from jobagent.api.ratelimit import RateLimiter, client_key
 from pydantic import BaseModel
 
 from jobagent import __version__
@@ -191,6 +193,15 @@ def create_app(settings=None, profile=None, llm: Any = _UNSET, cv_master: str | 
     profile_injected = profile is not None
     cv_injected = cv_master is not None
 
+    if settings.require_auth_reads and not settings.dashboard_password:
+        # Refuse to start rather than serve something unusable. With reads gated and no
+        # password there is no token that works, so every page — including the
+        # dashboard's own SSR fetches — would 403 forever, which reads as "the app is
+        # broken" rather than "you missed a setting".
+        raise RuntimeError(
+            "JOBAGENT_REQUIRE_AUTH_READS is on but DASHBOARD_PASSWORD is unset — "
+            "nothing would be readable. Set a password, or turn read-auth off.")
+
     app = FastAPI(title="Personal Job Agent API", version=__version__)
 
     # The dashboard runs on a different origin and calls the API from the browser.
@@ -234,6 +245,53 @@ def create_app(settings=None, profile=None, llm: Any = _UNSET, cv_master: str | 
             raise HTTPException(401, "Unauthorized.")
 
     auth = [Depends(require_auth)]
+
+    def require_read_auth(authorization: str | None = Header(None)) -> None:
+        """Gate GET routes when JOBAGENT_REQUIRE_AUTH_READS is on.
+
+        Off by default, which is right on the default 127.0.0.1 bind. Turn it on for
+        any deployment the network can reach: `/applications` and `/followups` reveal
+        where you applied, what was rejected, and where you are interviewing.
+
+        Unlike `require_auth` this does NOT fail closed without a password — with the
+        flag off it is a no-op, and with the flag on but no password configured there
+        would be no way to read anything at all, including the dashboard's own SSR
+        fetches. Refusing to start is better than that, so `create_app` checks the
+        combination up front.
+        """
+        if not settings.require_auth_reads:
+            return
+        require_auth(authorization)
+
+    read_auth = [Depends(require_read_auth)]
+
+    # Bounded per client, per class. See jobagent/api/ratelimit.py for why this is
+    # in-process rather than shared.
+    _limiters = {
+        "assistant": RateLimiter(settings.rate_limit_assistant),
+        "ingest": RateLimiter(settings.rate_limit_ingest),
+        "write": RateLimiter(settings.rate_limit_write),
+    }
+    app.state.limiters = _limiters      # exposed so tests can reset between cases
+
+    def _limit(kind: str):
+        def dependency(request: Request) -> None:
+            if not settings.rate_limit_enabled:
+                return
+            allowed, retry_after = _limiters[kind].allow(client_key(request))
+            if not allowed:
+                # 429 with Retry-After, because a caller that cannot tell "slow down"
+                # from "broken" will simply retry harder.
+                raise HTTPException(
+                    429, f"Rate limit reached for {kind} requests. Try again in "
+                         f"{int(retry_after) + 1}s, or raise "
+                         f"JOBAGENT_RATE_LIMIT_{kind.upper()}.",
+                    headers={"Retry-After": str(int(retry_after) + 1)})
+        return Depends(dependency)
+
+    write_limit = [_limit("write")]
+    ingest_limit = [_limit("ingest")]
+    assistant_limit = [_limit("assistant")]
 
     @app.post("/auth/login")
     def login(body: LoginReq):
@@ -332,7 +390,7 @@ def create_app(settings=None, profile=None, llm: Any = _UNSET, cv_master: str | 
             "config_ui": bool(settings.dashboard_password),
         }
 
-    @app.get("/stats")
+    @app.get("/stats", dependencies=read_auth)
     def stats():
         s = store()
         try:
@@ -340,7 +398,7 @@ def create_app(settings=None, profile=None, llm: Any = _UNSET, cv_master: str | 
         finally:
             s.close()
 
-    @app.get("/jobs")
+    @app.get("/jobs", dependencies=read_auth)
     def jobs(days: int = 0, location: str = "any", q: str | None = None,
              exclude: str | None = None, include: str | None = None,
              sources: str | None = None, limit: int = 50, offset: int = 0):
@@ -365,7 +423,7 @@ def create_app(settings=None, profile=None, llm: Any = _UNSET, cv_master: str | 
         finally:
             s.close()
 
-    @app.get("/applications")
+    @app.get("/applications", dependencies=read_auth)
     def applications(limit: int = 200):
         s = store()
         try:
@@ -378,7 +436,7 @@ def create_app(settings=None, profile=None, llm: Any = _UNSET, cv_master: str | 
             r["allowed_next"] = sorted(allowed_next(r["status"]))
         return {"applications": rows}
 
-    @app.get("/job/{job_id}")
+    @app.get("/job/{job_id}", dependencies=read_auth)
     def job_detail(job_id: str):
         s = store()
         try:
@@ -418,7 +476,7 @@ def create_app(settings=None, profile=None, llm: Any = _UNSET, cv_master: str | 
             s.close()
         return {"id": app_id, "status": body.status, "allowed_next": sorted(allowed_next(body.status))}
 
-    @app.post("/triage/{job_id}", dependencies=auth)
+    @app.post("/triage/{job_id}", dependencies=auth + write_limit)
     def triage(job_id: str, body: TriageReq):
         """One decision per job: dismiss (hide from the queue), snooze (hide for N
         days, lapses back on its own), note (annotate, stays live), clear (undo)."""
@@ -445,7 +503,7 @@ def create_app(settings=None, profile=None, llm: Any = _UNSET, cv_master: str | 
         return {"job_id": job_id, "state": row.get("state"),
                 "snoozed_until": row.get("snoozed_until"), "note": row.get("note")}
 
-    @app.post("/jobs/purge", dependencies=auth)
+    @app.post("/jobs/purge", dependencies=auth + write_limit)
     def purge_jobs(body: PurgeReq):
         """Delete stored postings matching the same filters /jobs lists by.
 
@@ -487,7 +545,7 @@ def create_app(settings=None, profile=None, llm: Any = _UNSET, cv_master: str | 
         result["run_id"] = run_id
         return result
 
-    @app.get("/followups")
+    @app.get("/followups", dependencies=read_auth)
     def followups(after_days: int = 7):
         """Submitted applications that have gone quiet. Read-only."""
         s = store()
@@ -530,7 +588,7 @@ def create_app(settings=None, profile=None, llm: Any = _UNSET, cv_master: str | 
         return {"application_id": app_id, "subject": subject, "body": text,
                 "to": job.get("apply_email"), "sent": False}
 
-    @app.get("/analytics")
+    @app.get("/analytics", dependencies=read_auth)
     def analytics():
         s = store()
         try:
@@ -538,7 +596,7 @@ def create_app(settings=None, profile=None, llm: Any = _UNSET, cv_master: str | 
         finally:
             s.close()
 
-    @app.post("/match", dependencies=auth)
+    @app.post("/match", dependencies=auth + assistant_limit)
     def match():
         s = store()
         try:
@@ -550,7 +608,7 @@ def create_app(settings=None, profile=None, llm: Any = _UNSET, cv_master: str | 
         finally:
             s.close()
 
-    @app.post("/ingest", status_code=202, dependencies=auth)
+    @app.post("/ingest", status_code=202, dependencies=auth + ingest_limit)
     def ingest(bg: BackgroundTasks):
         # The id is returned immediately so the caller can watch /runs/{id} while
         # the background task is still going.
@@ -566,7 +624,7 @@ def create_app(settings=None, profile=None, llm: Any = _UNSET, cv_master: str | 
         bg.add_task(_ingest_task, settings.db_path, settings, _profile(), _llm(), run_id)
         return {"status": "started", "run_id": run_id}
 
-    @app.get("/sources")
+    @app.get("/sources", dependencies=read_auth)
     def sources_view():
         """Selectable ingest sources, which are enabled, and what is actually in the
         store — the dashboard needs all three: the full set for the Settings picker,
@@ -583,7 +641,7 @@ def create_app(settings=None, profile=None, llm: Any = _UNSET, cv_master: str | 
             "in_store": in_store,
         }
 
-    @app.get("/runs")
+    @app.get("/runs", dependencies=read_auth)
     def runs(limit: int = 20):
         s = store()
         try:
@@ -591,7 +649,7 @@ def create_app(settings=None, profile=None, llm: Any = _UNSET, cv_master: str | 
         finally:
             s.close()
 
-    @app.get("/runs/{run_id}")
+    @app.get("/runs/{run_id}", dependencies=read_auth)
     def run_events(run_id: str):
         s = store()
         try:
@@ -602,7 +660,7 @@ def create_app(settings=None, profile=None, llm: Any = _UNSET, cv_master: str | 
             raise HTTPException(404, "No events for that run id.")
         return {"run_id": run_id, "events": events}
 
-    @app.post("/fit", dependencies=auth)
+    @app.post("/fit", dependencies=auth + assistant_limit)
     def fit(req: JobIdReq):
         s = store()
         try:
@@ -618,7 +676,7 @@ def create_app(settings=None, profile=None, llm: Any = _UNSET, cv_master: str | 
                 raise _llm_unavailable(exc) from exc
             raise
 
-    @app.post("/apply/prepare", dependencies=auth)
+    @app.post("/apply/prepare", dependencies=auth + assistant_limit)
     def apply_prepare(req: JobIdReq):
         current_llm = _llm()
         if current_llm is None:
@@ -689,7 +747,8 @@ def create_app(settings=None, profile=None, llm: Any = _UNSET, cv_master: str | 
     # Held on app.state so the pending-approval registry is reachable — tests drive the
     # two-phase flow through it, and an operator surface can list what is waiting.
     app.state.assistant_pending = register_assistant(
-        app, store_factory=store, settings_factory=get_settings, auth=auth)
+        app, store_factory=store, settings_factory=get_settings, auth=auth,
+        read_auth=read_auth, limit=assistant_limit)
 
     return app
 

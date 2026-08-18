@@ -143,9 +143,9 @@ thirty seconds.
 
 ---
 
-## v3.4.0 — "Safe to expose"
+## v3.4.0 — "Safe to expose" ✅ SHIPPED 2026-08-18
 
-### 🟠 10. Reads are unauthenticated, and the docs never say so
+### ✅ 10. Reads are unauthenticated, and the docs never say so
 
 `/jobs`, `/stats`, `/analytics`, `/applications`, `/followups`, `/runs` and
 `/job/{id}` are open. `/applications` and `/followups` reveal **where the operator
@@ -166,7 +166,7 @@ model, so by this project's own policy it is a MAJOR.
 **Value:** the current default is safe on a laptop and unsafe in the exact configuration
 the docs teach.
 
-### 🟡 11. No rate limiting or request bounds
+### ✅ 11. No rate limiting or request bounds
 
 Nothing bounds `/assistant/ask` (LLM spend), `/ingest` (outbound fetching), or purge
 size. On a private box this is theoretical; the moment anything is exposed it is not.

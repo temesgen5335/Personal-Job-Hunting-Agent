@@ -28,6 +28,8 @@ const queueCount = stats?.queue ?? 0;
 let apiVersion: string | null = null;
 try {
   apiVersion = (await (await fetch(`${apiBase()}/health`)).json()).version ?? null;
+  // /health stays open even when reads are gated — it is a liveness probe (the Docker
+  // HEALTHCHECK calls it) and reveals nothing about the job search.
 } catch { /* API down — the page already renders its own unreachable state */ }
 const degraded =
   !!stats?.health &&

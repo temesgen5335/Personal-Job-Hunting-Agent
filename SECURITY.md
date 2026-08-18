@@ -42,9 +42,20 @@ if you:
 - follow the split-deploy path (`PUBLIC_JOBAGENT_API_URL`, dashboard hosted separately),
   which requires the API to be publicly reachable.
 
-In those configurations, put the API behind a reverse proxy with authentication, a VPN,
-or an IP allow-list. Opt-in read authentication is planned — see item 10 in
-[docs/ROADMAP.md](docs/ROADMAP.md).
+In those configurations, either put the API behind a reverse proxy with authentication,
+a VPN, or an IP allow-list — **or turn on read authentication** (since v3.4.0):
+
+```bash
+JOBAGENT_REQUIRE_AUTH_READS=true                     # on the API
+JOBAGENT_API_TOKEN=$(python scripts/api_token.py)    # on the dashboard
+```
+
+`/health` deliberately stays open even then: it is a liveness probe (the Docker
+`HEALTHCHECK` calls it) and reports only status, version, and whether a store exists.
+
+The API refuses to start if read auth is on without `DASHBOARD_PASSWORD` — otherwise no
+token would exist and every page would 403 forever, which reads as a broken app rather
+than a missing setting.
 
 ### Secrets at rest
 
@@ -54,8 +65,13 @@ it defends against is *someone reading the store file*, not someone with your `.
 
 ### Rate limiting
 
-There is none. `/assistant/ask` costs LLM tokens and `/ingest` makes outbound requests.
-Neither is bounded. Another reason not to expose the API.
+Per-client token buckets on the expensive classes since v3.4.0: assistant/LLM calls,
+ingestion, and writes. Defaults are generous (60/20/600 per hour) because they exist to
+stop a runaway loop or an exposed port draining a quota, not to police normal use.
+Exceeding one returns `429` with `Retry-After`.
+
+The limiter is in-process and per-worker — a shared store would mean running Redis for a
+single-user app. With N workers the effective limit is N x the configured one.
 
 ## Hard safety rules
 

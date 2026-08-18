@@ -90,7 +90,7 @@ class EventSink:
         self.store.log_event(Event(kind=kind, payload=payload))
 
 
-def register(app, *, store_factory, settings_factory, auth):
+def register(app, *, store_factory, settings_factory, auth, read_auth=None, limit=None):
     """Mount the assistant routes. Both are auth-gated: `ask` spends LLM quota and
     `confirm` performs a privileged write, so neither may be reachable anonymously."""
 
@@ -110,7 +110,7 @@ def register(app, *, store_factory, settings_factory, auth):
         lines += [f"{k}: {v}" for k, v in args.items()]
         return "\n".join(lines)
 
-    @app.post("/assistant/ask", dependencies=auth)
+    @app.post("/assistant/ask", dependencies=auth + (limit or []))
     def ask(req: AskReq):
         question = (req.question or "").strip()
         if not question:
@@ -170,7 +170,7 @@ def register(app, *, store_factory, settings_factory, auth):
         finally:
             store.close()
 
-    @app.post("/assistant/confirm/{nonce}", dependencies=auth)
+    @app.post("/assistant/confirm/{nonce}", dependencies=auth + (limit or []))
     def confirm(nonce: str):
         """Approve one waiting action. The body is empty on purpose — there is nothing
         for the caller to supply, and therefore nothing to tamper with."""
@@ -201,7 +201,7 @@ def register(app, *, store_factory, settings_factory, auth):
         finally:
             store.close()
 
-    @app.get("/assistant/sessions")
+    @app.get("/assistant/sessions", dependencies=(read_auth or []))
     def sessions(limit: int = 20):
         """Past assistant sessions, kept out of the pipeline run ledger."""
         store = store_factory()

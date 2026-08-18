@@ -12,6 +12,35 @@ scoped in [docs/VERSIONING.md](docs/VERSIONING.md) — which is worth reading, b
 Planned work is tracked in [docs/ROADMAP.md](docs/ROADMAP.md), grouped by the release
 that will carry it.
 
+## [3.4.0] — 2026-08-18
+
+*Theme: the deployment the docs teach is no longer the one that leaks.*
+
+### Added
+- **`JOBAGENT_REQUIRE_AUTH_READS`** — opt-in authentication on GET routes. Off by
+  default, which stays correct on the `127.0.0.1` bind; turn it on for any deployment
+  the network can reach. `/health` stays open even then, because it is a liveness probe
+  (the Docker `HEALTHCHECK` calls it) and reports nothing about the job search.
+  A route-table test asserts every other GET is gated, so one added next year without
+  `dependencies=read_auth` fails in CI rather than leaking quietly.
+- **`scripts/api_token.py`** and `JOBAGENT_API_TOKEN` — the dashboard renders reads
+  server-side and has no browser session to borrow, so it carries a derived token.
+- **Per-client rate limits** on assistant/LLM calls (60/h), ingestion (20/h) and writes
+  (600/h), returning `429` with `Retry-After` and naming the env var that raises it.
+  Reads are deliberately unlimited: the dashboard makes several per page load, and a
+  limiter that throttles normal use is one that gets switched off.
+- `JOBAGENT_MAX_PURGE_ROWS` as a safety valve, defaulting to unlimited — the purge UI
+  already shows an exact count and requires a second click, so consent is obtained
+  before the delete and a cap would only add friction.
+- Exposure warnings at the top of `docs/DEPLOYMENT.md` and
+  `docs/DEPLOYMENT_ALTERNATIVES.md`, where the split-deploy path is taught.
+
+### Changed
+- The API **refuses to start** if read auth is on without `DASHBOARD_PASSWORD`. No token
+  would exist, so every page would 403 forever — which reads as a broken app rather than
+  a missing setting.
+- The dashboard distinguishes "the API is up and refusing me" from "the API is down".
+
 ## [3.3.0] — 2026-08-18
 
 *Theme: fifteen minutes from clone to first ranked job, without editing TOML by hand.*
@@ -157,7 +186,8 @@ no longer tracked by git.
   Telegram bot, Tier-1 email applications, Tier-2 ATS form-fill, and VPS deployment
   units.
 
-[Unreleased]: https://github.com/temesgen5335/personalAgent/compare/v3.3.0...HEAD
+[Unreleased]: https://github.com/temesgen5335/personalAgent/compare/v3.4.0...HEAD
+[3.4.0]: https://github.com/temesgen5335/personalAgent/compare/v3.3.0...v3.4.0
 [3.3.0]: https://github.com/temesgen5335/personalAgent/compare/v3.2.0...v3.3.0
 [3.2.0]: https://github.com/temesgen5335/personalAgent/compare/v3.1.0...v3.2.0
 [3.1.0]: https://github.com/temesgen5335/personalAgent/compare/v3.0.0...v3.1.0
