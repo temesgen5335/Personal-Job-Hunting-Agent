@@ -80,6 +80,7 @@ Two interfaces, one backend:
 | Triage | Done — dismiss/snooze/note per job (triage table, POST /triage, queue count) |
 | Queue parity | Done (Aug 2026) — the number the badge shows and the rows `/jobs` renders are now the same set. `/jobs` passes `max_per_company=None` (the bot keeps its cap) and the page defaults to `within=any`. Verified live: 231 = 231 |
 | Manual ingestion trigger | Done (Aug 2026) — "Pull Jobs" on the Overview calls `POST /ingest`, then polls `/runs/{id}` for per-source progress and reloads. Until this, nothing in any UI could start a pass, and no scheduler is live (see below). Verified live: 8,363 fetched across all 6 adapters, zero errors |
+| Job cleanup | Done (Aug 2026) — `purge_jobs()` + `POST /jobs/purge` + a preview→confirm panel on /jobs. Filters shared with the list via `_row_predicates`, `dry_run` default true, unfiltered purge refused, applications/CVs/notes spared unconditionally, knowledge index dropped on delete |
 | Shared sign-in prompt | Done (Aug 2026) — `window.JA.signIn()` in `Layout.astro`: any page's 401 raises a password modal and retries once. Writes the same `jobagent_token` the Settings page does, so one session covers both. 403 (no `DASHBOARD_PASSWORD` on the API) is reported as its own case, never as a wrong password |
 | Ingest gate | Done — age/locations/drop-keywords + source selection, editable in Settings, applied before storage with per-reason drop counts |
 | Dashboard v3 | Done — sidebar shell, health-first Overview, triage queue + focus mode, fit-check states, nudge banner, locked Settings (from the Claude Design project) |
@@ -89,7 +90,7 @@ Two interfaces, one backend:
 | assistant hardening (Phase 5) | **Complete.** 10-case eval set scoring tool *selection*, answer *grounding* and *in-bounds* separately; `scripts/eval_assistant.py` with floors; `scripts/llm_doctor.py` explaining the chain, every model card's provenance, and per-task routing offline. Degraded-path conformance run measured **100% / 100% / 100%** |
 | Profile & preferences | **Editable through the UI.** Identity, background, CV, search preferences, source toggles and the ATS watchlist all persist to a gitignored `data/profile.json` + `data/cv_master.md` overlay (three-layer merge: committed placeholders → legacy `preferences.local.toml` → writable overlay). `/profile` GET+PUT (both auth-gated — PII). Nothing personal is hardcoded; the tree carries placeholders only (R22) |
 | Settings UI | Tabbed: Profile · CV & background · Search & matching · Sources & watchlist · Ingestion · LLM · Telegram · Email. Each tab saves independently against the backend that owns it (`/profile` or `/config`) |
-| Test suite | 556 tests, 37 test files, zero network, injectable fakes throughout |
+| Test suite | 570 tests, 38 test files, zero network, injectable fakes throughout |
 
 ## Assistant cost characteristics (measured Aug 2026)
 
@@ -131,8 +132,7 @@ pipeline health, retry/backoff, docs truth-pass). Still open:
 - **Profile/watchlist editing** in dashboard Settings (currently file-based)
 - **Bot outcome-marking** (interview/offer/rejected from Telegram — currently dashboard-only)
 - **Deployment to a live VPS** — systemd units + scripts are ready, needs a provisioned box
-- **Filtered job cleanup from the dashboard** — deletion is age-only and CLI-only today
-  (`scripts/prune_store.py`). Designed but not built; see the TODO section below
+- ~~Filtered job cleanup from the dashboard~~ — **built 2026-08-18**, see below
 - **No ingestion is actually scheduled anywhere.** Both triggers exist and neither is
   live: the systemd timers (`deploy/jobagent-ingest.timer`, every 4h; `.pipeline.timer`,
   daily 07:00) need the VPS above, and `.github/workflows/digest.yml` (`0 4 * * *`) needs
@@ -143,117 +143,38 @@ pipeline health, retry/backoff, docs truth-pass). Still open:
 
 ---
 
-## TODO — Filtered job cleanup on the Jobs page (planned, NOT built)
+## Filtered job cleanup — BUILT (2026-08-18)
 
-**Status: designed, not implemented.** Written 2026-08-17. Nothing below exists yet.
+Planned 2026-08-17, implemented the next day. What shipped, against what was designed:
 
-### What and why
+- **`Store.purge_jobs(...)`** — filtered delete, `dry_run=True` by default. Shares
+  `_row_predicates()` with `get_matches()`, so the rows the dashboard lists and the rows
+  a cleanup deletes cannot mean different things. `prune_jobs` is untouched, so
+  `scripts/prune_store.py` and the Actions workflow still work.
+- **`POST /jobs/purge`** — `dependencies=auth` (R19), `dry_run` defaulting to true, and
+  a **400 on an unfiltered purge** rather than reading "no filters" as "everything".
+  Returns fresh `stats` so the caller need not make a second round trip.
+- **Jobs page** — a collapsed "Clean up stored jobs" panel: pick a preset (weak matches
+  under N%, everything dismissed, not seen in N days, everything matching the current
+  filters), Preview, then a separate explicit Delete. The page's live filter state is
+  always sent, so a purge is scoped to the view you are looking at.
+- **Spared unconditionally**: anything with an application, a tailored CV, or a triage
+  note. Verified on the real store — the widest possible purge selects 14,295 of 14,296
+  and spares exactly the one job carrying a note.
+- **The knowledge index is dropped on any real delete**, because it is derived data that
+  does not notice deletions and would otherwise let the assistant cite postings that no
+  longer exist. It rebuilds on next use.
 
-"Pull Jobs" made the store grow on demand; nothing makes it shrink on demand. The store
-is 14,296 jobs / 238 MB, of which 255 are strong matches — the rest is scrape residue
-that costs disk, matching time, and every `/jobs` query. Today the only way to remove
-anything is `scripts/prune_store.py --older-than N --apply`, which is **age-only and
-CLI-only**. The operator should be able to select rows on the Jobs page and delete them.
+Deliberately still absent: **no assistant tool** (R26 — it destroys data, so it is not
+registered rather than registered-and-gated), and **no VACUUM by default** (opt-in;
+it rewrites the whole file).
 
-### What already exists (build on it, do not duplicate)
-
-| Piece | Where | Note |
-|---|---|---|
-| `prune_jobs(older_than_days, vacuum)` | `store/db.py:93` | Age-only. Deletes `matches`/`triage` first (FK order), spares anything in `applications`/`cv_variants`, ages on `last_seen_at` not `posted_at` |
-| Dry-run-by-default CLI | `scripts/prune_store.py` | Reports before it deletes — keep that default when generalising |
-| Row selection with filters | `store.get_matches()` + `MatchFilter` | Already does days / location / keywords / sources / score / triage |
-| Preview-before-write pattern | `assistant/tools.py` impact previews | Dry-runs over real stored rows |
-
-### The filters
-
-Requested: **all**, **match threshold**, **date**, **source**. Also needed, because the
-useless rows cluster there:
-
-- **Score band** — `< threshold` (the bulk delete: 14,041 of 14,296 score under 0.7).
-  The direction is the trap: "threshold 0.7" reads both ways and guessing wrong deletes
-  the half you wanted to keep. The UI must say *"delete the 14,041 jobs scoring under
-  70%"*, never *"threshold: 0.7"*.
-- **Unscored** — jobs with no `matches` row at all (ingested, never matched).
-- **Triage state** — dismissed / snoozed / untriaged. "Delete everything I dismissed" is
-  the most obviously safe bulk action there is.
-- **Source** — drop one board wholesale when it turns out to be noise.
-- **Company / keyword** — kill a spammy employer.
-- **Last seen** — `last_seen_at` older than N days, the basis `prune_jobs` already uses:
-  a posting still in today's feed is live however old its `posted_at`.
-- **Everything matching the current filters** — the "all" case, meaning *all rows the
-  page is currently showing*, not all rows in the store.
-
-### The one architectural rule this must follow
-
-**Selection must run through the same filter path the list renders.** Build the delete
-on `MatchFilter` / `get_matches()`, not a second hand-written WHERE clause. The queue
-bug fixed on 2026-08-17 is exactly what happens otherwise: the page said 231 and the
-query behind it meant 46, because two code paths answered the same question differently.
-There the cost was a confusing number. Here the cost is deleting the wrong rows.
-
-### Consequences that are easy to miss
-
-1. **The FTS index does not notice deletions.** `agent_knowledge` is a persistent table
-   in the same SQLite file, refreshed only by `reindex_postings()`, which is a *full
-   rebuild* (`agentkit/knowledge.py:126`). Delete jobs without reindexing and the
-   assistant keeps retrieving and citing postings that no longer exist — a confident
-   answer about a deleted row, the worst failure shape this project has. **Any purge
-   must reindex, or explicitly mark the index stale.**
-2. **FK order is load-bearing.** `PRAGMA foreign_keys = ON`, so `matches` and `triage`
-   go first. `prune_jobs` already gets this right — copy it, do not re-derive it.
-3. **Never delete what you acted on.** Jobs referenced by `applications` or
-   `cv_variants` are your history, not scrape data, and deleting them orphans the
-   application record. This protection is unconditional and must not become a checkbox.
-4. **Deleted jobs come straight back.** The next pull re-ingests anything still live on
-   the board, so a purge is not a filter — the ingest gate (R4a) is where "never store
-   this again" belongs. Say so in the UI or the feature reads as broken.
-5. **Space is not reclaimed without `VACUUM`**, which rewrites the whole 238 MB file.
-   Offer it as a separate, explicit follow-up action, not a silent part of every delete.
-6. **`stats()` counts and the nav badge move under the user.** Reload or refetch after a
-   purge, the same way "Pull Jobs" reloads after a run.
-
-### Shape of the work
-
-- **Store** — generalise to `purge_jobs(flt: MatchFilter, *, dry_run: bool = True)`
-  returning `{jobs, matches, triage, kept_acted_on, sample}`. Keep `prune_jobs` as a
-  thin age-only caller so `scripts/prune_store.py` and the Actions workflow are untouched.
-- **API** — `POST /jobs/purge`, `dependencies=auth` (**R19**), `dry_run` defaulting to
-  **true** so an omitted field can never delete. Log a `purge` event on the run-id spine
-  so the ledger records what went and why.
-- **Dashboard** — a "Clean up" control on `/jobs` that reuses the filter form already
-  there. Two-step: preview (counts by table, a sample of titles, and the spared count)
-  → explicit confirm. Never a one-click delete on a filter the user has not seen resolve.
-
-### Decisions to settle before coding
-
-- Does a **triage note** protect a row? A note is the operator's own work, like an
-  application — argues for sparing. Counter-argument: you often note *why* something is
-  junk. Lean toward sparing, and say which it does in the preview.
-- Preview sample size: enough to be convincing, and **query wider than you show** so the
-  count is never confused with the cap (**R32**).
-- Hard cap per purge, or unbounded? A 14k-row delete in one request is a long-held write
-  lock on a store the dashboard is reading.
-
-### Explicitly out of scope
-
-**No assistant tool for this.** Per `agent.md` — *"before adding an ADMIN tool, ask
-whether the action moves data"* — a `delete_jobs` tool destroys data, so it belongs in
-the frozen complement. **Do not register it and then gate it** (R26): exclusion has no
-code path to attack, a gate has one. A prompt-injected "clean up my old jobs" must have
-no tool to reach for. The assistant may keep *reporting* what a purge would remove.
-
-### Tests to write with it
-
-- Preview and apply select the identical row set (the parity property above).
-- A job with an application survives every filter combination, including "all".
-- FK order: no `FOREIGN KEY constraint failed` on a job carrying matches and triage.
-- `dry_run` defaults to true — a request with the field omitted deletes nothing.
-- After a purge, an assistant search cannot return a deleted posting.
-- Route-table test still passes: the new route carries `dependencies=auth`.
+Measured on the live store the day it shipped: under-50% would remove 13,412 of 14,296;
+not-seen-in-60-days would remove 3,417.
 
 ## Key Numbers
 
 - **11,700+** jobs scored in a live run (8,253 fetched in a single pass across 6 adapters)
 - **40** companies in the ATS watchlist (Greenhouse/Lever/Ashby)
-- **556** tests across 37 files — all run offline, no network, no credentials
+- **570** tests across 38 files — all run offline, no network, no credentials
 - **6** LLM providers with automatic failover (3 free, 3 paid)

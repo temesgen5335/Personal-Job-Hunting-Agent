@@ -529,7 +529,8 @@ To rename, change the one constant; nothing else hardcodes it (asserted by test)
 | chat-bubble | `8bcaebf` | Floating assistant on every page; shared client + session with /assistant. Dashboard-only, no test-count change |
 | naming | `a1b06df` | Assistant named Baer; name-addressing in Telegram; 531 tests |
 | profile-config | | UI-editable profile/CV/prefs → gitignored data/ overlay; tabbed Settings; 554 tests |
-| queue-parity | (this) | Queue badge = queue rows (no digest cap, no date default); "Pull Jobs" → POST /ingest; `description` off the list wire; dashboard port 1234; 556 tests |
+| queue-parity | `d1d94bb` | Queue badge = queue rows (no digest cap, no date default); "Pull Jobs" → POST /ingest; `description` off the list wire; dashboard port 1234; 556 tests |
+| job-cleanup | (this) | Filtered purge: shared predicate path, dry-run default, preview→confirm panel, notes/applications spared, index dropped on delete; 570 tests |
 
 ---
 
@@ -634,3 +635,46 @@ each against 12 calls served by OpenRouter. Failover works exactly as designed �
 answer still arrives — which is precisely why this rots unnoticed: the only symptom is
 latency. Third time this pitfall has landed in this project. **Re-verify model slugs
 whenever the chain looks short, and read the API log after any real run.**
+
+## Filtered job cleanup, and a guard that could never fire (Aug 2026)
+
+Built the previous day's plan: `purge_jobs()`, `POST /jobs/purge`, and a preview→confirm
+panel on the Jobs page. The plan's central rule survived contact with the code and is now
+structural: **`_row_predicates()` is one filter builder shared by `get_matches()` (what
+the list renders) and `purge_jobs()` (what a cleanup deletes).** They cannot mean
+different things, because there is only one place where "what these filters select" is
+decided. That rule came from the queue bug the day before, where two paths answered the
+same question differently; there it cost a wrong number, here it would cost wrong rows.
+
+**The bug worth remembering is the dead guard.** `purge_jobs` refuses an unfiltered
+delete — no predicates would mean "the entire store", which is a caller bug far more
+often than an intent. The check was `if not where: return`. But the scored-ness predicate
+(`m.job_id IS NOT NULL`, a JOIN-shape detail, not a user filter) was appended to `where`
+*first*, so the list was never empty and the guard was dead from the moment it was
+written. It read correctly, it sat in the right place, and it could not fire.
+`test_an_unfiltered_purge_selects_nothing` caught it on the first run.
+
+Generalised: **a guard whose input is populated by the code above it is not a guard.**
+Same family as the Phase-2 audit-ordering test that stayed green with its property
+removed — both look right and observe nothing. The fix is ordering, and the reason to
+keep the story is that reading the function top to bottom does not reveal it; only
+executing the empty case does.
+
+Two smaller decisions that the plan left open and the code settled:
+
+- **A triage note protects a row; a dismissal does not.** A note is your own writing, so
+  a bulk sweep does not get to discard it. A dismissal is a decision to be rid of the
+  thing, so honouring it is the point. Verified against the real store: the widest
+  possible purge selects 14,295 of 14,296 and spares exactly the one job carrying a note.
+- **Deleting drops the FTS index outright** rather than reconciling it. `agent_knowledge`
+  is derived data refreshed only by full rebuild, so a purge would otherwise leave the
+  assistant retrieving and citing postings that no longer exist. Dropping is cheap and it
+  rebuilds on next use. The general question for any new delete path: *what else was
+  derived from this, and does it know?*
+
+Also: the delete drives off a **temp table**, not `IN (?,?,…)`. A real cleanup here is
+~13k ids and binding one parameter per id runs at SQLITE_MAX_VARIABLE_NUMBER. `prune_jobs`
+still has that latent shape; it has never been called with enough rows to hit it.
+
+Measured live before any real delete (all dry runs): under-50% would remove 13,412 of
+14,296, not-seen-in-60-days 3,417, lever-only-under-50% 703, unfiltered refused with 400.

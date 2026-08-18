@@ -63,11 +63,6 @@ def _llm_unavailable(exc: Exception) -> HTTPException:
     return HTTPException(503, f"No LLM provider could serve that request.{hint}")
 
 
-# The untouched source payload is kept in the store forever (JobPosting.raw — never
-# discard it) but no consumer reads it over the wire: the dashboard's MatchRow does not
-# declare it, and neither the bot nor the assistant touches it. It was 63% of a default
-# /jobs response — ~640 KB of dead weight on every dashboard page load. Storage rule,
-# not a transport one.
 # Stripped from the /jobs LIST only — the store keeps both forever, and /job/{id}
 # still serves the description because the detail page renders it. `raw` is the
 # untouched source payload nothing reads. `description` is the full posting text:
@@ -129,6 +124,31 @@ class TriageReq(BaseModel):
     action: str                     # dismiss | snooze | note | clear
     days: int = 3                   # snooze horizon
     note: str | None = None
+
+
+class PurgeReq(BaseModel):
+    """Filtered cleanup of stored postings. Mirrors the /jobs query parameters, so the
+    rows a user is looking at are the rows this deletes.
+
+    `dry_run` defaults to **True** on purpose: a request that omits the field previews.
+    The destructive reading has to be typed out, never fallen into.
+    """
+    dry_run: bool = True
+    # Same names /jobs uses, so the dashboard can hand its filter state straight over.
+    days: int = 0                       # posted/first-seen within N days
+    location: str = "any"
+    q: str | None = None
+    exclude: str | None = None
+    include: str | None = None
+    sources: str | None = None
+    companies: str | None = None
+    # Cleanup-specific selectors.
+    below_score: float | None = None    # delete rows scoring UNDER this
+    min_score: float = 0.0
+    last_seen_days: int | None = None   # not seen in a feed for N days
+    triage_states: str | None = None    # dismissed | snoozed | untriaged (comma list)
+    include_unscored: bool = False      # jobs with no matches row at all
+    vacuum: bool = False                # reclaim file space afterwards (rewrites the db)
 
 
 class StatusReq(BaseModel):
@@ -422,6 +442,48 @@ def create_app(settings=None, profile=None, llm: Any = _UNSET, cv_master: str | 
             s.close()
         return {"job_id": job_id, "state": row.get("state"),
                 "snoozed_until": row.get("snoozed_until"), "note": row.get("note")}
+
+    @app.post("/jobs/purge", dependencies=auth)
+    def purge_jobs(body: PurgeReq):
+        """Delete stored postings matching the same filters /jobs lists by.
+
+        Preview and apply are the SAME query — only `dry_run` differs — so what a user
+        approves is what gets deleted. Anything with an application, a tailored CV, or a
+        triage note is spared whatever the filters say.
+        """
+        split = lambda v: [x.strip() for x in (v or "").split(",") if x.strip()]  # noqa: E731
+        run_id = uuid.uuid4().hex[:12]
+        s = store()
+        try:
+            result = s.purge_jobs(
+                dry_run=body.dry_run,
+                run_id=run_id,
+                vacuum=body.vacuum and not body.dry_run,
+                include_unscored=body.include_unscored,
+                min_score=body.min_score,
+                max_score=body.below_score,
+                max_age_days=body.days or None,
+                last_seen_days=body.last_seen_days,
+                location=body.location,
+                keywords=[w for w in (body.q or "").replace(",", " ").split() if w],
+                exclude_locations=split(body.exclude),
+                include_locations=split(body.include),
+                sources=split(body.sources),
+                companies=split(body.companies),
+                triage_states=split(body.triage_states),
+            )
+            # Recomputed after the delete so the caller can refresh counts without a
+            # second round trip — the nav badge and every stat move under a purge.
+            result["stats"] = s.stats()
+        finally:
+            s.close()
+        if result.get("unfiltered"):
+            # No predicate at all would mean "the whole store". Refuse rather than
+            # guess: an empty filter set is a caller bug far more often than an intent.
+            raise HTTPException(400, "Refusing an unfiltered purge — narrow it with at "
+                                     "least one filter (score, date, source, or triage).")
+        result["run_id"] = run_id
+        return result
 
     @app.get("/followups")
     def followups(after_days: int = 7):

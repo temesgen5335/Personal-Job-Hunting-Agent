@@ -123,6 +123,8 @@ src/jobagent/
 ├── preferences.py           # Profile/Watchlist/Sources; 3-layer merge + writable
 │                            #   data/profile.json overlay + data/cv_master.md (save_*)
 ├── store/db.py              # SQLite Store: upsert, query, analytics, application lifecycle
+│                            #   _row_predicates() — ONE filter path shared by
+│                            #   get_matches() (list) and purge_jobs() (delete)
 ├── llm_client.py            # MultiLLM: ordered failover chain, OpenAI-compat + Anthropic backends
 ├── secrets_store.py         # Fernet-encrypted config store, masked_view()
 ├── ingestion/
@@ -277,6 +279,8 @@ it does, it belongs in the frozen complement, not `CONFIG_WRITABLE`.
 | 1 MB job list | `/jobs` shipped `raw` — the untouched source payload — on every row: 63% of the response, ~640 KB per dashboard page load, read by nobody | Stripped on the wire; the store still keeps it. Storage rule ≠ transport rule |
 | …then 3 MB | Removing the per-company cap and fetching 400 rows re-exposed the same defect through a different field: `description` was 95% of the list payload (136 KB of 143 KB over 20 rows) for text the list never renders. 3.0 MB → 346 KB | `description` joined `_WIRE_OMIT`; `/job/{id}` still serves it. **Widening a query re-prices every field on it** |
 | Digest cap on a browse list | The dashboard reused `ranked_matches`, whose `diversify(max_per_company=2)` is right for a bot top-10 and wrong for a triage queue. 231 strong untriaged matches rendered as 46, while the badge beside them said 231 | `max_per_company=None` from `/jobs`. The existing parity test could not see it — every job in it had a distinct company, so the cap never bound |
+| Guard placed after the thing it guards | `purge_jobs` refused an unfiltered delete by checking `if not where` — but the scored-ness predicate was appended to `where` *first*, so the list was never empty and the guard was dead code from the moment it was written. Caught by the test, not by review | Check user-supplied filters before adding JOIN-shape predicates. **A guard tested only through the path that populates its input never fires** |
+| Deletion vs derived data | The FTS knowledge index is a persistent table refreshed only by full rebuild, so deleting jobs leaves chunks the assistant still retrieves and cites — a confident answer about a row that no longer exists | Any real purge drops `agent_knowledge`; it rebuilds on next use. Ask of every new delete path: *what else derived from this?* |
 | Windowed default vs unwindowed count | `/jobs` defaulted to `within=7d`; `stats()["queue"]` has no date filter. With a stale pipeline the button promising 231 landed on "Nothing matches" | Default `within=any`, so the page and the badge answer the same question |
 | Provider exhaustion as 500 | A free-tier daily limit surfaced as `Internal Server Error`, which reads like a code fault | 503 naming the cause and pointing at `make doctor PROBE=1`. Note `/fit` and `/match` correctly stay 200 — both fall back to heuristics |
 | Import cycle via package `__init__` | `agentkit.tools` → `agentkit.llm.types` → runs `llm/__init__.py` → `runner` → `agentkit.tools`. Only failed depending on import order, so it looked fixed once | `Runner` duck-typed against the tool seam (better design anyway — it is why a governed box substitutes); topological-sort test over module-level imports |

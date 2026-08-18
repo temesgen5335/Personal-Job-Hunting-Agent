@@ -104,6 +104,12 @@ if (pickedSources.length) {
 }
 
 const publicUrl = publicApiBase();
+// The exact filter state this page rendered with, handed to the cleanup control so a
+// purge deletes the rows you are looking at rather than a second interpretation of them.
+const filterState = {
+  days, location: remote, q, exclude: excludeParam,
+  sources: pickedSources.join(","),
+};
 const queueData = queue.map((j) => ({
   id: j.id, title: j.title, company: j.company, loc: j.location, score: j.score,
   why: j.rationale, meta: metaLine(j), matched: matchedChips(j), gaps: gapChips(j),
@@ -178,6 +184,61 @@ const queueData = queue.map((j) => ({
           </div>
         )}
       </form>
+
+      <details class="panel cleanup" id="cleanup">
+        <summary class="cleanup-head">
+          <span>Clean up stored jobs</span>
+          <span class="faint" style="font-size:11px;margin-left:auto">
+            {rows.length} shown · deletes are previewed first
+          </span>
+        </summary>
+
+        <p class="cleanup-note">
+          Deletes postings from your store. Anything you applied to, tailored a CV for,
+          or left a note on is kept whatever you pick here. Postings still live on their
+          board come back on the next pull — to stop storing them at all, use the
+          ingestion filters in Settings.
+        </p>
+
+        <div class="cleanup-row">
+          <label class="cl-field">
+            <span class="k">What to remove</span>
+            <select id="cl-preset">
+              <option value="weak">Weak matches — scoring under…</option>
+              <option value="dismissed">Everything I dismissed</option>
+              <option value="stale">Not seen in a feed for…</option>
+              <option value="filters">Everything matching the filters above</option>
+            </select>
+          </label>
+
+          <label class="cl-field" id="cl-score-wrap">
+            <span class="k">Score under</span>
+            <select id="cl-score">
+              <option value="0.3">30%</option>
+              <option value="0.5" selected>50%</option>
+              <option value="0.7">70%</option>
+            </select>
+          </label>
+
+          <label class="cl-field" id="cl-stale-wrap" hidden>
+            <span class="k">Last seen over</span>
+            <select id="cl-stale">
+              <option value="30">30 days ago</option>
+              <option value="60" selected>60 days ago</option>
+              <option value="90">90 days ago</option>
+            </select>
+          </label>
+
+          <label class="cl-check">
+            <input type="checkbox" id="cl-unscored" />
+            <span>also never-matched jobs</span>
+          </label>
+
+          <button type="button" class="btn" id="cl-preview">Preview</button>
+        </div>
+
+        <div class="cl-result" id="cl-result" hidden></div>
+      </details>
 
       {rows.length === 0 && (
         <div class="panel empty">
@@ -319,7 +380,7 @@ const queueData = queue.map((j) => ({
 
   <script type="application/json" id="queue-data" set:html={JSON.stringify(queueData)} />
 
-  <script is:inline define:vars={{ publicUrl }}>
+  <script is:inline define:vars={{ publicUrl, filterState }}>
     // ---- filter persistence: the URL is the truth; localStorage restores a bare visit.
     const FKEY = "jobagent.filters";
     const params = new URLSearchParams(location.search);
@@ -426,6 +487,109 @@ const queueData = queue.map((j) => ({
       }
     });
 
+    // ---- cleanup: preview, then a separate explicit confirm ---------------------
+    // The preview and the delete are the SAME request with dry_run flipped, so what
+    // gets approved is what goes. Nothing here deletes on one click.
+    (function () {
+      const $ = (id) => document.getElementById(id);
+      const preset = $("cl-preset"), out = $("cl-result");
+      if (!preset) return;
+
+      function syncFields() {
+        $("cl-score-wrap").hidden = preset.value !== "weak";
+        $("cl-stale-wrap").hidden = preset.value !== "stale";
+      }
+      preset.addEventListener("change", () => { syncFields(); out.hidden = true; });
+      syncFields();
+
+      // Filters from the page are ALWAYS sent, so "weak matches" means weak matches
+      // within the view you are looking at — never the whole store behind your back.
+      function body(dryRun) {
+        const b = { dry_run: dryRun, include_unscored: $("cl-unscored").checked,
+                    days: filterState.days, location: filterState.location,
+                    q: filterState.q, exclude: filterState.exclude,
+                    sources: filterState.sources };
+        if (preset.value === "weak") b.below_score = parseFloat($("cl-score").value);
+        else if (preset.value === "dismissed") b.triage_states = "dismissed";
+        else if (preset.value === "stale") b.last_seen_days = parseInt($("cl-stale").value, 10);
+        return b;
+      }
+
+      const esc = (t) => { const d = document.createElement("span"); d.textContent = t ?? ""; return d.innerHTML; };
+
+      async function call(dryRun) {
+        let r = await fetch(`${publicUrl}/jobs/purge`, {
+          method: "POST", headers: window.JA.headers(), body: JSON.stringify(body(dryRun)),
+        });
+        if ((r.status === 401 || r.status === 403) && window.JA.signIn) {
+          const ok = await window.JA.signIn(
+            "Deleting stored jobs needs the dashboard password — the same one Settings asks for.");
+          if (!ok) return null;
+          r = await fetch(`${publicUrl}/jobs/purge`, {
+            method: "POST", headers: window.JA.headers(), body: JSON.stringify(body(dryRun)),
+          });
+        }
+        if (!r.ok) {
+          const d = await r.json().catch(() => null);
+          throw new Error((d && typeof d.detail === "string" && d.detail) || window.JA.explain(r.status));
+        }
+        return r.json();
+      }
+
+      $("cl-preview").addEventListener("click", async () => {
+        const btn = $("cl-preview");
+        btn.disabled = true; btn.textContent = "Checking…";
+        try {
+          const p = await call(true);
+          if (!p) return;
+          out.hidden = false;
+          if (!p.jobs) {
+            out.dataset.kind = "";
+            out.innerHTML = `<div class="cl-none">Nothing matches — nothing to delete.` +
+              (p.kept_acted_on ? ` ${p.kept_acted_on} matched but are protected.` : "") + `</div>`;
+            return;
+          }
+          out.dataset.kind = "armed";
+          // The count is the real total; the list is only a sample of it (R32).
+          const list = p.sample.map((j) =>
+            `<li><span class="mono cl-s">${j.score == null ? "—" : Math.round(j.score * 100) + "%"}</span> ` +
+            `${esc(j.title)} <span class="faint">${esc(j.company || j.source)}</span></li>`).join("");
+          out.innerHTML = `
+            <div class="cl-count"><strong>${p.jobs.toLocaleString()}</strong> postings will be deleted` +
+            (p.kept_acted_on ? `, <strong>${p.kept_acted_on}</strong> protected and kept` : "") + `.</div>
+            <ul class="cl-sample">${list}</ul>
+            <div class="faint" style="font-size:11px;margin:6px 0 10px">
+              showing ${p.sample.length} of ${p.jobs.toLocaleString()} · also removes
+              ${p.matches.toLocaleString()} match rows and ${p.triage.toLocaleString()} triage rows
+            </div>
+            <div class="cl-actions">
+              <button type="button" class="btn danger-hover" id="cl-apply">Delete ${p.jobs.toLocaleString()} postings</button>
+              <button type="button" class="btn quiet" id="cl-cancel">Cancel</button>
+            </div>`;
+          $("cl-cancel").addEventListener("click", () => { out.hidden = true; });
+          $("cl-apply").addEventListener("click", async () => {
+            const go = $("cl-apply");
+            go.disabled = true; go.textContent = "Deleting…";
+            try {
+              const done = await call(false);
+              if (!done) { go.disabled = false; go.textContent = "Delete"; return; }
+              out.dataset.kind = "ok";
+              out.innerHTML = `<div class="cl-count">Deleted ${done.jobs.toLocaleString()} postings. Reloading…</div>`;
+              location.reload();
+            } catch (e) {
+              out.dataset.kind = "bad";
+              out.innerHTML = `<div class="cl-count">${esc(e.message)}</div>`;
+            }
+          });
+        } catch (e) {
+          out.hidden = false; out.dataset.kind = "bad";
+          out.innerHTML = `<div class="cl-count">${esc(e.message)}</div>`;
+        } finally {
+          btn.disabled = false; btn.textContent = "Preview";
+        }
+      });
+    })();
+
     // ---- one-at-a-time mode -----------------------------------------------------
     const MKEY = "jobagent.triagemode";
     const queueData = JSON.parse(document.getElementById("queue-data")?.textContent || "[]");
@@ -512,6 +676,38 @@ const queueData = queue.map((j) => ({
   }
   .f-chip:hover { text-decoration: none; background: rgba(125, 211, 252, 0.2); }
   .f-x { opacity: 0.7; font-size: 13px; line-height: 1; }
+
+  .cleanup { padding: 0; margin-bottom: 16px; }
+  .cleanup[open] { padding-bottom: 14px; }
+  .cleanup-head {
+    display: flex; align-items: center; gap: 10px; padding: 11px 14px;
+    cursor: pointer; font-size: 12.5px; color: var(--muted); list-style: none;
+  }
+  .cleanup-head::-webkit-details-marker { display: none; }
+  .cleanup-head::before { content: "›"; transition: transform .15s; display: inline-block; }
+  .cleanup[open] .cleanup-head::before { transform: rotate(90deg); }
+  .cleanup[open] .cleanup-head { color: var(--strong); border-bottom: 1px solid var(--border); }
+  .cleanup-note { font-size: 12px; color: var(--faint); line-height: 1.6; margin: 12px 14px 0; max-width: 70ch; }
+  .cleanup-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; padding: 12px 14px 0; }
+  .cl-field { display: flex; flex-direction: column; gap: 4px; }
+  .cl-field[hidden] { display: none; }
+  .cl-field select {
+    background: #0d0d0d; border: 1px solid var(--border); border-radius: 8px;
+    padding: 7px 9px; font-size: 13px; color: var(--text); cursor: pointer;
+  }
+  .cl-check { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); padding-bottom: 8px; }
+  .cl-check input { accent-color: var(--accent); }
+  .cl-result { margin: 12px 14px 0; padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; background: #0d0d0d; }
+  .cl-result[hidden] { display: none; }
+  .cl-result[data-kind="armed"] { border-color: rgba(248, 113, 113, 0.35); background: rgba(248, 113, 113, 0.05); }
+  .cl-result[data-kind="ok"] { border-color: rgba(74, 222, 128, 0.35); }
+  .cl-result[data-kind="bad"] { border-color: rgba(248, 113, 113, 0.45); }
+  .cl-count { font-size: 13px; color: var(--text); }
+  .cl-none { font-size: 13px; color: var(--muted); }
+  .cl-sample { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
+  .cl-sample li { font-size: 12.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cl-s { color: var(--faint); font-size: 11px; margin-right: 6px; }
+  .cl-actions { display: flex; gap: 8px; }
 
   .empty { padding: 56px 24px; text-align: center; }
   .empty p { color: var(--muted); font-size: 13px; margin: 8px auto 18px; max-width: 380px; }

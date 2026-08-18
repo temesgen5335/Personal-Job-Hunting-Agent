@@ -491,3 +491,59 @@ def test_jobs_route_does_not_cap_per_company(client, tmp_path):
     mega = [j for j in rows if j["company"] == "Megacorp"]
     assert len(mega) == 8                       # all of them, not diversify's 2
     assert len([j for j in rows if j["score"] >= 0.7]) == queue
+
+
+def test_purge_previews_by_default_and_needs_a_filter(client, tmp_path):
+    """dry_run defaults true at the HTTP boundary too: a request body that omits the
+    field must report, never delete. And an unfiltered purge is refused rather than
+    read as 'the whole store'."""
+    s = Store(str(tmp_path / "api.db"))
+    for i in range(5):
+        jid = s.upsert_job(JobPosting(source=Source.remoteok, title=f"Weak {i}",
+                                      company=f"Co{i}", is_remote=True))
+        s.upsert_match(Match(job_id=jid, score=0.1))
+    before = s.count_jobs()
+    s.close()
+
+    # No dry_run key at all.
+    r = client.post("/jobs/purge", json={"below_score": 0.7})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["dry_run"] is True and body["jobs"] == 5
+    s = Store(str(tmp_path / "api.db"))
+    assert s.count_jobs() == before, "a preview must not delete"
+    s.close()
+
+    # No filters at all → refused, not interpreted as everything.
+    assert client.post("/jobs/purge", json={"dry_run": True}).status_code == 400
+
+
+def test_purge_applies_and_reports_fresh_stats(client, tmp_path):
+    s = Store(str(tmp_path / "api.db"))
+    for i in range(4):
+        jid = s.upsert_job(JobPosting(source=Source.remoteok, title=f"Junk {i}",
+                                      company=f"J{i}", is_remote=True))
+        s.upsert_match(Match(job_id=jid, score=0.05))
+    s.close()
+
+    r = client.post("/jobs/purge", json={"below_score": 0.1, "dry_run": False})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["jobs"] == 4 and body["dry_run"] is False
+    # Every count moves under a purge, so they ride back with it rather than needing
+    # a second round trip the caller might skip.
+    assert body["stats"]["total_jobs"] == body["stats"]["total_jobs"]
+    s = Store(str(tmp_path / "api.db"))
+    assert s.count_jobs() == body["stats"]["total_jobs"]
+    s.close()
+
+
+def test_purge_is_covered_by_the_route_table_auth_invariant(client):
+    """R19. test_every_mutating_route_requires_auth already walks every non-GET route,
+    so it gates this one for free — but only if the route is actually IN the table.
+    This asserts that, so a purge route that vanished (or never registered) fails here
+    instead of quietly reducing the invariant's coverage."""
+    anon = TestClient(client.app)
+    assert anon.post("/jobs/purge", json={"below_score": 0.7}).status_code in (401, 403)
+    paths = {r.path for r in client.app.routes}
+    assert "/jobs/purge" in paths

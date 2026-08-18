@@ -150,6 +150,154 @@ class Store:
             self.conn.execute("VACUUM")
         return {"jobs": jobs, "matches": matches, "triage": triage, "kept_acted_on": kept}
 
+    # Protections that are NOT filters — they hold whatever the caller asks for.
+    # Jobs you acted on are your own history, not scrape data: deleting one orphans
+    # the application record and violates the FK. A triage note is the same argument
+    # one step down — you wrote it, so a bulk sweep does not get to discard it.
+    _PURGE_SPARED = (
+        "j.id NOT IN (SELECT job_id FROM applications) "
+        "AND j.id NOT IN (SELECT job_id FROM cv_variants) "
+        "AND COALESCE(TRIM(t.note), '') = ''"
+    )
+
+    def purge_jobs(
+        self,
+        *,
+        dry_run: bool = True,
+        sample_size: int = 8,
+        include_unscored: bool = False,
+        vacuum: bool = False,
+        run_id: str | None = None,
+        min_score: float = 0.0,
+        max_score: float | None = None,
+        max_age_days: int | None = None,
+        last_seen_days: int | None = None,
+        location: str = "any",
+        keywords: list[str] | None = None,
+        exclude_locations: list[str] | None = None,
+        include_locations: list[str] | None = None,
+        sources: list[str] | None = None,
+        companies: list[str] | None = None,
+        triage_states: list[str] | None = None,
+    ) -> dict:
+        """Delete stored postings matching the SAME filters the dashboard lists by.
+
+        `dry_run` defaults to **True**: a caller that forgets the flag reports, it does
+        not delete. Returns identical counts either way, so the preview a user approves
+        and the delete that follows are the same query — the only difference is whether
+        the DELETE runs.
+
+        Three rows are spared unconditionally, whatever the filters say (`_PURGE_SPARED`):
+        anything with an application, anything with a tailored CV, and anything carrying
+        a triage note. The first two would orphan records; the third is your own writing.
+
+        `include_unscored` reaches jobs with no `matches` row at all — ingested but never
+        matched. They cannot appear in `get_matches` (it INNER JOINs), so this is the one
+        selection the dashboard list cannot preview row-by-row; the count is still exact.
+
+        Deleting is FK-ordered (`matches` and `triage` first) and driven off a temp table
+        rather than `IN (?,?,…)`, because a real cleanup here is ~14k ids and binding one
+        parameter per id runs into SQLITE_MAX_VARIABLE_NUMBER.
+        """
+        self._ensure_triage()
+        where, params = self._row_predicates(
+            min_score=min_score, max_score=max_score, max_age_days=max_age_days,
+            last_seen_days=last_seen_days, location=location, keywords=keywords,
+            exclude_locations=exclude_locations, include_locations=include_locations,
+            sources=sources, companies=companies, triage_states=triage_states,
+            unscored_ok=include_unscored,
+        )
+        # A purge with no filters at all would mean "delete the entire store". That is
+        # never what a filter form submits, and an empty filter set is far more likely
+        # to be a bug in the caller than an intent — so it selects nothing.
+        #
+        # Checked BEFORE the scored-ness predicate below, which is a JOIN detail rather
+        # than a user filter: appending it first made `where` permanently non-empty and
+        # this guard permanently dead.
+        if not where:
+            return {"jobs": 0, "matches": 0, "triage": 0, "kept_acted_on": 0,
+                    "sample": [], "dry_run": dry_run, "unfiltered": True}
+
+        if not include_unscored:
+            where.append("m.job_id IS NOT NULL")
+
+        joins = ("FROM jobs j "
+                 "LEFT JOIN matches m ON m.job_id = j.id "
+                 "LEFT JOIN triage t ON t.job_id = j.id ")
+        cond = " AND ".join(where)
+
+        # "Matched your filters but was spared" is the number that stops a user thinking
+        # the purge silently missed rows, so it is computed even when nothing is deleted.
+        kept = self.conn.execute(
+            f"SELECT COUNT(*) AS n {joins} WHERE {cond} AND NOT ({self._PURGE_SPARED})",
+            list(params),
+        ).fetchone()["n"]
+
+        self.conn.execute("DROP TABLE IF EXISTS _purge_doomed")
+        self.conn.execute("CREATE TEMP TABLE _purge_doomed (id TEXT PRIMARY KEY)")
+        self.conn.execute(
+            f"INSERT OR IGNORE INTO _purge_doomed (id) SELECT j.id {joins} "
+            f"WHERE {cond} AND {self._PURGE_SPARED}",
+            list(params),
+        )
+        total = self.conn.execute("SELECT COUNT(*) AS n FROM _purge_doomed").fetchone()["n"]
+        # Query the count over the FULL selection and the sample separately, so the
+        # sample cap can never be mistaken for the total (R32).
+        sample = [
+            {"id": r["id"], "title": r["title"], "company": r["company"],
+             "source": r["source"], "score": r["score"]}
+            for r in self.conn.execute(
+                "SELECT j.id, j.title, j.company, j.source, m.score FROM _purge_doomed d "
+                "JOIN jobs j ON j.id = d.id LEFT JOIN matches m ON m.job_id = j.id "
+                "ORDER BY COALESCE(m.score, -1) DESC LIMIT ?",
+                (max(0, sample_size),),
+            )
+        ]
+
+        result = {"jobs": total, "matches": 0, "triage": 0, "kept_acted_on": kept,
+                  "sample": sample, "dry_run": dry_run, "unfiltered": False}
+
+        if dry_run or not total:
+            # Counting what WOULD go still needs the dependent-row numbers, or a preview
+            # would understate the blast radius against the apply that follows it.
+            result["matches"] = self.conn.execute(
+                "SELECT COUNT(*) AS n FROM matches WHERE job_id IN (SELECT id FROM _purge_doomed)"
+            ).fetchone()["n"]
+            result["triage"] = self.conn.execute(
+                "SELECT COUNT(*) AS n FROM triage WHERE job_id IN (SELECT id FROM _purge_doomed)"
+            ).fetchone()["n"]
+            self.conn.execute("DROP TABLE IF EXISTS _purge_doomed")
+            self.conn.commit()
+            return result
+
+        # FK order: dependents first, or PRAGMA foreign_keys = ON rejects the delete.
+        result["matches"] = self.conn.execute(
+            "DELETE FROM matches WHERE job_id IN (SELECT id FROM _purge_doomed)").rowcount
+        result["triage"] = self.conn.execute(
+            "DELETE FROM triage WHERE job_id IN (SELECT id FROM _purge_doomed)").rowcount
+        result["jobs"] = self.conn.execute(
+            "DELETE FROM jobs WHERE id IN (SELECT id FROM _purge_doomed)").rowcount
+        self.conn.execute("DROP TABLE IF EXISTS _purge_doomed")
+        self.conn.commit()
+
+        # The knowledge index is derived data that does NOT notice deletions: it is a
+        # persistent table refreshed only by a full rebuild. Left alone, the assistant
+        # keeps retrieving and citing postings that no longer exist — a confident answer
+        # about a deleted row. Dropping the index is the cheap, correct move; it is
+        # rebuilt on next use.
+        self.conn.execute("DROP TABLE IF EXISTS agent_knowledge")
+
+        self.log_event(Event(kind="purge", payload={
+            "run_id": run_id, "jobs": result["jobs"], "matches": result["matches"],
+            "triage": result["triage"], "kept_acted_on": kept,
+        }))
+
+        if vacuum:
+            # Reclaims the file space DELETE only marks free. Rewrites the whole db,
+            # so it is opt-in rather than automatic.
+            self.conn.execute("VACUUM")
+        return result
+
     def stats(self) -> dict:
         by_source = {
             r["source"]: r["n"]
@@ -298,34 +446,62 @@ class Store:
         ).fetchall()
         return [dict(r) for r in rows]
 
-    def get_matches(
+    # --- shared row selection -------------------------------------------------
+    #
+    # ONE predicate builder for both `get_matches` (what the dashboard renders) and
+    # `purge_jobs` (what a cleanup deletes). They must never drift: the 2026-08-17
+    # queue bug was two code paths answering the same question differently, and there
+    # it only produced a confusing number. Here the same drift deletes the wrong rows.
+    def _row_predicates(
         self,
-        limit: int = 10,
+        *,
         min_score: float = 0.0,
+        max_score: float | None = None,
         max_age_days: int | None = None,
+        last_seen_days: int | None = None,
         location: str = "any",
         keywords: list[str] | None = None,
         exclude_locations: list[str] | None = None,
         include_locations: list[str] | None = None,
         sources: list[str] | None = None,
+        companies: list[str] | None = None,
+        triage_states: list[str] | None = None,
         hide_triaged: bool = False,
-        offset: int = 0,
-    ) -> list[dict]:
-        """Ranked matches with filters: recency, location mode (remote/hybrid/any),
-        keyword OR-match, exclude_locations (drop), include_locations (keep-only),
-        sources (keep-only, for the dashboard's per-source visibility toggle),
-        hide_triaged (drop jobs you already dismissed or snoozed), and pagination
-        via offset.
+        unscored_ok: bool = False,
+    ) -> tuple[list[str], list]:
+        """Build the WHERE fragments shared by listing and purging.
 
-        `hide_triaged` exists because two consumers want opposite things: a shortlist
-        for action (digest, bot, /apply) must not re-offer what you already decided,
-        while the dashboard deliberately shows those rows so it can render Undo."""
-        where = ["m.score >= ?"]
-        params: list = [min_score]
+        Assumes `jobs j` LEFT JOINed to `triage t`, and `matches m` joined however the
+        caller needs it (INNER for listing, LEFT for purging so unscored jobs are
+        reachable). Returns (where_fragments, params) — never a full statement, because
+        the two callers need different SELECT and JOIN shapes.
+        """
+        where: list[str] = []
+        params: list = []
+
+        # `unscored_ok` is purge-only: it LEFT JOINs matches, so a never-scored job has
+        # a NULL score, and `NULL < 0.7` is NULL — i.e. silently excluded. Saying so in
+        # SQL is the difference between "delete the weak ones" quietly skipping every
+        # unscored row and actually including them.
+        null_ok = " OR m.job_id IS NULL" if unscored_ok else ""
+        if min_score:
+            where.append(f"(m.score >= ?{null_ok})")
+            params.append(min_score)
+        if max_score is not None:
+            # Strictly below: "clean up everything under 70%" must not eat a 0.70 row.
+            where.append(f"(m.score < ?{null_ok})")
+            params.append(max_score)
 
         if max_age_days:
             cutoff = (datetime.now(timezone.utc) - timedelta(days=max_age_days)).isoformat()
             where.append("COALESCE(NULLIF(j.posted_at, ''), j.first_seen_at) >= ?")
+            params.append(cutoff)
+
+        if last_seen_days:
+            # Age on last_seen_at, the basis prune_jobs uses: a posting still appearing
+            # in today's feed is live however old its posted_at.
+            cutoff = (datetime.now(timezone.utc) - timedelta(days=last_seen_days)).isoformat()
+            where.append("j.last_seen_at < ?")
             params.append(cutoff)
 
         if location == "remote":
@@ -358,6 +534,29 @@ class Store:
             where.append("j.source IN (" + ",".join("?" for _ in sources) + ")")
             params += [s.lower() for s in sources]
 
+        if companies:
+            ors = []
+            for c in companies:
+                ors.append("LOWER(COALESCE(j.company,'')) LIKE ?")
+                params.append(f"%{c.lower()}%")
+            where.append("(" + " OR ".join(ors) + ")")
+
+        if triage_states:
+            # "untriaged" includes a lapsed snooze, matching how the queue count and
+            # the rendered list already read a lapsed snooze as live.
+            ors = []
+            for st in triage_states:
+                if st == "untriaged":
+                    ors.append("(t.state IS NULL OR (t.state='snoozed' AND COALESCE(t.snoozed_until,'') <= ?))")
+                    params.append(_now())
+                elif st == "snoozed":
+                    ors.append("(t.state='snoozed' AND COALESCE(t.snoozed_until,'') > ?)")
+                    params.append(_now())
+                else:
+                    ors.append("t.state = ?")
+                    params.append(st)
+            where.append("(" + " OR ".join(ors) + ")")
+
         if hide_triaged:
             # Same lapsed-snooze predicate stats() uses for the queue count, so the
             # badge and the digest can never disagree about what is still live. A
@@ -366,7 +565,47 @@ class Store:
                          " (t.state='snoozed' AND COALESCE(t.snoozed_until,'') <= ?))")
             params.append(_now())
 
+        return where, params
+
+    def get_matches(
+        self,
+        limit: int = 10,
+        min_score: float = 0.0,
+        max_age_days: int | None = None,
+        location: str = "any",
+        keywords: list[str] | None = None,
+        exclude_locations: list[str] | None = None,
+        include_locations: list[str] | None = None,
+        sources: list[str] | None = None,
+        hide_triaged: bool = False,
+        offset: int = 0,
+        max_score: float | None = None,
+        last_seen_days: int | None = None,
+        companies: list[str] | None = None,
+        triage_states: list[str] | None = None,
+    ) -> list[dict]:
+        """Ranked matches with filters: recency, location mode (remote/hybrid/any),
+        keyword OR-match, exclude_locations (drop), include_locations (keep-only),
+        sources (keep-only, for the dashboard's per-source visibility toggle),
+        hide_triaged (drop jobs you already dismissed or snoozed), and pagination
+        via offset.
+
+        `hide_triaged` exists because two consumers want opposite things: a shortlist
+        for action (digest, bot, /apply) must not re-offer what you already decided,
+        while the dashboard deliberately shows those rows so it can render Undo.
+
+        The predicates come from `_row_predicates`, shared with `purge_jobs`, so what
+        this lists and what a cleanup deletes can never mean different things."""
         self._ensure_triage()
+        where, params = self._row_predicates(
+            min_score=min_score, max_score=max_score, max_age_days=max_age_days,
+            last_seen_days=last_seen_days, location=location, keywords=keywords,
+            exclude_locations=exclude_locations, include_locations=include_locations,
+            sources=sources, companies=companies, triage_states=triage_states,
+            hide_triaged=hide_triaged,
+        )
+        # min_score=0.0 adds no predicate, but this query must still only return
+        # SCORED rows (it INNER JOINs matches); purge_jobs LEFT JOINs instead.
         sql = (
             "SELECT j.*, m.score, m.rationale, m.gaps, "
             # Lapsed snoozes read as live directly in SQL so ordering and the
@@ -376,7 +615,7 @@ class Store:
             "t.snoozed_until AS triage_snoozed_until, t.note AS triage_note "
             "FROM matches m JOIN jobs j ON j.id = m.job_id "
             "LEFT JOIN triage t ON t.job_id = j.id "
-            "WHERE " + " AND ".join(where)
+            + ("WHERE " + " AND ".join(where) if where else "")
             + " ORDER BY m.score DESC LIMIT ? OFFSET ?"
         )
         params = [_now()] + params + [limit, offset]
