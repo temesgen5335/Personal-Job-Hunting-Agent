@@ -104,6 +104,16 @@ export interface MatchRow {
   // Why this might not fit: level mismatch, missing must-have, exclusion, not remote.
   // Surfaced in the list so triage does not need a click-through.
   gaps: string[];
+  // Parsed from salary_text at ingest. null means "could not tell", never zero.
+  salary_min: number | null;
+  salary_max: number | null;
+  salary_currency: string | null;
+  salary_period: string | null;
+  // Groups the same role seen on several boards. Not the row identity.
+  cluster_key: string | null;
+  // Which scorer produced `score`; llm_score survives a heuristic re-run.
+  score_source?: string;
+  llm_score?: number | null;
   // Per-job triage decision, joined by the store. null = live.
   triage_state: "dismissed" | "snoozed" | null;
   triage_snoozed_until: string | null;
@@ -117,6 +127,7 @@ export interface MatchFilter {
   exclude?: string;   // comma-separated locations to drop
   include?: string;   // comma-separated locations to keep-only
   sources?: string;   // comma-separated source slugs to keep-only
+  minSalary?: number; // annualised floor; rows with unknown pay are kept
   limit?: number;
   offset?: number;
 }
@@ -129,6 +140,7 @@ export async function getMatches(f: MatchFilter = {}): Promise<MatchRow[]> {
   if (f.exclude) p.set("exclude", f.exclude);
   if (f.include) p.set("include", f.include);
   if (f.sources) p.set("sources", f.sources);
+  if (f.minSalary) p.set("min_salary", String(f.minSalary));
   p.set("limit", String(f.limit ?? 50));
   if (f.offset) p.set("offset", String(f.offset));
   return (await getJSON(`/jobs?${p.toString()}`)).jobs;

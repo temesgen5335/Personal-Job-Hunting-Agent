@@ -12,6 +12,8 @@ def _settings():
         greenhouse_slugs="", lever_slugs="", ashby_slugs="",
         telegram_api_id=None, telegram_api_hash="", telegram_channels="",
         telegram_session="data/telegram", telegram_fetch_limit=50,
+        # Empty key → the aggregator self-gates off, same as the ATS slugs above.
+        jsearch_api_key="", jsearch_location="",
     )
 
 

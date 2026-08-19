@@ -8,6 +8,7 @@ append-only audit trail. Keep these stable; adapters and tools depend on them.
 from __future__ import annotations
 
 import hashlib
+import re
 from datetime import datetime, timezone
 from enum import Enum
 
@@ -98,6 +99,41 @@ def can_transition(current: str, target: str) -> bool:
     return target == current or target in ALLOWED_TRANSITIONS.get(current, set())
 
 
+# Decorations boards add to an otherwise identical title. Stripped for CLUSTERING only —
+# never for matching, where "Senior" and "Intern" are exactly the signal that matters.
+_TITLE_NOISE = re.compile(
+    r"\((?:[^()]*)\)|\[[^\]]*\]"                       # (Remote), [Contract]
+    r"|\b(?:senior|sr\.?|junior|jr\.?|staff|principal|lead|mid|mid-level|entry[- ]level)\b"
+    r"|\b(?:full[- ]?time|part[- ]?time|contract|permanent|freelance|intern(?:ship)?)\b"
+    r"|\b(?:remote|hybrid|on[- ]?site|onsite|wfh)\b"
+    r"|\b(?:m/f/d|m/w/d|f/m/x|all genders)\b",
+    re.I)
+# A trailing location after a dash or comma: "Backend Engineer — Berlin", "…, London".
+_TRAILING_PLACE = re.compile(r"\s*[-–—,|]\s*[^-–—,|]{1,40}$")
+_COMPANY_NOISE = re.compile(
+    r"\b(?:inc|inc\.|llc|ltd|ltd\.|gmbh|bv|b\.v\.|sa|s\.a\.|ag|plc|co|corp|"
+    r"corporation|company|technologies|technology|labs|group|holdings)\b", re.I)
+_NON_WORD = re.compile(r"[^a-z0-9]+")
+
+
+def normalize_title(title: str | None) -> str:
+    """Title reduced to the role itself, for grouping across boards."""
+    text = (title or "").lower()
+    text = _TITLE_NOISE.sub(" ", text)
+    # Applied AFTER noise removal, so "(Remote) — Berlin" does not leave "berlin" behind
+    # as the only survivor. Guarded on length: a two-word title must not be halved.
+    stripped = _TRAILING_PLACE.sub("", text)
+    if len(stripped.split()) >= 2:
+        text = stripped
+    return " ".join(_NON_WORD.sub(" ", text).split())
+
+
+def normalize_company(company: str | None) -> str:
+    """Company reduced to its distinctive part: "Acme Inc." and "ACME" agree."""
+    text = _COMPANY_NOISE.sub(" ", (company or "").lower())
+    return " ".join(_NON_WORD.sub(" ", text).split())
+
+
 class JobPosting(BaseModel):
     """Normalized job posting. The dedup_hash collapses the same role seen on
     multiple sources into one logical job."""
@@ -123,13 +159,39 @@ class JobPosting(BaseModel):
     raw: dict = Field(default_factory=dict)  # full source payload — never discard
 
     def dedup_hash(self) -> str:
-        """Stable identity across sources: normalized company+title+location."""
+        """Stable identity across sources: normalized company+title+location.
+
+        This is the PRIMARY KEY and must never change meaning: every stored job, every
+        `applications.job_id`, and every triage row is keyed on it. Redefining it would
+        re-id the whole store and orphan the operator's own history — a MAJOR by this
+        project's versioning policy. Cross-board grouping goes in `cluster_key` instead.
+        """
         basis = "|".join(
             (self.company or "").strip().lower().split()
             + (self.title or "").strip().lower().split()
             + (self.location or "").strip().lower().split()
         )
         return hashlib.sha256(basis.encode()).hexdigest()[:16]
+
+    def cluster_key(self) -> str:
+        """Groups the SAME role seen on several boards, without touching identity.
+
+        The dedup hash is exact, so "Senior Backend Engineer" on Greenhouse and
+        "Senior Backend Engineer (Remote)" on LinkedIn are two rows — which is correct
+        for storage (each keeps its own apply URL) and wrong for a queue, where they are
+        one decision. This key normalises away the decorations boards add:
+
+        - parenthetical and bracketed suffixes: "(Remote)", "[Contract]"
+        - a trailing location after a dash or comma: "— Berlin", ", London"
+        - seniority and employment-type words, which vary per board for one role
+        - punctuation and duplicate whitespace
+
+        Location is deliberately EXCLUDED: the same role is posted with "Remote",
+        "Remote (EMEA)" and "" on three boards, so including it would defeat the point.
+        """
+        return hashlib.sha256(
+            f"{normalize_company(self.company)}|{normalize_title(self.title)}".encode()
+        ).hexdigest()[:16]
 
 
 class Match(BaseModel):
@@ -141,6 +203,12 @@ class Match(BaseModel):
     score: float = Field(ge=0.0, le=1.0)  # 0..1 fit
     rationale: str = ""                   # why it fits
     gaps: list[str] = Field(default_factory=list)  # missing requirements
+    # Which scorer produced `score`. Heuristic scores used to overwrite LLM ones on
+    # every run with nothing recording that a better number had existed — a known gap
+    # from the July 2026 audit. `llm_score` keeps the expensive answer in its own field
+    # so a cheap re-run cannot erase it (the store COALESCEs rather than overwrites).
+    score_source: str = "heuristic"       # heuristic | llm
+    llm_score: float | None = None
     created_at: datetime = Field(default_factory=_utcnow)
 
 

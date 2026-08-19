@@ -40,6 +40,10 @@ class MatchFilter:
     # sets it False so it can still render the "Dismissed · Undo" row.
     hide_triaged: bool = True
     min_score: float = 0.0
+    # Annualised floor. None = no salary filter; rows with unparseable pay are
+    # kept, because most postings state none and dropping them would hide the
+    # market behind a filter the operator thinks is about money.
+    min_salary: float | None = None
 
     @classmethod
     def from_profile(cls, profile) -> "MatchFilter":
@@ -99,6 +103,7 @@ def ranked_matches(store: Store, n: int = 10, flt: MatchFilter | None = None, of
         max_age_days=flt.max_age_days, location=flt.location, keywords=flt.keywords,
         exclude_locations=flt.exclude_locations, include_locations=flt.include_locations,
         sources=flt.sources, hide_triaged=flt.hide_triaged, offset=offset,
+        min_salary=flt.min_salary,
     )
     if max_per_company is None:
         return pool[:n]

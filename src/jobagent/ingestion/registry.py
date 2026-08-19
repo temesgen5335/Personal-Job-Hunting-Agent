@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from jobagent.ingestion.adapters.ashby import AshbyAdapter
 from jobagent.ingestion.adapters.greenhouse import GreenhouseAdapter
+from jobagent.ingestion.adapters.jsearch import JSearchAdapter
 from jobagent.ingestion.adapters.lever import LeverAdapter
 from jobagent.ingestion.adapters.remoteok import RemoteOKAdapter
 from jobagent.ingestion.adapters.remotive import RemotiveAdapter
@@ -50,6 +51,16 @@ def build_adapters(settings) -> list[BaseAdapter]:
             split_slugs(settings.telegram_channels),
             session=settings.telegram_session,
             limit=settings.telegram_fetch_limit,
+        ),
+        # Queries come from the profile's own target roles, so the aggregator searches
+        # for what the operator is looking for rather than a hardcoded list. It
+        # self-gates on the API key AND on having something to search for — an empty
+        # query would return an arbitrary slice of every job on the internet.
+        JSearchAdapter(
+            settings.jsearch_api_key,
+            prefs.profile.target_roles,
+            location=settings.jsearch_location or prefs.profile.location,
+            remote_only=(prefs.profile.work_mode or "").lower() == "remote",
         ),
     ]
     allowed = resolve_sources(settings, src)

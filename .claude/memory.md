@@ -535,7 +535,8 @@ To rename, change the one constant; nothing else hardcodes it (asserted by test)
 | v3.2.0 | `6d14e3f`, `24eeaa3` | LICENSE, neutral profile template, lockfiles, community docs, identity guard; 586 tests |
 | v3.3.0 | `a13a3b8` | `make setup` wizard, `make demo` seeder, Docker + compose; 604 tests |
 | v3.4.0 | `d0faa50` | Opt-in read auth + route-table net, per-class rate limits, exposure warnings in both deploy docs; 617 tests |
-| v3.4.1 | (this) | Fix CI red since v3.2.0: `None` in model-visible config, three tests + two docs reading an untracked file, two guards that never fired |
+| v3.4.1 | `0215d0e` | Fix CI red since v3.2.0: `None` in model-visible config, three tests + two docs reading an untracked file, two guards that never fired |
+| v3.5.0 | (this) | JSearch aggregator, cluster_key, salary parse+filter, score provenance; 650 tests |
 
 ---
 
@@ -874,3 +875,52 @@ template. A test that passes coincidentally is a trap for whoever reads it next.
 believing it.** `env -i` is not enough — it strips the environment but not the
 filesystem. The real check is to move the gitignored files out of the way and run again,
 which takes ten seconds and would have caught all six.
+
+## v3.5.0 — more of the market, and what each feature refused to do (Aug 2026)
+
+**Clustering does not touch `dedup_hash`.** The obvious fix for "the same role arrives
+three times" is to normalise the dedup hash. That hash is the PRIMARY KEY: every
+`applications.job_id`, every triage row, every CV variant references it. Redefining it
+would re-id all 14k stored jobs and orphan the operator's own history — a MAJOR by this
+project's own policy, inside a release meant to be additive. So `cluster_key` is a
+*second*, weaker identity stored alongside. Better design regardless: each board's row
+keeps its own apply URL, and only the *display* collapses.
+
+**The salary filter keeps rows it cannot parse.** The instinct is to drop them — a
+minimum-salary filter returning postings with no stated salary looks broken. But most
+postings state no salary, so dropping unknowns would hide the majority of the market
+behind a filter the operator believes is about money. The chip therefore reads
+"≥ 100k/yr (or unstated)", because the alternative is a number that quietly lies. Same
+family as `infer_period`, which exists but is display-only: **a guess that decides what
+you see is a guess that hides things.**
+
+**Score provenance is a COALESCE, not an overwrite.** A heuristic pass carries
+`llm_score=NULL`; writing that would erase a rerank that cost real quota. The July 2026
+audit recorded this gap and it stayed open for four releases because it is invisible —
+the number just quietly gets worse.
+
+**Two bugs found by running the code, not reading it:**
+
+1. The salary parser reported `$120,000 - $160,000` as min=max=120000. The range regex
+   had no room for the currency symbol before the *second* number — the most common
+   salary format there is — so it never matched and fell through to the single-number
+   branch. Reading the regex, it looks correct.
+2. Indexing `cluster_key` inside `schema.sql` broke every pre-existing store:
+   `executescript` runs before `_migrate()`, so the index referenced a column that did
+   not exist yet and took the whole script down. Caught by running the migration against
+   a copy of the real 14,478-row store — the only place it could show, since a fresh
+   database has the column from the start. **Test migrations against an old store, not
+   a new one.**
+
+**An estimate in my own roadmap was wrong.** It proposed `sentence-transformers` at
+"~80 MB, CPU, no API cost". Checked against PyPI: it depends on `torch>=2.2`, plus
+`transformers`, `tokenizers`, `huggingface-hub`, `scikit-learn`, `scipy` — gigabytes, on
+a project whose whole install is tens of megabytes and which targets free-tier ARM VPSes.
+Deferred, with three lighter alternatives written up. **A dependency's own size is not
+its cost.**
+
+Limitation to carry forward: the JSearch adapter is verified against a fixture shaped
+like a real response and has **never been run against the live API** — no RapidAPI key
+was available. Field names came from the published response shape rather than an observed
+payload, which is exactly the R32 setup that has bitten this project four times. Treat
+the first live run as the real test.

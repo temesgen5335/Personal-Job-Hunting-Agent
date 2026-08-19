@@ -147,6 +147,10 @@ class Settings(BaseSettings):
 
     # Aggregator (Indeed/LinkedIn/Glassdoor/JobRight)
     serpapi_key: str = Field("", alias="SERPAPI_KEY")
+    # RapidAPI key for JSearch — LinkedIn/Indeed/Glassdoor behind one endpoint.
+    jsearch_api_key: str = Field("", alias="JSEARCH_API_KEY")
+    # Blank means "search where the profile says you are"; set to override.
+    jsearch_location: str = Field("", alias="JSEARCH_LOCATION")
     apify_token: str = Field("", alias="APIFY_TOKEN")
 
     # Store

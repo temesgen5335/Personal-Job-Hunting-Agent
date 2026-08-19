@@ -58,6 +58,8 @@ def get_with_retry(
     client: httpx.Client,
     url: str,
     *,
+    params: dict | None = None,
+    headers: dict | None = None,
     attempts: int = 3,
     base_delay: float = 0.5,
     max_delay: float = 8.0,
@@ -70,12 +72,17 @@ def get_with_retry(
     so callers keep their existing `except (httpx.HTTPError, ValueError)` handling and
     a dead source still degrades to "skip this adapter" rather than killing the run.
 
+    `params` and `headers` exist because an authenticated source (JSearch sends a
+    RapidAPI key) still has to come through here — R21 forbids calling `client.get`
+    directly, and an adapter that needed headers would otherwise have no legitimate
+    route and would quietly lose its retry/backoff.
+
     `sleep` and `rng` are injectable so tests are instant and deterministic.
     """
     last: Exception | None = None
     for attempt in range(attempts):
         try:
-            resp = client.get(url)
+            resp = client.get(url, params=params, headers=headers)
             if resp.status_code in _RETRY_STATUS and attempt < attempts - 1:
                 sleep(_retry_after(resp) or _backoff(attempt, base_delay, max_delay, rng))
                 continue

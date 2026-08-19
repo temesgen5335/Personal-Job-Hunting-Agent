@@ -51,7 +51,8 @@ def run_matching(
             if result is not None:
                 score, rationale, gaps = result
                 store.upsert_match(
-                    Match(job_id=job["id"], score=score, rationale=f"[LLM] {rationale}", gaps=gaps)
+                    Match(job_id=job["id"], score=score, rationale=f"[LLM] {rationale}",
+                          gaps=gaps, score_source="llm", llm_score=score)
                 )
                 report.llm_reranked += 1
 

@@ -12,6 +12,16 @@ CREATE TABLE IF NOT EXISTS jobs (
     is_remote       INTEGER NOT NULL DEFAULT 0,
     description     TEXT NOT NULL DEFAULT '',
     salary_text     TEXT,
+    -- Parsed from salary_text at ingest. NULL means "could not tell", never "zero" —
+    -- a filter must skip unknowns rather than read them as unpaid.
+    salary_min      REAL,
+    salary_max      REAL,
+    salary_currency TEXT,
+    salary_period   TEXT,           -- hour | day | week | month | year
+    -- Groups the same role seen on several boards. Deliberately NOT the primary key:
+    -- changing that would re-id every stored job and orphan every application, which
+    -- docs/VERSIONING.md classes as a MAJOR. This is additive instead.
+    cluster_key     TEXT,
     apply_method    TEXT NOT NULL DEFAULT 'unknown',
     apply_url       TEXT,
     apply_email     TEXT,
@@ -25,12 +35,20 @@ CREATE TABLE IF NOT EXISTS jobs (
 );
 CREATE INDEX IF NOT EXISTS idx_jobs_source ON jobs(source);
 CREATE INDEX IF NOT EXISTS idx_jobs_fetched ON jobs(fetched_at);
+-- NOTE: the index on cluster_key is created in Store._migrate(), not here. This script
+-- runs against pre-existing stores too, where the column does not exist yet — indexing
+-- it here failed the whole script before the migration could add it.
 
 CREATE TABLE IF NOT EXISTS matches (
     job_id      TEXT NOT NULL REFERENCES jobs(id),
     score       REAL NOT NULL,
     rationale   TEXT NOT NULL DEFAULT '',
     gaps        TEXT NOT NULL DEFAULT '[]',   -- JSON array
+    -- Which scorer produced `score`. Without this, a heuristic re-run silently replaced
+    -- an LLM rerank and nothing recorded that the better number had ever existed.
+    score_source TEXT NOT NULL DEFAULT 'heuristic',   -- heuristic | llm
+    -- The LLM's own score, kept in its own column so a heuristic pass cannot clobber it.
+    llm_score   REAL,
     created_at  TEXT NOT NULL,
     PRIMARY KEY (job_id)
 );

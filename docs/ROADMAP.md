@@ -176,9 +176,9 @@ purge size and assistant turns per hour.
 
 ---
 
-## v3.5.0 — "More jobs, better matched"
+## v3.5.0 — "More jobs, better matched" ✅ SHIPPED 2026-08-19
 
-### 🟠 12. No LinkedIn / Indeed / Glassdoor
+### ✅ 12. No LinkedIn / Indeed / Glassdoor
 
 The single biggest functional gap. `Sources.aggregator` and `Source.aggregator` exist;
 the adapter does not. These are where most postings actually are, and all three are
@@ -199,7 +199,7 @@ value-per-line change on the roadmap.
 **Watch out for:** aggregator results are lower quality and duplicate the direct
 adapters heavily, so ship it *with* item 13.
 
-### 🟠 13. Cross-board deduplication is weak
+### ✅ 13. Cross-board deduplication is weak
 
 The dedup hash is `company + title + location`, and the Telegram parser never sets a
 company — so those postings dedup on the title line alone. Adding an aggregator makes
@@ -215,24 +215,38 @@ source it appeared on.
 **Value:** removes the most visible quality problem in the queue, and "seen on 3 boards"
 is itself a useful ranking signal.
 
-### 🟡 14. Matching is keyword-only, and scores have no provenance
+### 🟡 14. Matching is keyword-only *(provenance ✅ shipped v3.5.0; embeddings deferred)*
 
 `heuristic_score()` is word-boundary keyword matching. It cannot tell that "LLM
 orchestration" and "agentic systems" are the same thing, so a genuinely good posting that
 uses different vocabulary scores zero. Separately, heuristic scores **overwrite** LLM
 scores each run and nothing records which produced a number.
 
-**Best solution:** add a local embedding pass (`sentence-transformers`, ~80 MB, CPU, no
-API cost) as a third signal blended with the keyword and role components — not a
-replacement, because the keyword scorer is explainable and the eval harness is built
-around it. Store `score_source` and keep the LLM score in its own column so a rerank is
-never clobbered.
+**Half shipped in v3.5.0.** `score_source` and a separate `llm_score` column now exist,
+and the store COALESCEs rather than overwrites — so a heuristic re-run can no longer
+erase a rerank that cost real quota.
 
-**Value:** catches the vocabulary-mismatch misses, which are invisible today precisely
-because they score zero and never appear. The existing labeled eval set
-(`matching/evalset.py`, P@5 floor) makes this measurable rather than a guess.
+**The embedding half is deferred, and the original estimate here was wrong.** This
+roadmap said "`sentence-transformers`, ~80 MB". It actually depends on **torch**
+(checked against PyPI: `transformers`, `tokenizers`, `huggingface-hub`, `torch>=2.2`,
+`numpy`, `scikit-learn`, `scipy`), which is multiple gigabytes. That is a serious cost
+to impose on a self-hosted app whose whole install is currently a few tens of megabytes,
+and it would land hardest on the free-tier and ARM VPS deployments this project targets.
 
-### 🟡 15. No salary signal
+Three options, cheapest first, for whoever picks this up:
+1. **BM25 / TF-IDF over the posting corpus, pure Python.** No dependency at all, catches
+   a real share of vocabulary mismatch, and stays explainable — which matters because
+   the existing eval harness is built around explainable components.
+2. **Embeddings through the LLM chain that already exists** (`text-embedding-*` via the
+   OpenAI-compatible backends). No new dependency, costs API calls, and the failover
+   machinery is already written.
+3. **`sentence-transformers` behind an optional extra** (`pip install '.[embed]'`), never
+   a default, so the heavy install is opt-in.
+
+Whichever is chosen, `matching/evalset.py` (P@5 floor) makes the result measurable rather
+than a matter of opinion — that is the part worth keeping from the original plan.
+
+### ✅ 15. No salary signal
 
 `salary_text` is stored but never parsed, filtered, or ranked on. For most people
 compensation is a top-three filter.

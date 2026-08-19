@@ -80,6 +80,10 @@ Two interfaces, one backend:
 | Triage | Done — dismiss/snooze/note per job (triage table, POST /triage, queue count) |
 | Queue parity | Done (Aug 2026) — the number the badge shows and the rows `/jobs` renders are now the same set. `/jobs` passes `max_per_company=None` (the bot keeps its cap) and the page defaults to `within=any`. Verified live: 231 = 231 |
 | Manual ingestion trigger | Done (Aug 2026) — "Pull Jobs" on the Overview calls `POST /ingest`, then polls `/runs/{id}` for per-source progress and reloads. Until this, nothing in any UI could start a pass, and no scheduler is live (see below). Verified live: 8,363 fetched across all 6 adapters, zero errors |
+| Aggregator source | Done (v3.5.0) — JSearch adapter (LinkedIn/Indeed/Glassdoor/ZipRecruiter via RapidAPI). Queries come from `target_roles`; self-gates on key AND queries. Needs `JSEARCH_API_KEY` + `[sources] aggregator = true`. **Built and tested against fixtures; never run against the live API** — no key available |
+| Cross-board clustering | Done (v3.5.0) — `cluster_key` groups the same role across boards WITHOUT touching `dedup_hash`, which is the PK every application references. Dashboard shows "also on N" |
+| Salary | Done (v3.5.0) — parsed to columns at write time, chip in the list, annualised min-salary filter. Unknown pay is KEPT by the filter (most postings state none) |
+| Score provenance | Done (v3.5.0) — `score_source` + `llm_score`; the store COALESCEs so a heuristic re-run cannot erase a rerank. Closes a July 2026 audit gap |
 | Exposure controls | Done (v3.4.0) — `JOBAGENT_REQUIRE_AUTH_READS` gates every GET except `/health` (route-table test enforces it), the API refuses to start with read-auth and no password, per-client rate limits on assistant/ingest/write classes return 429 with Retry-After, and both deployment docs open with the warning |
 | First-run onboarding | Done (v3.3.0) — `make setup` wizard (pure logic in `jobagent.setup_wizard`, merges `.env` key-by-key so nothing hand-tuned is lost), `make demo` seeding a throwaway store, and containers (`Dockerfile`, `compose.yml`, `make docker_up`) |
 | OSS packaging | Done (v3.2.0) — LICENSE, `preferences.example.toml` with a loader fallback, lockfiles committed, SECURITY/CONTRIBUTING/CoC, issue+PR templates, and `tests/test_packaging.py` pinning all of it |
@@ -93,7 +97,7 @@ Two interfaces, one backend:
 | assistant hardening (Phase 5) | **Complete.** 10-case eval set scoring tool *selection*, answer *grounding* and *in-bounds* separately; `scripts/eval_assistant.py` with floors; `scripts/llm_doctor.py` explaining the chain, every model card's provenance, and per-task routing offline. Degraded-path conformance run measured **100% / 100% / 100%** |
 | Profile & preferences | **Editable through the UI.** Identity, background, CV, search preferences, source toggles and the ATS watchlist all persist to a gitignored `data/profile.json` + `data/cv_master.md` overlay (three-layer merge: committed placeholders → legacy `preferences.local.toml` → writable overlay). `/profile` GET+PUT (both auth-gated — PII). Nothing personal is hardcoded; the tree carries placeholders only (R22) |
 | Settings UI | Tabbed: Profile · CV & background · Search & matching · Sources & watchlist · Ingestion · LLM · Telegram · Email. Each tab saves independently against the backend that owns it (`/profile` or `/config`) |
-| Test suite | 617 tests, 42 test files, zero network, injectable fakes throughout |
+| Test suite | 650 tests, 43 test files, zero network, injectable fakes throughout |
 
 ## Assistant cost characteristics (measured Aug 2026)
 
@@ -188,5 +192,5 @@ not-seen-in-60-days would remove 3,417.
 
 - **11,700+** jobs scored in a live run (8,253 fetched in a single pass across 6 adapters)
 - **40** companies in the ATS watchlist (Greenhouse/Lever/Ashby)
-- **617** tests across 42 files — all run offline, no network, no credentials
+- **650** tests across 43 files — all run offline, no network, no credentials
 - **6** LLM providers with automatic failover (3 free, 3 paid)

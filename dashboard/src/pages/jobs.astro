@@ -20,6 +20,7 @@ const page = Math.max(1, parseInt(url.searchParams.get("page") ?? "1", 10) || 1)
 // Repeated `sources=` params (checkbox group) rather than one comma string, so the
 // browser builds the query for free on submit.
 const pickedSources = url.searchParams.getAll("sources").filter(Boolean);
+const minSalary = parseInt(url.searchParams.get("minsal") ?? "0", 10) || 0;
 const PAGE = 25;
 
 const days = within === "24h" ? 1 : within === "3d" ? 3 : within === "7d" ? 7 : 0;
@@ -38,6 +39,7 @@ try {
   rows = await getMatches({
     days, location: remote as "any" | "remote" | "hybrid", q,
     exclude: excludeParam, sources: pickedSources.join(","), limit: FETCH, offset: 0,
+    minSalary,
   });
   sourceInfo = await getSources();
   // The store's own count of strong ∧ untriaged — the number the sidebar badge shows.
@@ -81,6 +83,29 @@ const remoteTag = (j: MatchRow) =>
   j.is_remote ? "remote" : /hybrid/i.test(j.location ?? "") ? "hybrid" : "on-site";
 const metaLine = (j: MatchRow) => `${j.location || "—"} · ${j.source} · ${ago(j)}`;
 
+// Compact pay label. Renders nothing when the pay could not be parsed — a blank is
+// honest, whereas "—" next to a number-shaped column reads as "this job pays nothing".
+const SYM: Record<string, string> = { USD: "$", EUR: "€", GBP: "£", INR: "₹", NGN: "₦" };
+const short = (n: number) => (n >= 1000 ? `${Math.round(n / 1000)}k` : `${Math.round(n)}`);
+const payLabel = (j: MatchRow) => {
+  if (j.salary_min == null && j.salary_max == null) return "";
+  const sym = SYM[j.salary_currency ?? ""] ?? (j.salary_currency ? j.salary_currency + " " : "");
+  const lo = j.salary_min, hi = j.salary_max;
+  const amount = lo != null && hi != null && lo !== hi
+    ? `${sym}${short(lo)}–${short(hi)}`
+    : `${sym}${short((hi ?? lo) as number)}`;
+  return j.salary_period && j.salary_period !== "year" ? `${amount}/${j.salary_period}` : amount;
+};
+
+// How many stored rows share this role across boards. Turning on the aggregator makes
+// the same job arrive from LinkedIn, Indeed and its own ATS; this says so instead of
+// looking like three separate opportunities.
+const clusterCount = new Map<string, number>();
+for (const j of rows) {
+  if (j.cluster_key) clusterCount.set(j.cluster_key, (clusterCount.get(j.cluster_key) ?? 0) + 1);
+}
+const alsoOn = (j: MatchRow) => (j.cluster_key ? (clusterCount.get(j.cluster_key) ?? 1) - 1 : 0);
+
 // Filter chips (each individually removable → link without that param).
 const linkWith = (patch: Record<string, string>) => {
   const p = new URLSearchParams(url.searchParams);
@@ -99,6 +124,10 @@ if (q) chips.push({ label: `“${q}”`, href: linkWith({ q: "" }) });
 if (within !== "any") chips.push({ label: `posted < ${within === "24h" ? "24h" : within.replace("d", " days")}`, href: linkWith({ within: "any" }) });
 if (remote !== "any") chips.push({ label: remote, href: linkWith({ remote: "any" }) });
 if (exclude) chips.push({ label: `exclude ${exclude}`, href: linkWith({ exclude: "" }) });
+// Shown with the caveat, because the filter deliberately keeps unknown-pay rows —
+// without saying so, a user would read the result as "everything here pays 100k+".
+if (minSalary) chips.push({ label: `≥ ${Math.round(minSalary / 1000)}k/yr (or unstated)`,
+                            href: linkWith({ minsal: "" }) });
 if (pickedSources.length) {
   chips.push({ label: `sources: ${pickedSources.join(", ")}`, href: linkWith({ sources: "" }) });
 }
@@ -155,6 +184,12 @@ const queueData = queue.map((j) => ({
             <option value="" selected={exclude === ""}>Exclude…</option>
             <option value="US-only" selected={exclude === "US-only"}>US-only</option>
             <option value="On-site" selected={exclude === "On-site"}>On-site</option>
+          </select>
+          <select name="minsal">
+            <option value="" selected={!minSalary}>Any salary</option>
+            <option value="60000" selected={minSalary === 60000}>&ge; 60k / yr</option>
+            <option value="100000" selected={minSalary === 100000}>&ge; 100k / yr</option>
+            <option value="150000" selected={minSalary === 150000}>&ge; 150k / yr</option>
           </select>
           <button class="btn" type="submit">Apply</button>
         </div>
@@ -274,6 +309,12 @@ const queueData = queue.map((j) => ({
                     <span class:list={["mono", "q-score", scoreClass(j.score)]}>{pctOf(j.score)}</span>
                     <a class="q-title" href={`/jobs/${j.id}`}>{j.title}</a>
                     <span class="muted" style="font-size:13px">{j.company}</span>
+                    {payLabel(j) && <span class="pay mono">{payLabel(j)}</span>}
+                    {alsoOn(j) > 0 && (
+                      <span class="dupe mono" title="the same role is stored from other boards">
+                        also on {alsoOn(j)}
+                      </span>
+                    )}
                     <span class="mono faint" style="font-size:11px;margin-left:auto">{metaLine(j)}</span>
                   </div>
                   <div class="q-why">{j.rationale}</div>
@@ -322,6 +363,8 @@ const queueData = queue.map((j) => ({
                           <a class="r-title" href={`/jobs/${j.id}`}>{j.title}</a>
                           <span class="muted" style="font-size:12.5px">{j.company}</span>
                           <span class="r-tag mono">{remoteTag(j)}</span>
+                          {payLabel(j) && <span class="pay mono">{payLabel(j)}</span>}
+                          {alsoOn(j) > 0 && <span class="dupe mono">also on {alsoOn(j)}</span>}
                         </span>
                         <span class="r-why">{j.rationale}</span>
                         <span class="r-note mono" hidden={!j.triage_note}>↳ {j.triage_note}</span>
@@ -406,6 +449,7 @@ const queueData = queue.map((j) => ({
         localStorage.setItem(FKEY, JSON.stringify({
           q: params.get("q") || "", within: params.get("within") || "any",
           remote: params.get("remote") || "any", exclude: params.get("exclude") || "",
+          minsal: params.get("minsal") || "",
           sources: params.getAll("sources").filter(Boolean),
         }));
       } catch {}
@@ -708,6 +752,11 @@ const queueData = queue.map((j) => ({
   .cl-sample li { font-size: 12.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .cl-s { color: var(--faint); font-size: 11px; margin-right: 6px; }
   .cl-actions { display: flex; gap: 8px; }
+
+  .pay { font-size: 11px; color: var(--good); border: 1px solid rgba(74,222,128,.28);
+         border-radius: 4px; padding: 0 5px; }
+  .dupe { font-size: 10.5px; color: var(--faint); border: 1px solid var(--border);
+          border-radius: 4px; padding: 0 5px; }
 
   .empty { padding: 56px 24px; text-align: center; }
   .empty p { color: var(--muted); font-size: 13px; margin: 8px auto 18px; max-width: 380px; }

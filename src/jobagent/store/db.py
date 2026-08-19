@@ -14,6 +14,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from jobagent.core.schemas import Event, JobPosting, Match
+from jobagent.salary import parse_salary
 
 _SCHEMA = Path(__file__).with_name("schema.sql")
 
@@ -29,9 +30,38 @@ class Store:
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA foreign_keys = ON")
 
+    # Columns added after v1. `CREATE TABLE IF NOT EXISTS` does nothing to a table that
+    # already exists, so a store created before these shipped would keep working right
+    # up until the first query naming one — an error at read time, on the operator's
+    # real data, long after the upgrade. Adding them here makes the upgrade automatic,
+    # which is what keeps these releases MINOR rather than MAJOR (docs/VERSIONING.md).
+    _ADDED_COLUMNS = (
+        ("jobs", "salary_min", "REAL"),
+        ("jobs", "salary_max", "REAL"),
+        ("jobs", "salary_currency", "TEXT"),
+        ("jobs", "salary_period", "TEXT"),
+        ("jobs", "cluster_key", "TEXT"),
+        ("matches", "score_source", "TEXT NOT NULL DEFAULT 'heuristic'"),
+        ("matches", "llm_score", "REAL"),
+    )
+
     def init_schema(self) -> None:
         self.conn.executescript(_SCHEMA.read_text())
+        self._migrate()
         self.conn.commit()
+
+    def _migrate(self) -> None:
+        """Add any column missing from an older store. Idempotent and additive only —
+        nothing here drops or rewrites data, so it is safe to run on every open."""
+        for table, column, coltype in self._ADDED_COLUMNS:
+            existing = {r["name"] for r in
+                        self.conn.execute(f"PRAGMA table_info({table})")}
+            if not existing:
+                continue                      # table not created yet; schema.sql owns it
+            if column not in existing:
+                self.conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {coltype}")
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_jobs_cluster ON jobs(cluster_key)")
 
     # --- jobs -------------------------------------------------------------
     def upsert_job(self, job: JobPosting) -> str:
@@ -42,19 +72,29 @@ class Store:
         """
         job_id = job.dedup_hash()
         now = _now()
+        # Parsed once at write time rather than on every query. `salary_text` is kept
+        # verbatim regardless — the parse is a convenience, not a replacement, and an
+        # unparseable string must still be readable by a human.
+        pay = parse_salary(job.salary_text)
         row = self.conn.execute("SELECT first_seen_at FROM jobs WHERE id=?", (job_id,)).fetchone()
         first_seen = row["first_seen_at"] if row else now
         self.conn.execute(
             """
             INSERT INTO jobs (id, source, source_job_id, title, company, location,
-                is_remote, description, salary_text, apply_method, apply_url,
+                is_remote, description, salary_text, salary_min, salary_max,
+                salary_currency, salary_period, cluster_key, apply_method, apply_url,
                 apply_email, url, posted_at, fetched_at, tags, raw,
                 first_seen_at, last_seen_at)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(id) DO UPDATE SET
                 last_seen_at=excluded.last_seen_at,
                 description=excluded.description,
                 salary_text=excluded.salary_text,
+                salary_min=excluded.salary_min,
+                salary_max=excluded.salary_max,
+                salary_currency=excluded.salary_currency,
+                salary_period=excluded.salary_period,
+                cluster_key=excluded.cluster_key,
                 apply_method=excluded.apply_method,
                 apply_url=excluded.apply_url,
                 apply_email=excluded.apply_email,
@@ -65,6 +105,7 @@ class Store:
             (
                 job_id, _ev(job.source), job.source_job_id, job.title, job.company,
                 job.location, int(job.is_remote), job.description, job.salary_text,
+                pay.min, pay.max, pay.currency, pay.period, job.cluster_key(),
                 _ev(job.apply_method), job.apply_url, job.apply_email, job.url,
                 job.posted_at.isoformat() if job.posted_at else None,
                 job.fetched_at.isoformat(), json.dumps(job.tags), json.dumps(job.raw),
@@ -423,13 +464,21 @@ class Store:
     def upsert_match(self, match: Match) -> None:
         self.conn.execute(
             """
-            INSERT INTO matches (job_id, score, rationale, gaps, created_at)
-            VALUES (?,?,?,?,?)
+            INSERT INTO matches (job_id, score, rationale, gaps, score_source,
+                                 llm_score, created_at)
+            VALUES (?,?,?,?,?,?,?)
             ON CONFLICT(job_id) DO UPDATE SET
                 score=excluded.score, rationale=excluded.rationale,
-                gaps=excluded.gaps, created_at=excluded.created_at
+                gaps=excluded.gaps, score_source=excluded.score_source,
+                -- COALESCE, not excluded: a heuristic pass carries llm_score=NULL, and
+                -- overwriting with it would erase a rerank that cost real quota. An LLM
+                -- pass supplies a value and wins. This is the "heuristic scores overwrite
+                -- LLM scores each run, no provenance kept" gap from the July 2026 audit.
+                llm_score=COALESCE(excluded.llm_score, matches.llm_score),
+                created_at=excluded.created_at
             """,
-            (match.job_id, match.score, match.rationale, json.dumps(match.gaps), _now()),
+            (match.job_id, match.score, match.rationale, json.dumps(match.gaps),
+             match.score_source, match.llm_score, _now()),
         )
         self.conn.commit()
 
@@ -457,6 +506,7 @@ class Store:
         *,
         min_score: float = 0.0,
         max_score: float | None = None,
+        min_salary: float | None = None,
         max_age_days: int | None = None,
         last_seen_days: int | None = None,
         location: str = "any",
@@ -491,6 +541,20 @@ class Store:
             # Strictly below: "clean up everything under 70%" must not eat a 0.70 row.
             where.append(f"(m.score < ?{null_ok})")
             params.append(max_score)
+
+        if min_salary:
+            # Compares ANNUALISED pay, so an hourly rate and a salary are judged on the
+            # same scale — "$60/hour" is not below a "$100k" floor.
+            #
+            # Rows whose pay could not be parsed are KEPT. Most postings state no salary
+            # at all, so dropping unknowns would hide the majority of the market behind
+            # a filter the operator thinks is about money. A salary floor that silently
+            # removes every posting without a number is worse than no filter.
+            annualised = ("CASE j.salary_period WHEN 'hour' THEN 2080 WHEN 'day' THEN 260 "
+                          "WHEN 'week' THEN 52 WHEN 'month' THEN 12 ELSE 1 END")
+            where.append(f"(j.salary_max IS NULL OR j.salary_period IS NULL "
+                         f"OR (j.salary_max * {annualised}) >= ?)")
+            params.append(min_salary)
 
         if max_age_days:
             cutoff = (datetime.now(timezone.utc) - timedelta(days=max_age_days)).isoformat()
@@ -580,6 +644,7 @@ class Store:
         hide_triaged: bool = False,
         offset: int = 0,
         max_score: float | None = None,
+        min_salary: float | None = None,
         last_seen_days: int | None = None,
         companies: list[str] | None = None,
         triage_states: list[str] | None = None,
@@ -598,7 +663,8 @@ class Store:
         this lists and what a cleanup deletes can never mean different things."""
         self._ensure_triage()
         where, params = self._row_predicates(
-            min_score=min_score, max_score=max_score, max_age_days=max_age_days,
+            min_score=min_score, max_score=max_score, min_salary=min_salary,
+            max_age_days=max_age_days,
             last_seen_days=last_seen_days, location=location, keywords=keywords,
             exclude_locations=exclude_locations, include_locations=include_locations,
             sources=sources, companies=companies, triage_states=triage_states,
@@ -607,7 +673,7 @@ class Store:
         # min_score=0.0 adds no predicate, but this query must still only return
         # SCORED rows (it INNER JOINs matches); purge_jobs LEFT JOINs instead.
         sql = (
-            "SELECT j.*, m.score, m.rationale, m.gaps, "
+            "SELECT j.*, m.score, m.rationale, m.gaps, m.score_source, m.llm_score, "
             # Lapsed snoozes read as live directly in SQL so ordering and the
             # dashboard queue agree with get_triage()'s view of the world.
             "CASE WHEN t.state='snoozed' AND COALESCE(t.snoozed_until,'') <= ? THEN NULL "
@@ -627,7 +693,8 @@ class Store:
 
     def get_match(self, job_id: str) -> dict | None:
         row = self.conn.execute(
-            "SELECT score, rationale, gaps FROM matches WHERE job_id=?", (job_id,)
+            "SELECT score, rationale, gaps, score_source, llm_score "
+            "FROM matches WHERE job_id=?", (job_id,)
         ).fetchone()
         return dict(row) if row else None
 

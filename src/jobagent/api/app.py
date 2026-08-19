@@ -401,13 +401,16 @@ def create_app(settings=None, profile=None, llm: Any = _UNSET, cv_master: str | 
     @app.get("/jobs", dependencies=read_auth)
     def jobs(days: int = 0, location: str = "any", q: str | None = None,
              exclude: str | None = None, include: str | None = None,
-             sources: str | None = None, limit: int = 50, offset: int = 0):
+             sources: str | None = None, limit: int = 50, offset: int = 0,
+             min_salary: float | None = None):
         split = lambda v: [x.strip() for x in (v or "").split(",") if x.strip()]  # noqa: E731
         flt = MatchFilter(
             max_age_days=days or None, location=location,
             keywords=[w for w in (q or "").replace(",", " ").split() if w],
             exclude_locations=split(exclude), include_locations=split(include),
             sources=split(sources),
+            # Annualised comparison, and unknown pay is kept — see _row_predicates.
+            min_salary=min_salary,
             # The dashboard renders dismissed/snoozed rows with an Undo control, so
             # unlike every other consumer it wants them in the result set.
             hide_triaged=False,

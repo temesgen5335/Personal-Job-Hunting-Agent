@@ -12,6 +12,48 @@ scoped in [docs/VERSIONING.md](docs/VERSIONING.md) — which is worth reading, b
 Planned work is tracked in [docs/ROADMAP.md](docs/ROADMAP.md), grouped by the release
 that will carry it.
 
+## [3.5.0] — 2026-08-19
+
+*Theme: more of the market, and less of it duplicated.*
+
+### Added
+- **JSearch aggregator adapter** — LinkedIn, Indeed, Glassdoor and ZipRecruiter behind
+  one API. An aggregator rather than a scraper: those boards are aggressively anti-bot
+  with no public API, so scraping them would be fragile and against both their terms and
+  R7. Queries come from the profile's own `target_roles`, and the adapter self-gates on
+  having *both* a key and something to search for — an empty query would return an
+  arbitrary slice of every job on the internet. Needs `JSEARCH_API_KEY` and
+  `[sources] aggregator = true`.
+- **Cross-board clustering** — a `cluster_key` alongside the primary key groups the same
+  role seen on several boards ("Senior Backend Engineer" / "…(Remote)" / "…— Berlin" at
+  Acme Inc./ACME/Acme Technologies are one cluster). The dashboard shows "also on N".
+  Deliberately **not** a change to `dedup_hash`: that is the primary key every
+  application and triage row references, and redefining it would re-id the store and
+  orphan the operator's history — a MAJOR by this project's own policy.
+- **Salary parsing and filtering** — `salary_text` has been stored since v1 and never
+  read. It is now parsed into `salary_min/max/currency/period` at write time, shown as a
+  chip, and filterable by an annualised floor, so an hourly rate and a salary are judged
+  on the same scale. The parser refuses to guess: equity percentages, team sizes and
+  "5+ years of experience" return nothing rather than a wrong number.
+- **Score provenance** — `score_source` and a separate `llm_score` column. The store
+  COALESCEs rather than overwrites, so a heuristic re-run can no longer erase a rerank
+  that cost real quota. This closes a gap open since the July 2026 audit.
+- `get_with_retry` accepts `params` and `headers`, so an authenticated source still goes
+  through the shared retry/backoff instead of calling `client.get` directly (R21).
+
+### Changed
+- Store columns are added automatically on open (`Store._migrate`), so upgrading an
+  existing store needs no manual step — which is what keeps this release MINOR.
+
+### Notes
+- A minimum-salary filter deliberately **keeps** postings whose pay could not be parsed.
+  Most postings state no salary, so dropping unknowns would hide the majority of the
+  market behind a filter the operator thinks is about money. The active-filter chip says
+  "(or unstated)" so the result is never read as "everything here pays this much".
+- Embedding-assisted matching is **deferred**, and the roadmap's cost estimate for it was
+  wrong: `sentence-transformers` pulls `torch`, not "~80 MB". See ROADMAP item 14 for
+  three lighter alternatives.
+
 ## [3.4.1] — 2026-08-19
 
 ### Fixed
@@ -210,7 +252,8 @@ no longer tracked by git.
   Telegram bot, Tier-1 email applications, Tier-2 ATS form-fill, and VPS deployment
   units.
 
-[Unreleased]: https://github.com/temesgen5335/personalAgent/compare/v3.4.1...HEAD
+[Unreleased]: https://github.com/temesgen5335/personalAgent/compare/v3.5.0...HEAD
+[3.5.0]: https://github.com/temesgen5335/personalAgent/compare/v3.4.1...v3.5.0
 [3.4.1]: https://github.com/temesgen5335/personalAgent/compare/v3.4.0...v3.4.1
 [3.4.0]: https://github.com/temesgen5335/personalAgent/compare/v3.3.0...v3.4.0
 [3.3.0]: https://github.com/temesgen5335/personalAgent/compare/v3.2.0...v3.3.0
