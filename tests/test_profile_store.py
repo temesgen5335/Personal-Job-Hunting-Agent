@@ -15,6 +15,7 @@ import json
 import pytest
 
 from jobagent.preferences import (
+    EXAMPLE_PATH,
     Profile,
     load_cv_master,
     load_overlay,
@@ -126,9 +127,12 @@ def test_overlay_beats_the_legacy_local_toml(tmp_path):
 
 
 def test_a_clone_with_no_overlay_still_yields_a_usable_profile(tmp_path):
-    # The REAL committed base with no overlay and no local.toml — a fresh clone. Pinned
-    # explicitly (not the bare call) so the developer's identity overlay cannot leak in.
-    prefs = load_preferences(path="config/preferences.toml",
+    # The committed base is the TEMPLATE since v3.2.0 — `preferences.toml` is gitignored
+    # and absent from a clone. Naming it here passed only by coincidence: it equals
+    # DEFAULT_PATH, so the loader's fallback quietly supplied the template anyway. A test
+    # that passes for a reason other than the one in its comment is a trap for the next
+    # reader, so it now names what it actually means.
+    prefs = load_preferences(path=EXAMPLE_PATH,
                              local_path=str(tmp_path / "none.toml"),
                              overlay_path=str(tmp_path / "none.json"))
     assert isinstance(prefs.profile, Profile)

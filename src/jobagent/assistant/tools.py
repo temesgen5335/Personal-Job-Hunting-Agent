@@ -196,9 +196,18 @@ def build_tools(*, store, settings, links, index=None) -> list[Registration]:
         lines = []
         for f in MANAGED_FIELDS:
             value = getattr(settings, f, None)
-            lines.append(f"{f} = " + ("(set)" if f in SECRET_FIELDS and value
-                                      else "(unset)" if f in SECRET_FIELDS
-                                      else repr(value)))
+            if f in SECRET_FIELDS:
+                shown = "(set)" if value else "(unset)"
+            elif value is None or value == "":
+                # NOT repr(None). Integer settings coerce a blank env var to None
+                # (telegram_chat_id, telegram_api_id), so an unconfigured install
+                # rendered "telegram_chat_id = None" — which a model reports as a fact
+                # or invents around (R32). Found by CI, where no .env exists; it could
+                # not fail on a developer machine that has those values set.
+                shown = "(unset)"
+            else:
+                shown = repr(value)
+            lines.append(f"{f} = {shown}")
         return "\n".join(lines)
 
     def triage(args: dict) -> str:

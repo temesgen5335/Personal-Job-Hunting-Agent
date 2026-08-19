@@ -170,7 +170,9 @@ def test_the_committed_config_still_carries_no_real_identity(client):
     import re
     client.put("/profile", json={"profile": {"name": "Ada Lovelace",
                                               "email": "ada@example.dev"}})
-    tracked = pathlib.Path("config/preferences.toml").read_text()
+    # `preferences.toml` is gitignored since v3.2.0; the committed one is the
+    # template, and that is what must never acquire an identity.
+    tracked = pathlib.Path("config/preferences.example.toml").read_text()
     assert "Ada Lovelace" not in tracked and "ada@example.dev" not in tracked
     emails = re.findall(r"[\w.+-]+@[\w-]+\.[\w.]+", tracked)
     assert emails == ["you@example.com"], f"non-placeholder email leaked: {emails}"

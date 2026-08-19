@@ -129,8 +129,8 @@ Full architecture + module map: `.claude/agent.md`
 
 ## 7. Configuration
 
-- `config/preferences.toml` — target roles, skills, watchlist, source toggles (committed, placeholders for identity).
-- `config/preferences.local.toml` — your name/email/phone/cv_path (gitignored, overlaid at load).
+- `config/preferences.example.toml` — the committed template: target roles, skills, watchlist, source toggles. Copy it to `config/preferences.toml` (gitignored) and make it yours, or edit everything in Settings.
+- `data/profile.json` — the writable overlay Settings edits (gitignored). Wins over both files above.
 - `.env` — secrets (API keys, Telegram tokens, SMTP). See `.env.example`.
 - Dashboard Settings page — auth-gated UI for LLM/Telegram/SMTP config (encrypted at rest).
 - `JOBAGENT_MASTER_KEY` — Fernet key for the secret store. Generate with `python scripts/genkey.py`.

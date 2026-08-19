@@ -534,7 +534,8 @@ To rename, change the one constant; nothing else hardcodes it (asserted by test)
 | v3.1.0 | `06054ce` | Single-source versioning + CHANGELOG + VERSIONING policy; OSS review → docs/ROADMAP.md; 576 tests |
 | v3.2.0 | `6d14e3f`, `24eeaa3` | LICENSE, neutral profile template, lockfiles, community docs, identity guard; 586 tests |
 | v3.3.0 | `a13a3b8` | `make setup` wizard, `make demo` seeder, Docker + compose; 604 tests |
-| v3.4.0 | (this) | Opt-in read auth + route-table net, per-class rate limits, exposure warnings in both deploy docs; 617 tests |
+| v3.4.0 | `d0faa50` | Opt-in read auth + route-table net, per-class rate limits, exposure warnings in both deploy docs; 617 tests |
+| v3.4.1 | (this) | Fix CI red since v3.2.0: `None` in model-visible config, three tests + two docs reading an untracked file, two guards that never fired |
 
 ---
 
@@ -831,3 +832,45 @@ went out to six job boards. It did not fail; it timed out after two minutes, whi
 as a slow test rather than an R17 violation. Now it exercises the `write` class through
 `/triage` (purely local) and stubs `_ingest_task` for the ingest class. **A hanging test
 deserves the same suspicion as a failing one** — offline suites do not hang.
+
+## CI was the only place the truth was visible — again (Aug 2026)
+
+v3.2.0 untracked `config/preferences.toml`. Six tests broke, and **every one of them
+passed locally**, because the file still exists on the author's machine — gitignored, not
+deleted. The suite was green here and red on `main` for three releases.
+
+The failures were four distinct shapes of one mistake:
+
+1. **A real bug, found by the environment rather than the test.** `current_config`
+   rendered `telegram_chat_id = None` into model-visible text — integer settings coerce a
+   blank env var to `None`, so any install without a `.env` got a literal `None`. This is
+   exactly the R32 class the test beside it was written to catch, and it was invisible
+   locally because the developer's `.env` populates those fields. **The guard was
+   correct; the environment was hiding its input.**
+2. Three tests read a file that no longer exists in a clone.
+3. Two entry-point docs cited it as a committed path.
+4. `test_preferences_load` asserted the author's roles and curated watchlist — which only
+   the gitignored file supplies. **This is the third time that one test has been broken
+   by the same mistake**: first the real name (from the identity overlay), then the roles
+   and watchlist (from `preferences.toml`). It no longer hardcodes values at all; it
+   compares what loads against what the committed template declares, so editing the
+   template updates both sides.
+
+**Two guards that did not guard.** The hermeticity check only matched a bare
+`load_preferences()`, so `load_preferences(local_path=...)` — which pins the overlay and
+leaves the *base* at its default — sailed through. And when I broadened it, the new check
+was `"path=" in args`, which matches the `path=` **inside** `local_path=` and
+`overlay_path=` — so the fix passed every offender it was written to catch. Caught only
+by planting a deliberate violation and confirming the guard fired. **A guard that has
+never been shown to fail is a guard you have not tested**, and this is the second time
+that has been the lesson (the Phase-2 audit-ordering test was the first).
+
+Also found: one test passed for a reason other than the one in its comment. It named
+`config/preferences.toml` to mean "the committed base", and only worked because that
+string happens to equal `DEFAULT_PATH`, so the loader's fallback quietly supplied the
+template. A test that passes coincidentally is a trap for whoever reads it next.
+
+**The standing lesson, now paid for twice: run the suite the way CI does before
+believing it.** `env -i` is not enough — it strips the environment but not the
+filesystem. The real check is to move the gitignored files out of the way and run again,
+which takes ten seconds and would have caught all six.

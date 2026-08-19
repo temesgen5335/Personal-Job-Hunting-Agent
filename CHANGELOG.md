@@ -12,6 +12,30 @@ scoped in [docs/VERSIONING.md](docs/VERSIONING.md) — which is worth reading, b
 Planned work is tracked in [docs/ROADMAP.md](docs/ROADMAP.md), grouped by the release
 that will carry it.
 
+## [3.4.1] — 2026-08-19
+
+### Fixed
+- **CI was red on `main` since v3.2.0.** Untracking `config/preferences.toml` broke six
+  tests that could only fail where the file is absent — every one of them passed on a
+  developer machine, which is where they were run.
+  - `current_config` rendered `telegram_chat_id = None` into model-visible text. Integer
+    settings coerce a blank env var to `None`, so any install without those values got a
+    literal `None` — the R32 failure the guard beside it exists to catch, invisible on a
+    machine with a populated `.env`.
+  - Three tests read `config/preferences.toml`, which no longer exists in a clone.
+  - `CLAUDE.md` and `AGENTS.md` cited it as a committed path.
+  - `test_preferences_load` asserted the author's roles and ATS watchlist, which only
+    the gitignored file supplies. It now compares against the committed template, so it
+    cannot drift.
+- `test_a_clone_with_no_overlay_still_yields_a_usable_profile` passed by coincidence —
+  the path it named happened to equal `DEFAULT_PATH`, so the loader's fallback supplied
+  the template regardless. It now names the template.
+- The hermeticity guard only caught a bare `load_preferences()`, so pinning `local_path`
+  while leaving the base at its default sailed through — the same bug one argument along.
+  It now requires the base to be named, and its own `"path=" in args` check matched the
+  substring inside `local_path=`, which made the first fix pass every offender it was
+  written to catch.
+
 ## [3.4.0] — 2026-08-18
 
 *Theme: the deployment the docs teach is no longer the one that leaks.*
@@ -186,7 +210,8 @@ no longer tracked by git.
   Telegram bot, Tier-1 email applications, Tier-2 ATS form-fill, and VPS deployment
   units.
 
-[Unreleased]: https://github.com/temesgen5335/personalAgent/compare/v3.4.0...HEAD
+[Unreleased]: https://github.com/temesgen5335/personalAgent/compare/v3.4.1...HEAD
+[3.4.1]: https://github.com/temesgen5335/personalAgent/compare/v3.4.0...v3.4.1
 [3.4.0]: https://github.com/temesgen5335/personalAgent/compare/v3.3.0...v3.4.0
 [3.3.0]: https://github.com/temesgen5335/personalAgent/compare/v3.2.0...v3.3.0
 [3.2.0]: https://github.com/temesgen5335/personalAgent/compare/v3.1.0...v3.2.0
