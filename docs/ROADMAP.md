@@ -18,7 +18,7 @@ Status legend: 🔴 blocking · 🟠 high · 🟡 medium · 🟢 nice-to-have
 *The theme: a stranger can legally use it, and gets their own job search rather than
 someone else's.* Nothing here is hard; all of it is blocking.
 
-### 🔴 1. There is no LICENSE file
+### ✅ 1. There is no LICENSE file
 
 `pyproject.toml` declares `license = { text = "MIT" }`. No `LICENSE` exists. Without the
 file, default copyright applies — **all rights reserved** — so nobody may legally fork,
@@ -30,7 +30,7 @@ modify, or run it, whatever the README implies.
 
 **Value:** the difference between "open source" and "source visible". Ten minutes.
 
-### 🔴 2. `config/preferences.toml` is the author's job search, not a template
+### ✅ 2. `config/preferences.toml` is the author's job search, not a template
 
 Identity fields are placeholders, but everything that drives matching is personal:
 `location = "Ethiopia (Addis Ababa)"`, `timezone = "EAT / UTC+3"`, 9 target roles,
@@ -53,7 +53,7 @@ is true only of contact details.
 **Value:** removes the single biggest "this doesn't work" experience. Every match score
 a new user sees is wrong until this is fixed, and nothing currently tells them why.
 
-### 🔴 3. No lockfiles — installs are not reproducible
+### ✅ 3. No lockfiles — installs are not reproducible
 
 No `uv.lock`, no `requirements.txt`, and `dashboard/package-lock.json` is *explicitly
 gitignored*. Both dependency trees resolve to whatever is newest at install time, so a
@@ -64,7 +64,7 @@ commit it; pin the CI install to the lockfiles.
 
 **Value:** reproducible builds and actionable bug reports. This is table stakes.
 
-### 🟠 4. The README is a release behind
+### ✅ 4. The README is a release behind
 
 Claimed 515 tests (now 576, fixed in 3.1.0). Tells you to put your CV in
 `config/cv_master.md`; it is `data/cv_master.md`. Describes file-based profile editing as
@@ -77,7 +77,7 @@ claims about the suite matches the collected count.
 **Value:** the README is the only thing most visitors read. Stale instructions read as
 an abandoned project.
 
-### 🟠 5. Missing community and safety scaffolding
+### ✅ 5. Missing community and safety scaffolding
 
 No `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`, issue templates, or PR
 template. `SECURITY.md` matters more than usual here: the software holds an operator's
@@ -90,7 +90,7 @@ reads unauthenticated by default, and a private disclosure address.
 
 **Value:** turns a personal repo into one a stranger can contribute to.
 
-### 🟡 6. `.gitignore` protects the CV narrowly
+### ✅ 6. `.gitignore` protects the CV narrowly
 
 `docs/*CV*.pdf` and `docs/*cv*.pdf` cover exactly two spellings in exactly one directory.
 `Cv`, `resume.pdf`, a `.docx`, or a CV anywhere else is not ignored. The git history is
