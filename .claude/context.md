@@ -80,6 +80,8 @@ Two interfaces, one backend:
 | Triage | Done — dismiss/snooze/note per job (triage table, POST /triage, queue count) |
 | Queue parity | Done (Aug 2026) — the number the badge shows and the rows `/jobs` renders are now the same set. `/jobs` passes `max_per_company=None` (the bot keeps its cap) and the page defaults to `within=any`. Verified live: 231 = 231 |
 | Manual ingestion trigger | Done (Aug 2026) — "Pull Jobs" on the Overview calls `POST /ingest`, then polls `/runs/{id}` for per-source progress and reloads. Until this, nothing in any UI could start a pass, and no scheduler is live (see below). Verified live: 8,363 fetched across all 6 adapters, zero errors |
+| Standalone LLM service | Done (v3.7.0) — `agentkit.llm.LLMService`: chain + breaker + trace ledger + concurrent pre-flight behind one duck-typed object. Verified usable with `jobagent` absent. `make doctor HEALTH=1` |
+| Provider coverage (live) | groq · cerebras · gemini · github · openrouter · qwen · custom · openai · anthropic. **Verified live Aug 2026**: groq `openai/gpt-oss-20b` 0.84s, openrouter `gpt-oss-20b:free` 4.16s, gemini `gemini-flash-latest` 9.06s. Both previous defaults were dead |
 | Inbox outcomes | Done (v3.6.0) — optional IMAP scan PROPOSES interview/offer/rejected for one-tap confirmation; never applies one. Obeys `ALLOWED_TRANSITIONS`, audited with `source: "inbox"`. `make inbox`. **Classifier and attribution tested against fixtures; never run against a real mailbox** |
 | Bot handler coverage | Done (v3.6.0) — fake `Update`/`Context` harness in `tests/test_bot_handlers.py`. Closes the gap that let an undefined `_llm()` ship in `/apply`. Covers the owner gate, every command, malformed args, and a no-`None` check |
 | LLM usage accounting | Done (v3.6.0) — calls/failures/estimated tokens per provider on the run ledger. Failures counted, because a dead first backend is invisible when the answer still arrives from the next |
@@ -100,7 +102,7 @@ Two interfaces, one backend:
 | assistant hardening (Phase 5) | **Complete.** 10-case eval set scoring tool *selection*, answer *grounding* and *in-bounds* separately; `scripts/eval_assistant.py` with floors; `scripts/llm_doctor.py` explaining the chain, every model card's provenance, and per-task routing offline. Degraded-path conformance run measured **100% / 100% / 100%** |
 | Profile & preferences | **Editable through the UI.** Identity, background, CV, search preferences, source toggles and the ATS watchlist all persist to a gitignored `data/profile.json` + `data/cv_master.md` overlay (three-layer merge: committed placeholders → legacy `preferences.local.toml` → writable overlay). `/profile` GET+PUT (both auth-gated — PII). Nothing personal is hardcoded; the tree carries placeholders only (R22) |
 | Settings UI | Tabbed: Profile · CV & background · Search & matching · Sources & watchlist · Ingestion · LLM · Telegram · Email. Each tab saves independently against the backend that owns it (`/profile` or `/config`) |
-| Test suite | 697 tests, 45 test files, zero network, injectable fakes throughout |
+| Test suite | 726 tests, 46 test files, zero network, injectable fakes throughout |
 
 ## Assistant cost characteristics (measured Aug 2026)
 
@@ -198,5 +200,5 @@ not-seen-in-60-days would remove 3,417.
 
 - **11,700+** jobs scored in a live run (8,253 fetched in a single pass across 6 adapters)
 - **40** companies in the ATS watchlist (Greenhouse/Lever/Ashby)
-- **697** tests across 45 files — all run offline, no network, no credentials
+- **726** tests across 46 files — all run offline, no network, no credentials
 - **6** LLM providers with automatic failover (3 free, 3 paid)

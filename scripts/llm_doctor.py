@@ -137,6 +137,9 @@ def probe(report) -> None:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
+    ap.add_argument("--health", action="store_true",
+                    help="concurrent pre-flight: one small live call per backend, "
+                         "then a health table (fast — seconds, not minutes)")
     ap.add_argument("--probe", action="store_true",
                     help="make one tiny live call per backend (spends quota)")
     ap.add_argument("--task", default="", help="explain routing for one task only")
@@ -152,6 +155,19 @@ def main() -> int:
     show_chain(report)
     show_routing(report, args.task)
     show_budgets()
+    if args.health:
+        # Concurrent and cheap. The sequential --probe below is the DEEP check (it also
+        # sends a realistically-sized request); this one answers "which of my keys work
+        # right now" in the time of the slowest single provider rather than the sum.
+        from agentkit.llm.ledger import Ledger
+        from agentkit.llm.probe import probe_all
+
+        rule("pre-flight (concurrent)")
+        ledger = Ledger()
+        print(probe_all(report.backends, ledger=ledger, timeout_s=30).render())
+        rule("provider health")
+        print(ledger.render())
+
     if args.probe:
         probe(report)
 

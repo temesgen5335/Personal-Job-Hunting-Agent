@@ -38,12 +38,18 @@ class ProviderSpec:
 # Every provider the harness can speak to. All the OpenAI-compatible ones share one
 # backend — the only differences are the base URL and where the credentials live.
 DEFAULT_PROVIDERS: tuple[ProviderSpec, ...] = (
+    # Verified live Aug 2026 against the account's own /models list. The previous
+    # default, llama-3.3-70b-versatile, had been withdrawn from Groq's catalogue and
+    # 404'd on every call — the third time a pinned slug has died here.
     ProviderSpec("groq", "groq_api_key", "groq_model",
                  "https://api.groq.com/openai/v1",
-                 default_model="llama-3.3-70b-versatile"),
+                 default_model="openai/gpt-oss-20b"),
+    # A "-latest" alias rather than a pinned version: gemini-2.0-flash was retired and
+    # took the whole provider down with it. An alias survives a rotation by design,
+    # which is worth more here than pinning a known quantity.
     ProviderSpec("gemini", "gemini_api_key", "gemini_model",
                  "https://generativelanguage.googleapis.com/v1beta/openai/",
-                 default_model="gemini-2.0-flash"),
+                 default_model="gemini-flash-latest"),
     ProviderSpec("openai", "openai_api_key", "openai_model",
                  None, default_model="gpt-4o-mini"),
     ProviderSpec("anthropic", "anthropic_api_key", "anthropic_model",
@@ -56,13 +62,22 @@ DEFAULT_PROVIDERS: tuple[ProviderSpec, ...] = (
                  # :free slugs are withdrawn without notice — the previous default
                  # started 404ing. Verified live Aug 2026.
                  default_model="openai/gpt-oss-20b:free"),
+    ProviderSpec("cerebras", "cerebras_api_key", "cerebras_model",
+                 "https://api.cerebras.ai/v1",
+                 default_model="llama-3.3-70b"),
+    # GitHub Models: free with a GitHub account, OpenAI-compatible, fronts several
+    # vendors. The credential is a PAT with the `models:read` scope, not a vendor key.
+    ProviderSpec("github", "github_models_token", "github_models_model",
+                 "https://models.github.ai/inference",
+                 default_model="openai/gpt-4o-mini"),
     ProviderSpec("custom", "custom_llm_api_key", "custom_llm_model",
                  None, base_url_field="custom_llm_base_url", requires_key=False),
 )
 
 # Tried in this order after the configured primary. Free and fast first, so a paid key
 # is a deliberate escalation rather than a surprise on the bill.
-DEFAULT_ORDER = ("groq", "gemini", "openrouter", "qwen", "custom", "openai", "anthropic")
+DEFAULT_ORDER = ("groq", "cerebras", "gemini", "github", "openrouter", "qwen",
+                 "custom", "openai", "anthropic")
 
 
 @dataclass

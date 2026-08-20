@@ -26,6 +26,8 @@ _PROVIDERS = {
     "openrouter": {"base_url": "https://openrouter.ai/api/v1", "kind": "openai"},
     "openai": {"base_url": None, "kind": "openai"},
     "gemini": {"base_url": "https://generativelanguage.googleapis.com/v1beta/openai/", "kind": "openai"},
+    "cerebras": {"base_url": "https://api.cerebras.ai/v1", "kind": "openai"},
+    "github": {"base_url": "https://models.github.ai/inference", "kind": "openai"},
     "anthropic": {"kind": "anthropic"},
 }
 # Backups are tried in this order (free/fast first), after the primary.

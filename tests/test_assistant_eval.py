@@ -246,7 +246,15 @@ def test_llm_doctor_runs_offline_and_makes_no_calls(monkeypatch, capsys):
 
     out = capsys.readouterr().out
     assert "chain" in out and "routing" in out
-    assert "groq/llama-3.3-70b-versatile" in out
+    # Asserts the CONFIGURED model appears, not a hardcoded slug. The previous version
+    # named groq/llama-3.3-70b-versatile, which Groq later withdrew — so the test failed
+    # for a reason unrelated to the doctor, and the fix was to change the test rather
+    # than anything it covers. A slug is data that expires; the property is that the
+    # doctor names whatever model the chain is actually going to call.
+    from agentkit.llm.chain import DEFAULT_PROVIDERS
+
+    groq_default = next(p.default_model for p in DEFAULT_PROVIDERS if p.name == "groq")
+    assert f"groq/{groq_default}" in out
     # Every task shape this system uses must be explained, not just the chain.
     for task in ("scoring", "fit_check", "assistant_answer", "assistant_action"):
         assert task in out

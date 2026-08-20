@@ -76,8 +76,8 @@ run_backend: ## API only (uvicorn on $(API_PORT))
 run_bot: ## telegram bot only (long-polling)
 	$(PY) scripts/run_bot.py
 
-doctor: ## explain the LLM chain, model cards, and routing per task (offline)
-	@$(PY) scripts/llm_doctor.py $(if $(PROBE),--probe)
+doctor: ## LLM chain, model cards, routing (offline; HEALTH=1 probes, PROBE=1 deep-probes)
+	@$(PY) scripts/llm_doctor.py $(if $(HEALTH),--health) $(if $(PROBE),--probe)
 
 eval_assistant: ## run the assistant eval set (spends LLM quota)
 	@$(PY) scripts/eval_assistant.py $(if $(WEAK),--weak) --floors
@@ -100,5 +100,5 @@ inbox: ## scan the applying mailbox for outcomes (proposes only, never applies)
 pipeline: ## one ingest → match pass, no Telegram push
 	$(PY) scripts/pipeline.py --no-send
 
-test: ## offline suite (697 tests, no credentials)
+test: ## offline suite (726 tests, no credentials)
 	$(PY) -m pytest tests/ -q

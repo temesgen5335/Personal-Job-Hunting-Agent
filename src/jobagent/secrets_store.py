@@ -19,9 +19,9 @@ from pathlib import Path
 MANAGED_FIELDS = [
     "llm_provider",
     "groq_api_key", "openrouter_api_key", "openai_api_key", "gemini_api_key", "anthropic_api_key",
-    "qwen_api_key",
+    "qwen_api_key", "cerebras_api_key", "github_models_token",
     "groq_model", "openrouter_model", "openai_model", "gemini_model", "anthropic_model",
-    "qwen_model",
+    "qwen_model", "cerebras_model", "github_models_model",
     "custom_llm_base_url", "custom_llm_api_key", "custom_llm_model",
     "telegram_bot_token", "telegram_chat_id", "telegram_api_id", "telegram_api_hash",
     "telegram_phone", "telegram_channels",
@@ -32,7 +32,8 @@ MANAGED_FIELDS = [
 # Fields masked in any read-back (never return the plaintext value).
 SECRET_FIELDS = {
     "groq_api_key", "openrouter_api_key", "openai_api_key", "gemini_api_key",
-    "anthropic_api_key", "qwen_api_key", "custom_llm_api_key", "telegram_bot_token",
+    "anthropic_api_key", "qwen_api_key", "cerebras_api_key", "github_models_token",
+    "custom_llm_api_key", "telegram_bot_token",
     "telegram_api_hash", "smtp_password",
 }
 

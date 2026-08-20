@@ -12,6 +12,36 @@ scoped in [docs/VERSIONING.md](docs/VERSIONING.md) — which is worth reading, b
 Planned work is tracked in [docs/ROADMAP.md](docs/ROADMAP.md), grouped by the release
 that will carry it.
 
+## [3.7.0] — 2026-08-20
+
+*Theme: the multi-LLM layer becomes a service you could lift into another project.*
+
+### Added
+- **`agentkit.llm.LLMService`** — one object instead of six modules. Owns a chain, a
+  circuit breaker, a trace ledger and an optional pre-flight probe:
+  `LLMService.from_settings(cfg).complete(system, user)`. Duck-typed on the config
+  object, so it works with a pydantic Settings, a dataclass, or a `SimpleNamespace` —
+  and `from_providers()` takes an explicit provider table for a host that does not want
+  ours. Verified importable and usable with `jobagent` absent from the path.
+- **Concurrent pre-flight** (`agentkit.llm.probe`) — calls every backend at once, then
+  routes by measured latency instead of a static preference order. Reordering changes
+  sequence, never membership, so a probe can never leave the caller with an empty chain.
+- **Provider trace ledger** (`agentkit.llm.ledger`) — per-backend calls, failures,
+  latencies, and failures grouped by classified verdict, with `working()` / `broken()`
+  and a terminal-friendly `render()`. An untried backend reports `None`, not 100%.
+- **Cerebras** and **GitHub Models** as first-class providers, wired through the chain,
+  Settings, and the encrypted config store.
+- `make doctor HEALTH=1` — the concurrent probe plus the health table, in seconds.
+
+### Fixed
+- **Groq and Gemini were both dead in the shipped defaults.** `llama-3.3-70b-versatile`
+  had been withdrawn from Groq's catalogue and `gemini-2.0-flash` retired; every call
+  paid two 404s before OpenRouter answered. Replaced with models verified against each
+  account's own `/models` list: `openai/gpt-oss-20b` and `gemini-flash-latest` — an alias
+  rather than a pin, because a pinned version is what died.
+- A test asserted the dead Groq slug by name. It now asserts the *configured* model
+  appears, so a model rotation cannot fail a test about the doctor.
+
 ## [3.6.0] — 2026-08-20
 
 *Theme: the tracker learns what came back, and the bot is finally tested.*
@@ -286,7 +316,8 @@ no longer tracked by git.
   Telegram bot, Tier-1 email applications, Tier-2 ATS form-fill, and VPS deployment
   units.
 
-[Unreleased]: https://github.com/temesgen5335/personalAgent/compare/v3.6.0...HEAD
+[Unreleased]: https://github.com/temesgen5335/personalAgent/compare/v3.7.0...HEAD
+[3.7.0]: https://github.com/temesgen5335/personalAgent/compare/v3.6.0...v3.7.0
 [3.6.0]: https://github.com/temesgen5335/personalAgent/compare/v3.5.0...v3.6.0
 [3.5.0]: https://github.com/temesgen5335/personalAgent/compare/v3.4.1...v3.5.0
 [3.4.1]: https://github.com/temesgen5335/personalAgent/compare/v3.4.0...v3.4.1

@@ -64,6 +64,8 @@ so any developer or AI agent can navigate the codebase and contribute immediatel
 | Profile is data, not code | Identity, background, CV and search preferences persist to a gitignored `data/profile.json` + `data/cv_master.md` overlay, edited through Settings → the profile tabs and `/profile`. The tree carries placeholders only (R22). Loaded fresh per request so edits apply without a restart. |
 | Harness split in two packages | `agentkit` is domain-agnostic and may never import `jobagent` (R30); `jobagent/assistant` supplies tools, knowledge, prompts and policy through a manifest. If wiring a second application required editing `agentkit`, the boundary would be decorative — so three tests hold it. |
 | Route before running | `plans_for()` filters backends by capability *first* and returns a ranked queue that doubles as the failover queue. An incapable backend never enters it, so failover cannot land on a model that would silently do the job badly. Consequence worth knowing: `LLM_PROVIDER` no longer decides admission, only ties — a chosen primary that cannot do a task is skipped, with a reason. |
+| Probe before you need it | Failover is reactive: it finds a dead provider by calling it and waiting. `LLMService.preflight()` calls every backend **concurrently** and reorders by measured latency, so a chain with dead backends in front stops paying their timeouts on every request. Reordering never changes membership — a probe is a snapshot, not a verdict. |
+| A trace, not just a breaker | The breaker knows if a backend is open *now*. The `Ledger` answers the question an operator actually asks: which providers work, which do not, and why — per-verdict counts, latencies, last error. Two dead slugs survived weeks because nothing answered that; the answers still arrived, from the next provider, a little slower. |
 | Degrade by changing *how*, not *what* | Nine strategies behind one signature. The load-bearing one, `prefetch_single_shot`, moves the planning into Python so a model that cannot use a tool *result* still answers. Measured: the same question answered correctly on llama-3.3-70b via a native loop and on llama-3.1-8b (0/5 on loops) via prefetch. |
 | Exclusion over gating | A tool the agent must never have is not registered at all (R26). A gate is a runtime check an attacker defeats once; absence has no code path to attack. Same call this repo already made for follow-up sends (R24). |
 | Frozen config is the *complement* | `CONFIG_WRITABLE` names what may change; everything else in `MANAGED_FIELDS` is frozen by construction, so a setting added next year is frozen the day it is added. A frozen *list* would default the other way and fail silently. |
@@ -179,6 +181,10 @@ src/agentkit/                # DOMAIN-AGNOSTIC HARNESS — never imports jobagen
     ├── errors.py            # classify() by SDK type name — imports with no SDK
     ├── health.py            # per-(provider,model) breaker, injected clock
     ├── chain.py             # build_chain() — adding a key needs no code change
+    ├── service.py           # LLMService — THE reusable entry point: chain + breaker
+    │                        #   + ledger + preflight behind one object
+    ├── probe.py             # concurrent pre-flight; routes by measured latency
+    ├── ledger.py            # per-backend trace: works/dead, verdicts, latencies
     ├── jsonx.py             # tolerant JSON; every rule is an observed failure
     └── backends/            # openai_compat, anthropic_chat — SDK imported lazily
 

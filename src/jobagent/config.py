@@ -47,6 +47,11 @@ class Settings(BaseSettings):
     # Qwen via DashScope's OpenAI-compatible endpoint (also reachable through
     # OpenRouter or a local server, which the custom provider covers).
     qwen_api_key: str = Field("", alias="QWEN_API_KEY")
+    # Cerebras: ~1M tokens/day free, fastest inference available. OpenAI-compatible.
+    cerebras_api_key: str = Field("", alias="CEREBRAS_API_KEY")
+    # GitHub Models: free with a GitHub account. The credential is a PAT with the
+    # `models:read` scope — not a vendor API key.
+    github_models_token: str = Field("", alias="GITHUB_MODELS_TOKEN")
 
     # Per-provider model (sensible free defaults).
     # llama-3.3-70b-versatile over llama-3.1-8b-instant, measured on this project's own
@@ -63,7 +68,7 @@ class Settings(BaseSettings):
     # is fine and marginally quicker. It is chosen because the assistant harness needs a
     # model that can complete a tool loop, and a default that silently can't would make
     # every agent task take the degraded path.
-    groq_model: str = Field("llama-3.3-70b-versatile", alias="GROQ_MODEL")
+    groq_model: str = Field("openai/gpt-oss-20b", alias="GROQ_MODEL")
     # The previous default (meta-llama/llama-3.3-70b-instruct:free) now 404s — OpenRouter
     # moved it behind the paid slug, so the third provider in the chain was dead on every
     # call. Verified live Aug 2026: gpt-oss-20b:free answers in ~12s (nemotron-3-super
@@ -72,9 +77,11 @@ class Settings(BaseSettings):
     # https://openrouter.ai/api/v1/models and pick one advertising "tools".
     openrouter_model: str = Field("openai/gpt-oss-20b:free", alias="OPENROUTER_MODEL")
     openai_model: str = Field("gpt-4o-mini", alias="OPENAI_MODEL")
-    gemini_model: str = Field("gemini-2.0-flash", alias="GEMINI_MODEL")
+    gemini_model: str = Field("gemini-flash-latest", alias="GEMINI_MODEL")
     anthropic_model: str = Field("claude-sonnet-4-6", alias="ANTHROPIC_MODEL")
     qwen_model: str = Field("qwen-plus", alias="QWEN_MODEL")
+    cerebras_model: str = Field("llama-3.3-70b", alias="CEREBRAS_MODEL")
+    github_models_model: str = Field("openai/gpt-4o-mini", alias="GITHUB_MODELS_MODEL")
 
     # Custom OpenAI-compatible endpoint (Ollama / vLLM / any local or hosted server).
     custom_llm_base_url: str = Field("", alias="CUSTOM_LLM_BASE_URL")

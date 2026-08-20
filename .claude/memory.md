@@ -537,7 +537,8 @@ To rename, change the one constant; nothing else hardcodes it (asserted by test)
 | v3.4.0 | `d0faa50` | Opt-in read auth + route-table net, per-class rate limits, exposure warnings in both deploy docs; 617 tests |
 | v3.4.1 | `0215d0e` | Fix CI red since v3.2.0: `None` in model-visible config, three tests + two docs reading an untracked file, two guards that never fired |
 | v3.5.0 | `4c21db0` | JSearch aggregator, cluster_key, salary parse+filter, score provenance; 650 tests |
-| v3.6.0 | (this) | Inbox outcome proposals, Telegram handler harness, LLM usage accounting; 697 tests |
+| v3.6.0 | `0c112ca` | Inbox outcome proposals, Telegram handler harness, LLM usage accounting; 697 tests |
+| v3.7.0 | (this) | LLMService facade, concurrent preflight, provider ledger, Cerebras+GitHub, dead slugs replaced; 726 tests |
 
 ---
 
@@ -977,3 +978,60 @@ are verified against constructed emails and a fake IMAP connection. **Neither ha
 run against a real mailbox.** Real ATS mail is messier than anything written by the person
 who wrote the rules — treat the first live scan as the real test, and expect the
 `unmatched` counter to be the interesting number.
+
+## v3.7.0 — the LLM layer as a standalone service, and three self-inflicted bugs (Aug 2026)
+
+`agentkit/llm/` was already domain-agnostic (R30, three tests). What it lacked was a
+*door*: using it well meant knowing six modules. `LLMService` is that door — chain,
+breaker, ledger and probe behind one object, duck-typed on the config so a host can pass
+a `SimpleNamespace`. Verified by importing it with `jobagent` poisoned in `sys.modules`.
+
+Two genuinely new capabilities:
+
+- **Pre-flight.** Failover is *reactive* — it finds a dead provider by calling it and
+  waiting. `preflight()` calls every backend concurrently and reorders by measured
+  latency. Crucially it reorders, never filters: a probe is a snapshot, and a provider
+  that failed one health check may serve the next request.
+- **A ledger.** The breaker knows whether a backend is open *now*; the ledger answers
+  what an operator actually asks — which providers work, which do not, and why, with
+  per-verdict counts and latencies.
+
+### Three bugs I introduced, all caught by running it
+
+1. **The service called `generate(system, user)` — a method no backend has.** Real
+   backends expose `chat(ChatRequest) -> ChatResult`. Every test passed because I wrote
+   the fake to match my assumption rather than the interface. **This is the exact failure
+   I had written up one release earlier** in the v3.6.0 bot-harness entry ("a stub that
+   drifts from the real wiring tests nothing"), repeated at the first opportunity.
+   Knowing a lesson and applying it are different things; the fix is a conformance test
+   that asserts against the real classes by introspection, not a resolution to be careful.
+2. **`StopReason.stop` does not exist** — `StopReason` is a `Literal`, i.e. a plain
+   string. Read the type instead of assuming an enum. Same R32 discipline as store keys.
+3. **The probe declared all three live providers dead.** It used `max_tokens=16`, and
+   reasoning-style models (gpt-oss, o-series, Gemini thinking) spend output tokens on
+   reasoning before emitting visible text — so the response came back `stop_reason=
+   "length"` with an *empty string*. Measured: 16 → `""`, 64 → `"ready"` using 30 tokens.
+   The project's memory already warned that a doctor which clears a dead provider is
+   worse than none; this was the mirror image — **a diagnostic that condemns healthy
+   providers, which would have had someone rotating perfectly good API keys.** A
+   length-capped answer is now reported as *reachable, with a note that our budget was
+   too small*, because it is our fault and not the provider's.
+
+### And the dead slugs were worse than recorded
+
+Both shipped defaults were dead, not one: Groq's `llama-3.3-70b-versatile` withdrawn from
+the catalogue, Gemini's `gemini-2.0-flash` retired. Every call paid two 404s before
+OpenRouter answered. Replaced with models read off each account's **own `/models`
+endpoint** rather than chosen from memory — Groq's catalogue had rotated completely, and
+nothing in the old list still existed.
+
+`gemini-flash-latest` is deliberately an **alias, not a pin**. A pinned version is
+precisely what died. Pinning buys reproducibility and costs availability; for a
+best-effort failover chain the trade runs the other way.
+
+Measured live, all three green, fastest first: groq 0.84s → openrouter 4.16s →
+gemini 9.06s. A real completion and a JSON-mode completion both verified through the
+service.
+
+**Standing lesson, now paid for three times in three releases: a fake that was written
+from memory tests the memory, not the code.** Mirror the real seam by reading it.
