@@ -1035,3 +1035,23 @@ service.
 
 **Standing lesson, now paid for three times in three releases: a fake that was written
 from memory tests the memory, not the code.** Mirror the real seam by reading it.
+
+### The agentkit README, and why doc examples need a test (Aug 2026)
+
+`src/agentkit/README.md` documents the harness for use in *another* project: every
+provider and its config attribute, pre-flight, the ledger, error verdicts, tool
+registration, the governed toolbox, retrieval, a module map. It lives **inside the
+package**, not in `docs/`, because vendoring the directory has to carry its own
+documentation — a copy that arrives undocumented is a copy nobody adopts.
+
+**Two of the examples could never have worked, and both were invisible by reading.**
+`classify()` returns `retry_after_s`, not `retry_after`. And `validate_tool_schema`
+requires a `description` on every property, so the tool-registration example — the
+single most likely thing for a reader to copy first — raised at registration.
+
+`tests/test_agentkit_readme.py` now executes every example and cross-checks the prose
+against the code: each provider's key and model attribute must appear in the config
+table, each `Verdict` must be documented, and every path in the module map must exist.
+**A README for a reusable package is an interface promise, so it belongs under test
+like any other interface.** The same reasoning already covers `tests/test_docs.py`; this
+extends it from "the paths resolve" to "the code runs".

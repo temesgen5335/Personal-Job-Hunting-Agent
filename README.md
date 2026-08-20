@@ -37,7 +37,7 @@ Anthropic, or any OpenAI-compatible endpoint). See [docs/ARCHITECTURE.md](docs/A
 A **FastAPI orchestrator** sits between the interfaces and the data: the dashboard
 calls it over REST, and the bot calls the same service layer in-process.
 
-## Status: v3.7 (726 tests passing, CI on every push)
+## Status: v3.7 (759 tests passing, CI on every push)
 Ingestion · matching · Telegram bot (menu + filters) · Tier-1 email apply · Tier-2
 ATS form-fill · multi-LLM failover · FastAPI orchestrator · Astro dashboard with
 config UI, fit-checker, analytics, and pipeline health · VPS + GitHub Actions deploy
@@ -232,6 +232,12 @@ origin to `JOBAGENT_CORS_ORIGINS`, which defaults to localhost only.
 .venv/bin/python scripts/apply_ats.py preview 3 # Tier-2 ATS fill + screenshot (no submit)
 .venv/bin/pytest -q                             # run the test suite
 ```
+
+## Reusing the agent harness
+`src/agentkit/` is domain-agnostic — multi-provider LLM with capability routing,
+governed tools, fenced retrieval, a fail-closed audit trail — and imports nothing from
+this application. Copy the directory into another project and it works.
+Full guide with every config key: [src/agentkit/README.md](src/agentkit/README.md).
 
 ## Versions & roadmap
 Current release and what changed: [CHANGELOG.md](CHANGELOG.md).

@@ -42,6 +42,15 @@ that will carry it.
 - A test asserted the dead Groq slug by name. It now asserts the *configured* model
   appears, so a model rotation cannot fail a test about the doctor.
 
+### Documentation
+- **`src/agentkit/README.md`** — a complete guide to using the harness in another
+  project: every provider and its config attribute, pre-flight and the ledger, error
+  verdicts, tool registration, the governed toolbox, retrieval, and a module map. It
+  lives *inside* the package so vendoring the directory carries its own docs.
+  `tests/test_agentkit_readme.py` executes every example — writing it from memory
+  produced two that could never have worked (`c.retry_after` instead of `retry_after_s`,
+  and a tool schema missing the per-property `description` the validator requires).
+
 ## [3.6.0] — 2026-08-20
 
 *Theme: the tracker learns what came back, and the bot is finally tested.*

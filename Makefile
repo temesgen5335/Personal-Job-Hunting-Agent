@@ -100,5 +100,5 @@ inbox: ## scan the applying mailbox for outcomes (proposes only, never applies)
 pipeline: ## one ingest → match pass, no Telegram push
 	$(PY) scripts/pipeline.py --no-send
 
-test: ## offline suite (726 tests, no credentials)
+test: ## offline suite (759 tests, no credentials)
 	$(PY) -m pytest tests/ -q
