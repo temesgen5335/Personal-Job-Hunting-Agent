@@ -15,6 +15,7 @@ imported lazily, so this module imports fine without them and tests can inject f
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass, field
 import re
 
 logger = logging.getLogger("jobagent.llm")
@@ -86,6 +87,57 @@ class AnthropicBackend:
         return "".join(b.text for b in resp.content if getattr(b, "type", None) == "text")
 
 
+@dataclass
+class LLMUsage:
+    """Approximate spend, tracked per process.
+
+    The backends return a string and nothing else, so real token counts are not
+    available without changing every provider's return type. These are ESTIMATES from
+    character length (the conventional ~4 chars per token) and are named as such
+    everywhere they surface — a number presented as billed usage when it is a guess is
+    worse than no number, because it gets trusted.
+
+    Useful for what it is actually for: comparing tasks and providers against each
+    other, and noticing that a chain's first backend fails on every call.
+    """
+
+    calls: int = 0
+    failures: int = 0
+    prompt_chars: int = 0
+    completion_chars: int = 0
+    by_provider: dict = field(default_factory=dict)
+
+    CHARS_PER_TOKEN = 4
+
+    def record(self, provider: str, prompt: str, completion: str) -> None:
+        self.calls += 1
+        self.prompt_chars += len(prompt or "")
+        self.completion_chars += len(completion or "")
+        slot = self.by_provider.setdefault(provider, {"calls": 0, "failures": 0, "chars": 0})
+        slot["calls"] += 1
+        slot["chars"] += len(prompt or "") + len(completion or "")
+
+    def record_failure(self, provider: str) -> None:
+        self.failures += 1
+        slot = self.by_provider.setdefault(provider, {"calls": 0, "failures": 0, "chars": 0})
+        slot["failures"] += 1
+
+    @property
+    def estimated_tokens(self) -> int:
+        return (self.prompt_chars + self.completion_chars) // self.CHARS_PER_TOKEN
+
+    def as_dict(self) -> dict:
+        """Shape written to the run ledger. `estimated` is in the key name on purpose."""
+        return {
+            "calls": self.calls,
+            "failures": self.failures,
+            "estimated_tokens": self.estimated_tokens,
+            "estimated_prompt_tokens": self.prompt_chars // self.CHARS_PER_TOKEN,
+            "estimated_completion_tokens": self.completion_chars // self.CHARS_PER_TOKEN,
+            "by_provider": self.by_provider,
+        }
+
+
 class MultiLLM:
     """Ordered failover over backends. Each backend exposes `.name` and
     `.generate(system, user) -> str`."""
@@ -95,6 +147,8 @@ class MultiLLM:
             raise ValueError("MultiLLM needs at least one backend")
         self.backends = backends
         self.last_provider: str | None = None
+        # Per-process usage, for "which task is draining my quota" rather than billing.
+        self.usage = LLMUsage()
 
     @property
     def chain(self) -> list[str]:
@@ -110,10 +164,15 @@ class MultiLLM:
                 if not text.strip():
                     raise RuntimeError("empty response")
                 self.last_provider = backend.name
+                self.usage.record(backend.name, system + user, text)
                 if backend is not self.backends[0]:
                     logger.warning("LLM failover: served by '%s'", backend.name)
                 return _strip_fences(text) if json_mode else text
             except Exception as exc:  # noqa: BLE001 — that's the whole point: try the next one
+                # Failures are counted too. A provider that fails on every call still
+                # costs latency, and a chain whose first backend is dead is invisible
+                # otherwise — which is exactly how two dead model slugs went unnoticed.
+                self.usage.record_failure(backend.name)
                 errors.append(f"{backend.name}: {type(exc).__name__}: {exc}")
                 logger.warning("LLM provider '%s' failed, trying next — %s", backend.name, exc)
         raise RuntimeError("All LLM providers failed:\n  " + "\n  ".join(errors))

@@ -741,7 +741,8 @@ class Store:
     def list_applications(self, limit: int = 200) -> list[dict]:
         rows = self.conn.execute(
             "SELECT a.id, a.status, a.apply_method, a.created_at, a.submitted_at, "
-            "j.title, j.company, j.url, j.apply_url FROM applications a "
+            "a.job_id, j.title, j.company, j.url, j.apply_url, j.apply_email "
+            "FROM applications a "
             "JOIN jobs j ON j.id = a.job_id ORDER BY a.created_at DESC LIMIT ?",
             (limit,),
         ).fetchall()
@@ -830,6 +831,73 @@ class Store:
             row["days_waiting"] = max(0, waited)
             out.append(row)
         return out
+
+    # --- inbox outcome proposals -------------------------------------------
+    def _ensure_proposals(self) -> None:
+        """Older stores predate this table; created on demand like the triage one."""
+        self.conn.executescript("""
+            CREATE TABLE IF NOT EXISTS outcome_proposals (
+                id TEXT PRIMARY KEY,
+                application_id TEXT NOT NULL REFERENCES applications(id),
+                message_id TEXT NOT NULL, proposed TEXT NOT NULL,
+                confidence TEXT NOT NULL DEFAULT 'low', reason TEXT NOT NULL DEFAULT '',
+                subject TEXT NOT NULL DEFAULT '', sender TEXT NOT NULL DEFAULT '',
+                received_at TEXT, state TEXT NOT NULL DEFAULT 'pending',
+                created_at TEXT NOT NULL);
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_proposal_msg
+                ON outcome_proposals(application_id, message_id);
+            CREATE INDEX IF NOT EXISTS idx_proposal_state ON outcome_proposals(state);
+        """)
+
+    def add_proposal(self, *, application_id: str, message_id: str, proposed: str,
+                     confidence: str = "low", reason: str = "", subject: str = "",
+                     sender: str = "", received_at: str | None = None) -> str | None:
+        """Record a detected outcome. Returns the id, or None if already known.
+
+        Idempotent on (application_id, message_id) so re-reading the mailbox — which
+        happens on every poll — cannot resurrect a proposal the operator already
+        dismissed, or stack duplicates of one they have not looked at yet.
+        """
+        self._ensure_proposals()
+        existing = self.conn.execute(
+            "SELECT id FROM outcome_proposals WHERE application_id=? AND message_id=?",
+            (application_id, message_id)).fetchone()
+        if existing:
+            return None
+        pid = uuid.uuid4().hex[:12]
+        self.conn.execute(
+            "INSERT INTO outcome_proposals (id, application_id, message_id, proposed, "
+            "confidence, reason, subject, sender, received_at, state, created_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?,'pending',?)",
+            (pid, application_id, message_id, proposed, confidence, reason, subject,
+             sender, received_at, _now()))
+        self.conn.commit()
+        return pid
+
+    def list_proposals(self, state: str = "pending", limit: int = 50) -> list[dict]:
+        """Pending proposals joined to the job they concern, so the UI can render one
+        without a second query per row."""
+        self._ensure_proposals()
+        rows = self.conn.execute(
+            "SELECT p.*, a.status AS current_status, j.title, j.company "
+            "FROM outcome_proposals p "
+            "JOIN applications a ON a.id = p.application_id "
+            "JOIN jobs j ON j.id = a.job_id "
+            "WHERE p.state = ? ORDER BY p.created_at DESC LIMIT ?",
+            (state, limit)).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_proposal(self, proposal_id: str) -> dict | None:
+        self._ensure_proposals()
+        row = self.conn.execute(
+            "SELECT * FROM outcome_proposals WHERE id=?", (proposal_id,)).fetchone()
+        return dict(row) if row else None
+
+    def set_proposal_state(self, proposal_id: str, state: str) -> None:
+        self._ensure_proposals()
+        self.conn.execute("UPDATE outcome_proposals SET state=? WHERE id=?",
+                          (state, proposal_id))
+        self.conn.commit()
 
     # --- triage (dismiss / snooze / note) -----------------------------------
     # The dashboard's queue is "strong matches you haven't decided on yet", so a

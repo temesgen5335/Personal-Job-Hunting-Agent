@@ -257,9 +257,9 @@ menu. Leave unparseable text alone rather than guessing.
 
 ---
 
-## v3.6.0 — "Close the loop"
+## v3.6.0 — "Close the loop" ✅ SHIPPED 2026-08-20
 
-### 🟠 16. Application outcomes are entered by hand
+### ✅ 16. Application outcomes are entered by hand
 
 The tracker knows what you sent. It learns nothing about what came back, so the funnel
 and response rates only reflect what the operator remembered to type in.
@@ -274,7 +274,7 @@ lifecycle already enforces legal transitions.
 matching eval can be scored against *what actually got replies* — the single most
 valuable feedback signal the system could have.
 
-### 🟡 17. The Telegram handlers have no runtime coverage
+### ✅ 17. The Telegram handlers have no runtime coverage
 
 `tests/test_bot.py` covers only pure helpers; the handlers in `bot/app.py` need real
 `Update`/`Context` objects. This is how a call to an undefined `_llm()` shipped and
@@ -285,7 +285,7 @@ already used for Playwright), plus one end-to-end test per command.
 
 **Value:** the bot is the primary interface and the least tested part of the system.
 
-### 🟡 18. No LLM cost visibility
+### ✅ 18. No LLM cost visibility
 
 One assistant turn sends ~1,258 tokens before any tool result, 1,047 of them tool
 schemas resent every turn — measured, and the reason free tiers drain. Nothing surfaces

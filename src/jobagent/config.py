@@ -163,6 +163,15 @@ class Settings(BaseSettings):
     smtp_password: str = Field("", alias="SMTP_PASSWORD")
     apply_from_email: str = Field("", alias="APPLY_FROM_EMAIL")
 
+    # Inbox outcome detection (optional). Reads the mailbox you apply from and PROPOSES
+    # status changes for one-tap confirmation — it never applies one. Off unless a host
+    # is set; most people will use the same account as SMTP above.
+    imap_host: str = Field("", alias="IMAP_HOST")
+    imap_port: int = Field(993, alias="IMAP_PORT")
+    imap_user: str = Field("", alias="IMAP_USER")
+    imap_password: str = Field("", alias="IMAP_PASSWORD")
+    imap_folder: str = Field("INBOX", alias="IMAP_FOLDER")
+
 
 def _build_effective() -> Settings:
     """Env/.env settings, then overlaid by the encrypted secret store (if present)."""

@@ -107,6 +107,9 @@ def main() -> None:
         # 4) Run summary — the ledger row `store.list_runs()` and GET /runs read.
         store.log_event(Event(kind="run", payload={
             "run_id": run_id,
+            # Estimated, not billed — see LLMUsage. Recorded on the run spine so the
+            # cost of a pass is reconstructable alongside what it fetched and scored.
+            "llm": llm.usage.as_dict() if llm is not None else None,
             "duration_s": round(time.monotonic() - started, 1),
             "gap_hours_before_run": round(gap_hours, 1) if gap_hours is not None else None,
             "ingest": {"fetched": report.total_fetched, "new": report.total_new,

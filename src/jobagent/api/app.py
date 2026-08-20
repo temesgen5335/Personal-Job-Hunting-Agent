@@ -154,6 +154,10 @@ class PurgeReq(BaseModel):
     vacuum: bool = False                # reclaim file space afterwards (rewrites the db)
 
 
+class ProposalDecision(BaseModel):
+    action: str            # accept | dismiss
+
+
 class StatusReq(BaseModel):
     status: str
     # Escape hatch for fixing a mis-click. Bypasses the transition map and logs an
@@ -547,6 +551,70 @@ def create_app(settings=None, profile=None, llm: Any = _UNSET, cv_master: str | 
                                      "least one filter (score, date, source, or triage).")
         result["run_id"] = run_id
         return result
+
+    @app.get("/inbox/proposals", dependencies=read_auth)
+    def inbox_proposals(state: str = "pending", limit: int = 50):
+        """Detected outcomes awaiting a decision. Read-only: nothing here has been
+        applied, and nothing will be until the operator accepts it."""
+        s = store()
+        try:
+            rows = s.list_proposals(state=state, limit=limit)
+        finally:
+            s.close()
+        # allowed_next travels with each row so the UI never has to guess whether the
+        # proposal is even a legal move from the application's current status.
+        for r in rows:
+            r["allowed_next"] = sorted(allowed_next(r.get("current_status", "")))
+            r["is_legal"] = r["proposed"] in r["allowed_next"]
+        return {"proposals": rows}
+
+    @app.post("/inbox/proposals/{proposal_id}", dependencies=auth + write_limit)
+    def decide_proposal(proposal_id: str, body: ProposalDecision):
+        """Accept or dismiss a detected outcome.
+
+        Accepting applies the SAME transition rules a manual edit obeys — the detector
+        gets no privileged path into the lifecycle. An illegal move is refused with the
+        legal ones named, exactly as PATCH /applications does, rather than silently
+        corrected: a mis-detected outcome must not be able to rewrite history just
+        because it arrived by email.
+        """
+        s = store()
+        try:
+            proposal = s.get_proposal(proposal_id)
+            if not proposal:
+                raise HTTPException(404, "No such proposal.")
+            if proposal["state"] != "pending":
+                raise HTTPException(409, f"Already {proposal['state']}.")
+
+            if body.action == "dismiss":
+                s.set_proposal_state(proposal_id, "dismissed")
+                return {"id": proposal_id, "state": "dismissed"}
+            if body.action != "accept":
+                raise HTTPException(400, "action must be accept | dismiss")
+
+            app_row = s.get_application(proposal["application_id"])
+            if not app_row:
+                raise HTTPException(404, "Application not found.")
+            current, target = app_row["status"], proposal["proposed"]
+            if not can_transition(current, target):
+                raise HTTPException(422, {
+                    "message": f"Cannot move {current} → {target}.",
+                    "current": current,
+                    "allowed": sorted(allowed_next(current)),
+                    "hint": "Dismiss this proposal, or change the status by hand.",
+                })
+            s.update_application(proposal["application_id"], status=target)
+            s.set_proposal_state(proposal_id, "accepted")
+            # Audited: an outcome that entered the record from an email should be
+            # distinguishable from one the operator typed, forever.
+            s.log_event(Event(kind="outcome_accepted", job_id=app_row.get("job_id"),
+                              payload={"application_id": proposal["application_id"],
+                                       "from": current, "to": target,
+                                       "source": "inbox", "proposal_id": proposal_id,
+                                       "message_id": proposal["message_id"]}))
+        finally:
+            s.close()
+        return {"id": proposal_id, "state": "accepted", "status": target}
 
     @app.get("/followups", dependencies=read_auth)
     def followups(after_days: int = 7):

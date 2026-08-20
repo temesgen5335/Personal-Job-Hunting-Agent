@@ -12,6 +12,40 @@ scoped in [docs/VERSIONING.md](docs/VERSIONING.md) — which is worth reading, b
 Planned work is tracked in [docs/ROADMAP.md](docs/ROADMAP.md), grouped by the release
 that will carry it.
 
+## [3.6.0] — 2026-08-20
+
+*Theme: the tracker learns what came back, and the bot is finally tested.*
+
+### Added
+- **Inbox outcome detection** (optional, needs IMAP credentials). Reads the mailbox you
+  apply from and **proposes** status changes — interview, offer, rejected — for one-tap
+  confirmation. It never applies one: a wrong automatic transition corrupts the
+  operator's own history silently, so accepting is an explicit action gated exactly like
+  sending (R2). Accepting obeys the same `ALLOWED_TRANSITIONS` map a manual edit does,
+  and is audited with `source: "inbox"` so a detected outcome stays distinguishable from
+  a typed one forever.
+  `GET /inbox/proposals`, `POST /inbox/proposals/{id}`, `make inbox`.
+- **Runtime coverage for the Telegram handlers** — a fake `Update`/`Context` harness, the
+  `FakePage` pattern applied to python-telegram-bot. `bot/app.py` previously had none,
+  which is how a call to an undefined `_llm()` shipped in the `/apply` path. 18 tests
+  covering the owner gate, every command, malformed arguments, and a no-`None` check.
+- **LLM usage accounting** — calls, failures and estimated tokens per provider, recorded
+  on the run ledger. Failures are counted too: a chain whose first backend is dead is
+  otherwise invisible because the answer still arrives from the next one, which is
+  exactly how two dead model slugs went unnoticed.
+
+### Changed
+- `list_applications` returns `job_id` and `apply_email`, which inbox attribution needs.
+
+### Notes
+- Detection is deliberately conservative. A reply is attributed by sender domain or by
+  company name, and matches nothing when unsure — attributing a rejection to the *wrong*
+  application would close out a live opportunity on the operator's record. Only
+  `submitted` and `interview` applications are candidates.
+- Token counts are **estimates** from character length, and say so in every key name.
+  The backends return a string and nothing else, so real counts would mean changing
+  every provider's return type. A guess presented as billed usage gets trusted.
+
 ## [3.5.0] — 2026-08-19
 
 *Theme: more of the market, and less of it duplicated.*
@@ -252,7 +286,8 @@ no longer tracked by git.
   Telegram bot, Tier-1 email applications, Tier-2 ATS form-fill, and VPS deployment
   units.
 
-[Unreleased]: https://github.com/temesgen5335/personalAgent/compare/v3.5.0...HEAD
+[Unreleased]: https://github.com/temesgen5335/personalAgent/compare/v3.6.0...HEAD
+[3.6.0]: https://github.com/temesgen5335/personalAgent/compare/v3.5.0...v3.6.0
 [3.5.0]: https://github.com/temesgen5335/personalAgent/compare/v3.4.1...v3.5.0
 [3.4.1]: https://github.com/temesgen5335/personalAgent/compare/v3.4.0...v3.4.1
 [3.4.0]: https://github.com/temesgen5335/personalAgent/compare/v3.3.0...v3.4.0

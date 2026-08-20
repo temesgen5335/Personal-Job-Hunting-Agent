@@ -536,7 +536,8 @@ To rename, change the one constant; nothing else hardcodes it (asserted by test)
 | v3.3.0 | `a13a3b8` | `make setup` wizard, `make demo` seeder, Docker + compose; 604 tests |
 | v3.4.0 | `d0faa50` | Opt-in read auth + route-table net, per-class rate limits, exposure warnings in both deploy docs; 617 tests |
 | v3.4.1 | `0215d0e` | Fix CI red since v3.2.0: `None` in model-visible config, three tests + two docs reading an untracked file, two guards that never fired |
-| v3.5.0 | (this) | JSearch aggregator, cluster_key, salary parse+filter, score provenance; 650 tests |
+| v3.5.0 | `4c21db0` | JSearch aggregator, cluster_key, salary parse+filter, score provenance; 650 tests |
+| v3.6.0 | (this) | Inbox outcome proposals, Telegram handler harness, LLM usage accounting; 697 tests |
 
 ---
 
@@ -924,3 +925,55 @@ like a real response and has **never been run against the live API** — no Rapi
 was available. Field names came from the published response shape rather than an observed
 payload, which is exactly the R32 setup that has bitten this project four times. Treat
 the first live run as the real test.
+
+## v3.6.0 — closing the loop, and a harness that failed before it tested anything (Aug 2026)
+
+**Inbox detection proposes; it never decides.** The tracker knew what was sent and
+nothing about what came back, so the funnel was a diary rather than data. The obvious
+implementation — read the mailbox, move the application — is the wrong one: a rejection
+misread as an interview invitation would close out a live opportunity on the operator's
+own record, silently, with no way to notice. So `scan()` writes proposals and accepting
+one is an explicit action that goes through the *same* `ALLOWED_TRANSITIONS` map a manual
+edit obeys. The detector gets no privileged path into the lifecycle, and an accepted
+outcome is audited with `source: "inbox"` so it stays distinguishable from a typed one
+forever.
+
+Three decisions inside it worth keeping:
+
+- **Attribution matches nothing when unsure.** Company name or sender domain, and no
+  fuzzy fallback. Attributing a reply to the *wrong* application is strictly worse than
+  attributing it to none, so the safe failure is silence.
+- **The quoted thread is stripped before classifying.** A reply quotes the whole
+  conversation, including the invitation that preceded the rejection — classifying the
+  thread instead of the newest message reports the outcome backwards. There is a test
+  for exactly that shape.
+- **Rules are ordered, rejections first.** "We are not moving forward, but we will keep
+  your CV for future interviews" is the most common way a rejection reads as good news.
+
+**The bot harness failed sixteen times before it tested anything, and that was the
+point.** I wrote `FakeContext.bot_data`; the handlers read
+`context.application.bot_data`. Different objects in python-telegram-bot, and only one is
+populated by `build_application`. Every test errored identically. The fix was to read
+`bot/app.py` and mirror its keys exactly rather than remember them — the same discipline
+R32 demands of store keys, applied to a test stub. **A stub that drifts from the real
+wiring tests nothing**, and the only reason this drift was survivable is that it errored
+loudly; a stub that is *nearly* right passes while covering nothing.
+
+This closes the gap `context.md` had carried since Tier 1: the handlers had no runtime
+coverage, which is how a call to an undefined `_llm()` shipped in `/apply` and crashed
+with `NameError`. A static check guarded that one class afterwards, but a static check
+cannot see a handler that runs and does the wrong thing.
+
+**LLM usage counts failures, not just calls.** A chain whose first backend is dead is
+invisible from the outside — the answer still arrives, from the next provider, a little
+slower. That is precisely how two dead model slugs (Groq's `llama-3.3-70b-versatile`,
+Gemini's `gemini-2.0-flash`) went unnoticed for weeks until they showed up in an API log.
+The counts are **estimates** from character length and every key says `estimated_`,
+because the backends return a string and nothing else. A guess presented as billed usage
+gets trusted, which is worse than no number at all.
+
+Limitation to carry forward, same shape as the JSearch one: the classifier and attributor
+are verified against constructed emails and a fake IMAP connection. **Neither has been
+run against a real mailbox.** Real ATS mail is messier than anything written by the person
+who wrote the rules — treat the first live scan as the real test, and expect the
+`unmatched` counter to be the interesting number.

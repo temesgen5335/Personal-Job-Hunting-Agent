@@ -80,6 +80,9 @@ Two interfaces, one backend:
 | Triage | Done — dismiss/snooze/note per job (triage table, POST /triage, queue count) |
 | Queue parity | Done (Aug 2026) — the number the badge shows and the rows `/jobs` renders are now the same set. `/jobs` passes `max_per_company=None` (the bot keeps its cap) and the page defaults to `within=any`. Verified live: 231 = 231 |
 | Manual ingestion trigger | Done (Aug 2026) — "Pull Jobs" on the Overview calls `POST /ingest`, then polls `/runs/{id}` for per-source progress and reloads. Until this, nothing in any UI could start a pass, and no scheduler is live (see below). Verified live: 8,363 fetched across all 6 adapters, zero errors |
+| Inbox outcomes | Done (v3.6.0) — optional IMAP scan PROPOSES interview/offer/rejected for one-tap confirmation; never applies one. Obeys `ALLOWED_TRANSITIONS`, audited with `source: "inbox"`. `make inbox`. **Classifier and attribution tested against fixtures; never run against a real mailbox** |
+| Bot handler coverage | Done (v3.6.0) — fake `Update`/`Context` harness in `tests/test_bot_handlers.py`. Closes the gap that let an undefined `_llm()` ship in `/apply`. Covers the owner gate, every command, malformed args, and a no-`None` check |
+| LLM usage accounting | Done (v3.6.0) — calls/failures/estimated tokens per provider on the run ledger. Failures counted, because a dead first backend is invisible when the answer still arrives from the next |
 | Aggregator source | Done (v3.5.0) — JSearch adapter (LinkedIn/Indeed/Glassdoor/ZipRecruiter via RapidAPI). Queries come from `target_roles`; self-gates on key AND queries. Needs `JSEARCH_API_KEY` + `[sources] aggregator = true`. **Built and tested against fixtures; never run against the live API** — no key available |
 | Cross-board clustering | Done (v3.5.0) — `cluster_key` groups the same role across boards WITHOUT touching `dedup_hash`, which is the PK every application references. Dashboard shows "also on N" |
 | Salary | Done (v3.5.0) — parsed to columns at write time, chip in the list, annualised min-salary filter. Unknown pay is KEPT by the filter (most postings state none) |
@@ -97,7 +100,7 @@ Two interfaces, one backend:
 | assistant hardening (Phase 5) | **Complete.** 10-case eval set scoring tool *selection*, answer *grounding* and *in-bounds* separately; `scripts/eval_assistant.py` with floors; `scripts/llm_doctor.py` explaining the chain, every model card's provenance, and per-task routing offline. Degraded-path conformance run measured **100% / 100% / 100%** |
 | Profile & preferences | **Editable through the UI.** Identity, background, CV, search preferences, source toggles and the ATS watchlist all persist to a gitignored `data/profile.json` + `data/cv_master.md` overlay (three-layer merge: committed placeholders → legacy `preferences.local.toml` → writable overlay). `/profile` GET+PUT (both auth-gated — PII). Nothing personal is hardcoded; the tree carries placeholders only (R22) |
 | Settings UI | Tabbed: Profile · CV & background · Search & matching · Sources & watchlist · Ingestion · LLM · Telegram · Email. Each tab saves independently against the backend that owns it (`/profile` or `/config`) |
-| Test suite | 650 tests, 43 test files, zero network, injectable fakes throughout |
+| Test suite | 697 tests, 45 test files, zero network, injectable fakes throughout |
 
 ## Assistant cost characteristics (measured Aug 2026)
 
@@ -126,7 +129,10 @@ pipeline health, retry/backoff, docs truth-pass). Still open:
   from the family pattern, but the free-tier quota has been exhausted on every attempt,
   so no call has ever reached it. The card's `notes` field says so; treat the claim as
   documented-not-measured until a call succeeds.
-- **The Telegram handlers have no runtime test coverage.** `tests/test_bot.py` covers
+- ~~**The Telegram handlers have no runtime test coverage.**~~ **Closed in v3.6.0** —
+  `tests/test_bot_handlers.py` is the harness this paragraph asked for. Kept below for
+  the history of how the gap was found.
+- (historical) `tests/test_bot.py` covers
   only the pure helpers in `bot/service.py`; the handlers in `bot/app.py` need live
   `Update`/`Context` objects. This is how a call to an undefined `_llm()` shipped in
   the `/apply` fit-check path and crashed it with `NameError`
@@ -192,5 +198,5 @@ not-seen-in-60-days would remove 3,417.
 
 - **11,700+** jobs scored in a live run (8,253 fetched in a single pass across 6 adapters)
 - **40** companies in the ATS watchlist (Greenhouse/Lever/Ashby)
-- **650** tests across 43 files — all run offline, no network, no credentials
+- **697** tests across 45 files — all run offline, no network, no credentials
 - **6** LLM providers with automatic failover (3 free, 3 paid)

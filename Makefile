@@ -18,7 +18,7 @@ PY           := $(VENV)/bin/python
 API_PORT     ?= 8077
 DASH_PORT    ?= 1234
 
-.PHONY: install setup demo run run_backend run_bot run_dashboard check test pipeline ask doctor eval_assistant docker_up docker_down
+.PHONY: install setup demo inbox run run_backend run_bot run_dashboard check test pipeline ask doctor eval_assistant docker_up docker_down
 
 install: ## backend + dashboard deps (idempotent)
 	@if command -v uv >/dev/null 2>&1; then \
@@ -94,8 +94,11 @@ run: check ## API + dashboard together; prefixed logs; one Ctrl-C tears both dow
 	( cd dashboard && JOBAGENT_API_URL=http://127.0.0.1:$(API_PORT) npm run dev -- --port $(DASH_PORT) 2>&1 | sed -e 's/^/[dash] /' ) & \
 	wait
 
+inbox: ## scan the applying mailbox for outcomes (proposes only, never applies)
+	$(PY) scripts/scan_inbox.py
+
 pipeline: ## one ingest → match pass, no Telegram push
 	$(PY) scripts/pipeline.py --no-send
 
-test: ## offline suite (650 tests, no credentials)
+test: ## offline suite (697 tests, no credentials)
 	$(PY) -m pytest tests/ -q

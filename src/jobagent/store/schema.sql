@@ -78,6 +78,28 @@ CREATE TABLE IF NOT EXISTS applications (
 );
 CREATE INDEX IF NOT EXISTS idx_apps_status ON applications(status);
 
+-- Outcomes detected in the inbox. A PROPOSAL, never an applied change: accepting one
+-- is an explicit operator action, for the same reason sending is (R2). A wrong
+-- automatic transition corrupts the operator's own history silently.
+CREATE TABLE IF NOT EXISTS outcome_proposals (
+    id             TEXT PRIMARY KEY,
+    application_id TEXT NOT NULL REFERENCES applications(id),
+    message_id     TEXT NOT NULL,          -- RFC822 Message-ID; dedups re-reads
+    proposed       TEXT NOT NULL,          -- interview | offer | rejected
+    confidence     TEXT NOT NULL DEFAULT 'low',
+    reason         TEXT NOT NULL DEFAULT '',
+    subject        TEXT NOT NULL DEFAULT '',
+    sender         TEXT NOT NULL DEFAULT '',
+    received_at    TEXT,
+    state          TEXT NOT NULL DEFAULT 'pending',   -- pending | accepted | dismissed
+    created_at     TEXT NOT NULL
+);
+-- One proposal per message per application: re-reading the mailbox must not pile up
+-- duplicates of a decision the operator already made.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_proposal_msg
+    ON outcome_proposals(application_id, message_id);
+CREATE INDEX IF NOT EXISTS idx_proposal_state ON outcome_proposals(state);
+
 CREATE TABLE IF NOT EXISTS events (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     kind        TEXT NOT NULL,
