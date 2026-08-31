@@ -22,6 +22,7 @@ from jobagent.assistant.config_policy import (
     preview,
 )
 from jobagent.assistant.tools import build_tools
+from jobagent.core.schemas import JobPosting, Match, Source
 from jobagent.secrets_store import MANAGED_FIELDS, SECRET_FIELDS
 from jobagent.store.db import Store
 
@@ -255,6 +256,24 @@ def test_read_tools_answer_without_a_confirmation_channel(store, settings):
     a = assistant(store, settings, ask=None)
     out = a.toolbox.execute(ToolCall("c1", "pipeline_health", {}))
     assert not out.is_error and "jobs=" in out.content
+
+
+def test_upskill_tool_is_a_read_tool_that_reports_recorded_gaps(store, settings):
+    jid = store.upsert_job(JobPosting(source=Source.telegram, title="MLOps Engineer",
+                                      company="Acme", description="k8s"))
+    store.upsert_match(Match(job_id=jid, score=0.6,
+                             gaps=["must-have not found: kubernetes"]))
+    a = assistant(store, settings, ask=None)   # no confirmation channel → proves READ
+    out = a.toolbox.execute(ToolCall("c1", "upskill", {}))
+    assert not out.is_error
+    assert "kubernetes" in out.content
+
+
+def test_upskill_tool_is_not_a_send_or_approve_shape():
+    names = {r.spec.name for r in build_tools(store=None, settings=None,
+                                              links=lambda k, t: "")}
+    assert "upskill" in names
+    assert not any(w in "upskill" for w in ("send", "submit", "approve", "apply_to", "ats"))
 
 
 def test_a_config_write_needs_confirmation_even_with_a_channel(store, settings):

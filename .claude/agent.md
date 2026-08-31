@@ -163,7 +163,7 @@ src/jobagent/
 │   └── assistant_routes.py  # /assistant/ask + two-phase /assistant/confirm/{nonce}
 ├── assistant/               # THE DOMAIN HALF OF THE AGENT HARNESS
 │   ├── manifest.py          # build_assistant() — wires tools+policy+audit+knowledge
-│   ├── tools.py             # 14 in-process tools; EXCLUDED = absences, not gates (R26)
+│   ├── tools.py             # 15 in-process tools; EXCLUDED = absences, not gates (R26)
 │   ├── config_policy.py     # CONFIG_WRITABLE allow-list; FROZEN = computed complement
 │   ├── knowledge.py         # postings → FTS5 chunks, all Trust.UNTRUSTED
 │   └── evalset.py           # labeled cases: selection / grounding / in-bounds
@@ -285,7 +285,7 @@ it does, it belongs in the frozen complement, not `CONFIG_WRITABLE`.
 | Vacuous eval pass | The assistant eval printed "grounding 100%" over **zero** graded cases. A number that reassures without measuring is worse than none | Rate is `None`, not `1.0`; the table prints `n/a` |
 | Eval failed a correct answer | The model wrote `12,971`; the store said `12971`. A right answer scored as a miss sends you hunting a bug that is not there | Normalize digit separators on both sides before matching |
 | Fixed prefetch, wrong questions | `prefetch_single_shot` always fetched health + recent runs, so on the degraded path the model never chose a tool — every other question was unanswerable. Measured 50% | Question-aware keyword routing in Python; re-measured 100% |
-| Tiny probe said "reachable" | `llm_doctor --probe` reported a provider healthy when it could not serve a real request — "reply ok" fits where a system prompt plus 14 tool schemas does not | Probe at realistic size too; a doctor consulted when things are broken must not say they are fine |
+| Tiny probe said "reachable" | `llm_doctor --probe` reported a provider healthy when it could not serve a real request — "reply ok" fits where a system prompt plus 15 tool schemas does not | Probe at realistic size too; a doctor consulted when things are broken must not say they are fine |
 | 1 MB job list | `/jobs` shipped `raw` — the untouched source payload — on every row: 63% of the response, ~640 KB per dashboard page load, read by nobody | Stripped on the wire; the store still keeps it. Storage rule ≠ transport rule |
 | …then 3 MB | Removing the per-company cap and fetching 400 rows re-exposed the same defect through a different field: `description` was 95% of the list payload (136 KB of 143 KB over 20 rows) for text the list never renders. 3.0 MB → 346 KB | `description` joined `_WIRE_OMIT`; `/job/{id}` still serves it. **Widening a query re-prices every field on it** |
 | Digest cap on a browse list | The dashboard reused `ranked_matches`, whose `diversify(max_per_company=2)` is right for a bot top-10 and wrong for a triage queue. 231 strong untriaged matches rendered as 46, while the badge beside them said 231 | `max_per_company=None` from `/jobs`. The existing parity test could not see it — every job in it had a distinct company, so the cap never bound |

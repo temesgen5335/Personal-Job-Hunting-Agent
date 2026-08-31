@@ -30,7 +30,9 @@ that will carry it.
   no-fabrication boundary (R1). It rewrites generated content, so it ships **off** and
   needs a live-model check before being trusted (R1b).
 - **Skill-gap upskilling report** (`jobagent/upskill.py`, `GET /upskill`, Telegram
-  `/upskill [fit]`, `scripts/upskill.py`, `make upskill`) — aggregates the gaps the matcher already records
+  `/upskill [fit]`, `scripts/upskill.py`, `make upskill`, and a governed assistant tool
+  `upskill` — READ / Confirm.NEVER, reads recorded gaps, spends no quota, moves no data,
+  R25–R29) — aggregates the gaps the matcher already records
   across scored matches, weights each by fit (a moderate match the candidate could close
   counts more than a weak one), and ranks the recurring ones into a heatmap; non-skill
   filters (seniority, location, hard-exclusions) are reported separately. With an LLM key

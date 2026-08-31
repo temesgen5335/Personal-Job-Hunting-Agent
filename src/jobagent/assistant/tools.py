@@ -189,6 +189,26 @@ def build_tools(*, store, settings, links, index=None) -> list[Registration]:
             f"submitted {(a.get('submitted_at') or '?')[:10]} "
             f"{a.get('title') or '?'} — {a.get('company') or 'unknown'}"))
 
+    def upskill(args: dict) -> str:
+        """Recurring skill gaps across scored matches, weighted by fit. Read-only — it
+        reads gaps the matcher already recorded, spends no quota, and moves no data. The
+        full learning plan (the one model-backed step) lives in `make upskill`, not here.
+        """
+        from jobagent.upskill import skill_gaps, structural_notes
+        min_score = float(args.get("min_score") or 0.5)
+        matches = store.get_matches(limit=FETCH_ROWS, min_score=min_score)
+        gaps = skill_gaps(matches, min_score=min_score, limit=FETCH_ROWS)
+        if not gaps:
+            return (f"No recurring skill gaps across {len(matches)} match(es) with fit "
+                    f"≥ {min_score:.0%}. Score more jobs, or lower min_score.")
+        body = _rows(gaps, lambda g:
+                     f"{g.skill} — {g.count} job(s) (priority {g.weight:.2f})")
+        notes = structural_notes(matches, min_score=min_score)
+        tail = ("\nnon-skill filters: "
+                + ", ".join(f"{k}={v}" for k, v in notes.items())) if notes else ""
+        return (f"Skill gaps across {len(matches)} match(es), fit ≥ {min_score:.0%}:\n"
+                f"{body}{tail}")
+
     def current_config(args: dict) -> str:
         """Non-secret settings only. Credential values never enter a tool result — a
         result is text the model sees, quotes, and may be asked to repeat."""
@@ -346,6 +366,14 @@ def build_tools(*, store, settings, links, index=None) -> list[Registration]:
                      _schema(after_days={"type": "integer",
                                          "description": "days waited (default 7)"})),
             needs_followup, ToolPolicy("needs_followup", Permission.READ, Confirm.NEVER)),
+
+        Registration(
+            ToolSpec("upskill",
+                     "Recurring skill gaps across your scored matches, weighted by fit. "
+                     "Read-only; the full learning plan is `make upskill`.",
+                     _schema(min_score={"type": "number",
+                                        "description": "minimum fit, 0-1 (default 0.5)"})),
+            upskill, ToolPolicy("upskill", Permission.READ, Confirm.NEVER)),
 
         Registration(
             ToolSpec("current_config",

@@ -58,7 +58,7 @@ Added Aug 2026, in two packages whose separation is the whole point:
                      ▼
    ┌──────────────────────────────────────┐   supplies tools, knowledge,
    │  jobagent/assistant  (DOMAIN)        │   prompts, policy — via a manifest
-   │  14 in-process tools · CONFIG_       │
+   │  15 in-process tools · CONFIG_       │
    │  WRITABLE · FTS5 over postings       │
    └───────────────────┬──────────────────┘
                        ▼
