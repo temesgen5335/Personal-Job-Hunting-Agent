@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from jobagent.assistant import ASSISTANT_NAME
 from jobagent.digest import diversify, format_matches
 from jobagent.store import Store
+from jobagent.upskill import upskill_report
 
 HELP_TEXT = (
     "🤖 *Personal Job Agent*\n\n"
@@ -16,6 +17,7 @@ HELP_TEXT = (
     "/jobs [N] — top N job matches (default 10)\n"
     "/apply <rank> — draft a tailored application for job #rank\n"
     "/status — pipeline stats (jobs, sources, matches)\n"
+    "/upskill [fit] — recurring skill gaps across your matches (default fit ≥ 0.5)\n"
     f"/ask <question> — ask {ASSISTANT_NAME} about your pipeline "
     f"(or just say “{ASSISTANT_NAME}, …”)\n"
     "/help — this message\n\n"
@@ -151,9 +153,45 @@ def apply_preview_text(bundle) -> str:
         "",
         f"📎 Tailored CV ({len(bundle.cv_markdown)} chars) attached above.",
     ]
+    ats = getattr(bundle, "ats", None)
+    if ats is not None:
+        lines.append(f"🔎 {ats.summary()}")
     if bundle.apply_method != "email":
         lines.append("\n⚠️ Not an email posting — approving hands you the apply link (Tier-2 form-fill is Phase 4).")
     lines.append("\nApprove to send?")
+    return "\n".join(lines)
+
+
+def upskill_report_for(db_path: str, *, min_score: float = 0.5, limit: int = 12) -> dict:
+    """Open a Store, build the gap report, close it. One store per call (R15)."""
+    store = Store(db_path)
+    try:
+        return upskill_report(store, min_score=min_score, limit=limit)
+    finally:
+        store.close()
+
+
+def upskill_text(report: dict) -> str:
+    """Plain-text skill-gap heatmap for Telegram. No Markdown — gap labels come from the
+    scorers and may contain characters (underscores, dots) that break legacy Markdown."""
+    gaps = report.get("gaps", [])
+    n = report.get("n_jobs", 0)
+    floor = int(round(float(report.get("min_score", 0.5)) * 100))
+    lines = [f"🎯 Skill gaps across {n} match(es) with fit ≥ {floor}%", ""]
+    if not gaps:
+        lines.append("No recurring skill gaps found. Score jobs with /jobs first, "
+                     "or lower the fit floor, e.g. /upskill 0.4")
+        return "\n".join(lines)
+    peak = gaps[0]["count"] or 1
+    for g in gaps:
+        bar = "█" * max(1, round(g["count"] / peak * 10))
+        lines.append(f"• {g['skill']} — {bar} {g['count']} job(s)")
+    structural = report.get("structural") or {}
+    if structural:
+        lines.append("")
+        lines.append("Non-skill filters: "
+                     + ", ".join(f"{k} ({v})" for k, v in structural.items()))
+    lines.append("\nFull learning plan:  make upskill")
     return "\n".join(lines)
 
 

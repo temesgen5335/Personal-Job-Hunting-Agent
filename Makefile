@@ -18,7 +18,7 @@ PY           := $(VENV)/bin/python
 API_PORT     ?= 8077
 DASH_PORT    ?= 1234
 
-.PHONY: install setup demo inbox run run_backend run_bot run_dashboard check test pipeline ask doctor eval_assistant docker_up docker_down
+.PHONY: install setup demo inbox run run_backend run_bot run_dashboard check test pipeline ask upskill doctor eval_assistant docker_up docker_down
 
 install: ## backend + dashboard deps (idempotent)
 	@if command -v uv >/dev/null 2>&1; then \
@@ -84,6 +84,9 @@ eval_assistant: ## run the assistant eval set (spends LLM quota)
 
 ask: ## ask the assistant, e.g. make ask Q="is the pipeline healthy?"
 	@$(PY) scripts/ask.py $(if $(EXPLAIN),--explain) "$(Q)"
+
+upskill: ## skill-gap heatmap + learning plan from recorded match gaps (MIN=0.5)
+	@$(PY) scripts/upskill.py $(MIN)
 
 run_dashboard: ## dashboard only (astro dev on $(DASH_PORT))
 	cd dashboard && JOBAGENT_API_URL=http://127.0.0.1:$(API_PORT) npm run dev -- --port $(DASH_PORT)

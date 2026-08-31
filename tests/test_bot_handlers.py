@@ -135,7 +135,7 @@ def wired(tmp_path):
 
 # --- the owner gate -----------------------------------------------------------
 
-@pytest.mark.parametrize("handler", ["menu", "jobs", "status", "apply_cmd", "ask_cmd"])
+@pytest.mark.parametrize("handler", ["menu", "jobs", "status", "upskill", "apply_cmd", "ask_cmd"])
 def test_every_command_refuses_a_stranger(wired, handler):
     """The bot is single-user and fails closed. This is the property most worth a
     runtime test: a handler that forgot `_guard` would answer anyone who found it."""

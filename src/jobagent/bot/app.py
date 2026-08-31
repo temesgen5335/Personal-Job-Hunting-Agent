@@ -50,6 +50,8 @@ from jobagent.bot.service import (
     resolve_ranked_job,
     set_keywords,
     status_text,
+    upskill_report_for,
+    upskill_text,
 )
 from jobagent.core.schemas import ApplicationStatus
 from jobagent.fit import assess_fit
@@ -71,10 +73,10 @@ def _flt(context) -> MatchFilter:
 
 
 # --- thread helpers: each opens its own Store (SQLite is single-thread) ----------
-def _prepare(db_path, job, profile, cv_master, llm):
+def _prepare(db_path, job, profile, cv_master, llm, settings=None):
     store = Store(db_path)
     try:
-        return prepare_application(store, job, profile, cv_master, llm)
+        return prepare_application(store, job, profile, cv_master, llm, settings=settings)
     finally:
         store.close()
 
@@ -172,6 +174,20 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     finally:
         store.close()
     await update.message.reply_text(text, parse_mode=MD)
+
+
+async def upskill(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/upskill [fit] — recurring skill gaps across scored matches (read-only, no model)."""
+    if not await _guard(update, context):
+        return
+    min_score = 0.5
+    if context.args:
+        try:
+            min_score = max(0.0, min(1.0, float(context.args[0])))
+        except ValueError:
+            pass
+    report = await asyncio.to_thread(upskill_report_for, _db(context), min_score=min_score)
+    await update.message.reply_text(upskill_text(report), disable_web_page_preview=True)
 
 
 async def apply_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -320,7 +336,8 @@ async def _start_apply(context, msg, rank: int) -> None:
         return
     await msg.reply_text(f"✍️ Drafting application for {job.get('title')}… (~a few seconds)")
     try:
-        bundle = await asyncio.to_thread(_prepare, db_path, job, _bd(context, "profile"), cv_master, llm)
+        bundle = await asyncio.to_thread(
+            _prepare, db_path, job, _bd(context, "profile"), cv_master, llm, _bd(context, "settings"))
     except Exception as exc:  # noqa: BLE001
         await msg.reply_text(f"⚠️ Drafting failed: {exc}")
         return
@@ -434,6 +451,7 @@ def build_application(settings, profile, llm, cv_master: str) -> Application:
     app.add_handler(CommandHandler("jobs", jobs))
     app.add_handler(CommandHandler("apply", apply_cmd))
     app.add_handler(CommandHandler("status", status))
+    app.add_handler(CommandHandler("upskill", upskill))
     app.add_handler(CommandHandler("ask", ask_cmd))
     app.add_handler(CallbackQueryHandler(on_button))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))

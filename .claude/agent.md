@@ -142,7 +142,9 @@ src/jobagent/
 ├── fit.py                   # FitReport, heuristic_fit(), llm_fit(), assess_fit() — explainable
 ├── apply/
 │   ├── flow.py              # prepare_application() + approve_and_send() (HITL gate)
-│   ├── generators.py        # tailor_cv(), write_cover_letter(), draft_email()
+│   ├── generators.py        # tailor_cv(), write_cover_letter(), draft_email(); review_draft()/revise_draft()
+│   ├── verify.py            # ats_report(): pure ATS-parseability check on the CV (always on, read-only)
+│   ├── pdf_verify.py        # optional PDF text-layer extractor (vendored, MIT) for ats_report_for_pdf()
 │   ├── email_send.py        # SMTP sender with attachment
 │   ├── ats/fields.py        # detect_platform(), field_plan(), CAPTCHA_SELECTORS
 │   ├── ats/executor.py      # execute() (injectable page), apply_to_job() (Playwright)
@@ -153,6 +155,8 @@ src/jobagent/
 │   └── notify.py            # send_message() with chunk_text() (4096-char limit)
 ├── digest.py                # diversify() (per-company cap), format_matches(),
 │                            #   health_banner() — degraded-run warnings on the digest
+├── upskill.py               # skill_gaps()/upskill_report(): fit-weighted gap heatmap
+│                            #   from Match.gaps; learning_plan() is the one LLM step
 ├── api/
 │   ├── app.py               # FastAPI create_app() factory — all REST endpoints
 │   │                        #   every non-GET route carries dependencies=auth (R19)

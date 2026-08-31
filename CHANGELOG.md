@@ -12,6 +12,32 @@ scoped in [docs/VERSIONING.md](docs/VERSIONING.md) — which is worth reading, b
 Planned work is tracked in [docs/ROADMAP.md](docs/ROADMAP.md), grouped by the release
 that will carry it.
 
+### Added
+- **ATS-parseability report on every tailored CV** (`apply/verify.py`) — a pure,
+  model-free check of the CV the way a résumé parser sees it: contact details present
+  as literal text, no garbled glyphs (`(cid:…)` / `�`), and honest keyword coverage
+  against the posting. Attached to every draft and surfaced in the API response, the
+  Telegram preview, and `scripts/apply.py`. Read-only: it reports gaps, never stuffs
+  keywords (R1). The technique is adapted from
+  [MadsLorentzen/ai-job-search](https://github.com/MadsLorentzen/ai-job-search) (MIT).
+- **Optional PDF text-layer extractor** (`apply/pdf_verify.py`, vendored from the same
+  project, MIT) — runs the identical report over a *rendered* CV's extracted text
+  (`ats_report_for_pdf`), so the artifact actually attached to an application can be
+  verified. pypdf → Poppler fallback; no PDF toolchain needed for the base install.
+- **Drafter → reviewer → revise loop** (`APPLY_REVIEW_ENABLED`, default off) — a second
+  agent critiques the tailored CV and cover letter against the real CV and the posting,
+  and the drafter revises. Both new prompts receive the CV (R1a) and re-assert the
+  no-fabrication boundary (R1). It rewrites generated content, so it ships **off** and
+  needs a live-model check before being trusted (R1b).
+- **Skill-gap upskilling report** (`jobagent/upskill.py`, `GET /upskill`, Telegram
+  `/upskill [fit]`, `scripts/upskill.py`, `make upskill`) — aggregates the gaps the matcher already records
+  across scored matches, weights each by fit (a moderate match the candidate could close
+  counts more than a weak one), and ranks the recurring ones into a heatmap; non-skill
+  filters (seniority, location, hard-exclusions) are reported separately. With an LLM key
+  set, the CLI also prints a prioritized now/next/later learning plan. Aggregation is pure
+  and offline; the plan is the only model-backed step. Borrowed in spirit from
+  [MadsLorentzen/ai-job-search](https://github.com/MadsLorentzen/ai-job-search) (MIT).
+
 ## [3.7.0] — 2026-08-20
 
 *Theme: the multi-LLM layer becomes a service you could lift into another project.*

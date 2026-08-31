@@ -34,6 +34,22 @@ class Settings(BaseSettings):
             return 0
         return v
 
+    # Advanced apply-review flags: a blank from CI/env means "use the default" rather
+    # than a parse error (bool("") and int("") both raise in pydantic).
+    @field_validator("apply_review_enabled", mode="before")
+    @classmethod
+    def _blank_bool_false(cls, v):
+        if isinstance(v, str) and v.strip() == "":
+            return False
+        return v
+
+    @field_validator("apply_review_rounds", mode="before")
+    @classmethod
+    def _blank_rounds_to_one(cls, v):
+        if v is None or (isinstance(v, str) and v.strip() == ""):
+            return 1
+        return v
+
     # --- LLM: multi-provider with failover (see jobagent/llm_client.py) ---
     # Primary provider; the rest become automatic backups. Free providers stay as
     # backups even after you add a paid one and point LLM_PROVIDER at it.
@@ -116,6 +132,14 @@ class Settings(BaseSettings):
     cors_origins: str = Field(
         "http://localhost:1234,http://127.0.0.1:1234", alias="JOBAGENT_CORS_ORIGINS"
     )
+
+    # --- Application review (drafter → reviewer → revise; see apply/flow.py) --------
+    # A second agent critiques the tailored CV/cover letter and the drafter revises.
+    # It REWRITES generated content, so it ships OFF: turn it on only after a live-model
+    # check that the revise prompt still honors R1 (no fabrication) — see R1b. The
+    # always-on ATS-parseability report (apply/verify.py) is independent of this flag.
+    apply_review_enabled: bool = Field(False, alias="APPLY_REVIEW_ENABLED")
+    apply_review_rounds: int = Field(1, alias="APPLY_REVIEW_ROUNDS")
 
     # --- Ingest gate (dashboard-editable; see ingestion/gate.py) -------------------
     # Applied between fetch and store, so filtered postings never enter the store and

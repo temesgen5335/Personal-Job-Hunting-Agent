@@ -151,6 +151,87 @@ def draft_email(candidate_name: str, job: dict, llm, cv_master_md: str = "") -> 
     return _parse_subject_body(raw, f"Application for {job.get('title')}")
 
 
+# --- Drafter → reviewer → revise -------------------------------------------------
+# A second pass that critiques a draft against the real CV and the job, then revises.
+# Both prompts receive the CV (R1a) and re-assert the no-fabrication boundary (R1).
+# These are NEW generator prompts: FakeLLM tests assert their guardrails, but per R1b
+# only a live-model run proves them — which is why the flow gates the revise step
+# behind a setting that ships OFF (see APPLY_REVIEW_ENABLED).
+
+REVIEW_SYSTEM = (
+    "You are a critical reviewer of a job-application draft (a CV or a cover letter). "
+    "You do NOT rewrite it — you critique it. " + _NO_FABRICATION + " "
+    "Judge the draft against the candidate's real CV and the job posting on: "
+    "(1) fabrication risk — any claim not grounded in the CV; "
+    "(2) missing keywords the CV genuinely supports but the draft omits; "
+    "(3) weak or generic framing; (4) structure and length. "
+    "NEVER suggest inventing experience to cover a gap — a genuine gap must stay visible. "
+    'Return STRICT JSON: {"fabrication_risk": ["..."], "missing_keywords": ["..."], '
+    '"weaknesses": ["..."], "verdict": "ok" | "revise"}.'
+)
+
+REVISE_SYSTEM = (
+    "You revise a job-application draft using a reviewer's critique. " + _NO_FABRICATION + " "
+    "Apply ONLY changes grounded in the candidate's CV: add a missing keyword ONLY if the "
+    "CV genuinely supports it, tighten weak framing, fix structure and length. Leave "
+    "genuine gaps visible — never invent experience to satisfy a critique, and never stuff "
+    "keywords the CV does not support. Preserve the draft's format exactly (a Markdown CV "
+    "stays Markdown; a cover letter stays prose). Output only the revised draft, no commentary."
+)
+
+
+def review_prompt(kind: str, draft: str, cv_master_md: str, job: dict) -> tuple[str, str]:
+    return REVIEW_SYSTEM, (
+        f"DRAFT KIND: {kind}\n"
+        f"CANDIDATE CV (source of truth):\n{cv_master_md}\n\n"
+        f"{_job_block(job)}\n\nDRAFT TO REVIEW:\n{draft}"
+    )
+
+
+def _parse_review(raw: str) -> dict:
+    """Parse the reviewer JSON, degrading to a neutral 'ok' verdict on bad output so a
+    malformed critique never blocks or corrupts the pipeline."""
+    text = (raw or "").strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```[a-zA-Z0-9]*\n?", "", text)
+        text = re.sub(r"\n?```$", "", text).strip()
+    try:
+        data = json.loads(text, strict=False)
+        if not isinstance(data, dict):
+            raise ValueError("not an object")
+    except (json.JSONDecodeError, ValueError, TypeError):
+        return {"fabrication_risk": [], "missing_keywords": [], "weaknesses": [], "verdict": "ok"}
+    listy = lambda k: [str(x) for x in data.get(k) or [] if str(x).strip()]  # noqa: E731
+    verdict = "revise" if str(data.get("verdict", "")).lower() == "revise" else "ok"
+    return {
+        "fabrication_risk": listy("fabrication_risk"),
+        "missing_keywords": listy("missing_keywords"),
+        "weaknesses": listy("weaknesses"),
+        "verdict": verdict,
+    }
+
+
+def review_draft(kind: str, draft: str, cv_master_md: str, job: dict, llm) -> dict:
+    """Critique a draft. Returns the parsed reviewer verdict (never raises on bad JSON)."""
+    system, user = review_prompt(kind, draft, cv_master_md, job)
+    return _parse_review(llm.complete(system, user, json_mode=True))
+
+
+def revise_prompt(kind: str, draft: str, critique: dict, cv_master_md: str, job: dict) -> tuple[str, str]:
+    return REVISE_SYSTEM, (
+        f"DRAFT KIND: {kind}\n"
+        f"CANDIDATE CV (the ONLY permitted source of claims):\n{cv_master_md}\n\n"
+        f"{_job_block(job)}\n\n"
+        f"REVIEWER CRITIQUE (JSON):\n{json.dumps(critique)}\n\n"
+        f"CURRENT DRAFT:\n{draft}"
+    )
+
+
+def revise_draft(kind: str, draft: str, critique: dict, cv_master_md: str, job: dict, llm) -> str:
+    system, user = revise_prompt(kind, draft, critique, cv_master_md, job)
+    return llm.complete(system, user).strip()
+
+
 def followup_prompt(candidate_name: str, job: dict, days_waiting: int) -> tuple[str, str]:
     return FOLLOWUP_SYSTEM, (
         f"Candidate name: {candidate_name}\n"

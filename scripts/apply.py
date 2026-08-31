@@ -41,11 +41,13 @@ def main() -> None:
             job = ranked[int(arg) - 1]
         except (ValueError, IndexError):
             sys.exit(f"No ranked job #{arg}. Run scripts/match.py to see the list.")
-        bundle = prepare_application(store, job, profile, load_cv_master(), llm)
+        bundle = prepare_application(store, job, profile, load_cv_master(), llm, settings=settings)
         print(f"\n=== TAILORED CV ===\n{bundle.cv_markdown}\n")
         print(f"=== COVER LETTER ===\n{bundle.cover_letter}\n")
         print(f"=== EMAIL ===\nSubject: {bundle.email_subject}\n\n{bundle.email_body}\n")
         print(f"apply_method: {bundle.apply_method}")
+        if bundle.ats is not None:
+            print(f"ATS: {bundle.ats.summary()}")
         print(f"\nReview above. To send:  python scripts/apply.py approve {bundle.application_id}")
     else:  # approve
         print(approve_and_send(store, arg, settings, profile))

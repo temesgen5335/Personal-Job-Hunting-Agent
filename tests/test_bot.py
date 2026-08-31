@@ -12,6 +12,8 @@ from jobagent.bot.service import (
     parse_callback_data,
     resolve_ranked_job,
     status_text,
+    upskill_report_for,
+    upskill_text,
 )
 from jobagent.core.schemas import JobPosting, Match, Source
 from jobagent.store import Store
@@ -32,6 +34,33 @@ def test_status_text_renders_counts():
     assert "Total jobs: 7000" in text
     assert "greenhouse: 5000" in text
     assert "strong ≥70%: 120" in text
+
+
+def test_upskill_text_renders_gap_heatmap():
+    report = {"n_jobs": 3, "min_score": 0.5,
+              "gaps": [{"skill": "kubernetes", "weight": 0.9, "count": 2, "examples": []},
+                       {"skill": "aws", "weight": 0.5, "count": 1, "examples": []}],
+              "structural": {"seniority": 1}}
+    text = upskill_text(report)
+    assert "fit ≥ 50%" in text
+    assert "kubernetes" in text and "2 job(s)" in text
+    assert "seniority (1)" in text
+    assert "make upskill" in text
+
+
+def test_upskill_text_handles_no_gaps():
+    text = upskill_text({"n_jobs": 0, "min_score": 0.5, "gaps": [], "structural": {}})
+    assert "No recurring skill gaps" in text
+
+
+def test_upskill_report_for_reads_store(tmp_path):
+    store = Store(str(tmp_path / "u.db"))
+    store.init_schema()
+    jid = store.upsert_job(JobPosting(source=Source.remoteok, title="MLOps", company="Acme"))
+    store.upsert_match(Match(job_id=jid, score=0.6, gaps=["must-have not found: kubernetes"]))
+    store.close()
+    report = upskill_report_for(str(tmp_path / "u.db"), min_score=0.5)
+    assert report["gaps"][0]["skill"] == "kubernetes"
 
 
 def test_jobs_text_from_store(tmp_path):

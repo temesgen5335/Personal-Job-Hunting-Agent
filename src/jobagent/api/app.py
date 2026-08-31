@@ -45,6 +45,7 @@ from jobagent.preferences import (
 )
 from jobagent.secrets_store import MANAGED_FIELDS, SecretStore, masked_view
 from jobagent.store import Store
+from jobagent.upskill import upskill_report
 
 _UNSET = object()
 
@@ -626,6 +627,16 @@ def create_app(settings=None, profile=None, llm: Any = _UNSET, cv_master: str | 
         finally:
             s.close()
 
+    @app.get("/upskill", dependencies=read_auth)
+    def upskill(min_score: float = 0.5, limit: int = 20):
+        """Recurring skill gaps across scored matches, weighted by fit. Read-only, no
+        model — the LLM learning plan lives in `scripts/upskill.py`."""
+        s = store()
+        try:
+            return upskill_report(s, min_score=min_score, limit=limit)
+        finally:
+            s.close()
+
     @app.post("/followups/{app_id}/draft", dependencies=auth)
     def followup_draft(app_id: str, body: FollowupReq | None = None):
         """Draft a nudge for a quiet application.
@@ -761,7 +772,7 @@ def create_app(settings=None, profile=None, llm: Any = _UNSET, cv_master: str | 
             if not job:
                 raise HTTPException(404, "Job not found.")
             try:
-                b = prepare_application(s, job, _profile(), cv_master, current_llm)
+                b = prepare_application(s, job, _profile(), cv_master, current_llm, settings=settings)
             except RuntimeError as exc:
                 if _ALL_PROVIDERS_FAILED in str(exc):
                     raise _llm_unavailable(exc) from exc
@@ -770,6 +781,8 @@ def create_app(settings=None, profile=None, llm: Any = _UNSET, cv_master: str | 
                 "application_id": b.application_id, "apply_method": b.apply_method,
                 "cv_markdown": b.cv_markdown, "cover_letter": b.cover_letter,
                 "email_subject": b.email_subject, "email_body": b.email_body,
+                "ats": b.ats.as_dict() if b.ats else None,
+                "review": b.review,
             }
         finally:
             s.close()
