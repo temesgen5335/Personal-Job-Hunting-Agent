@@ -53,7 +53,7 @@ Writes need `DASHBOARD_PASSWORD` set — the API gates every non-GET route (R19)
 - **Telegram bot** (`src/jobagent/bot/`) — calls service layer in-process (no HTTP hop).
 - **Dashboard** (`dashboard/`) — Astro SSR, fetches FastAPI REST API.
 - **Store** (`src/jobagent/store/db.py`) — SQLite, per-request open/close for thread safety.
-- **MultiLLM** (`src/jobagent/llm_client.py`) — ordered failover: Groq → Gemini → OpenRouter → custom → OpenAI → Anthropic.
+- **MultiLLM** (`src/jobagent/llm_client.py`) — table-driven ordered failover over any OpenAI-compatible provider (Groq, Cerebras, Gemini, OpenRouter, SambaNova, Nvidia, Mistral, Llama, GitHub, Pollinations-keyless, custom, OpenAI, Anthropic). `OPENROUTER_FREE_FANOUT` fetches the live `:free` model list and tries them all; withdrawn slugs self-heal.
 - **Secret store** (`src/jobagent/secrets_store.py`) — Fernet-encrypted config on disk, overlays `.env`.
 - **Auth** — every non-GET API route requires a bearer token from `DASHBOARD_PASSWORD`; fails closed (R19).
 - **Health** (`store.pipeline_health()`) — staleness, error count, per-source freshness; bannered in the dashboard and the digest.

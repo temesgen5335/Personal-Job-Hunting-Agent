@@ -13,6 +13,18 @@ Planned work is tracked in [docs/ROADMAP.md](docs/ROADMAP.md), grouped by the re
 that will carry it.
 
 ### Added
+- **Smart multi-provider LLM router with live free-model discovery** (`llm_client.py`) —
+  the failover chain is now table-driven off one `_PROVIDERS` registry and gains SambaNova,
+  Nvidia (NIM), Mistral, Meta Llama, and keyless **Pollinations** (opt-in) alongside the
+  existing Groq/Gemini/OpenRouter/Cerebras/GitHub/OpenAI/Anthropic — every one OpenAI-API
+  compatible, activated by adding a key. **`OPENROUTER_FREE_FANOUT`** (default off) fetches
+  OpenRouter's live `:free` chat-model list (`openrouter_free_models()`), ranks it
+  (tool-capable + large-context first), and adds every model as a failover backend — so a
+  withdrawn free slug (like the `gpt-oss-20b:free` that started 404ing) is simply skipped
+  for the next working one, cached hourly, degrading to the configured model if the fetch
+  fails. Verified live: of the top free models, gated ones 403 and the router falls through
+  to `minimax-m3` / `nvidia/nemotron`. Keyless Pollinations is opt-in so a no-key install
+  still reports "no LLM configured" rather than silently routing through a third party.
 - **ATS-parseability report on every tailored CV** (`apply/verify.py`) — a pure,
   model-free check of the CV the way a résumé parser sees it: contact details present
   as literal text, no garbled glyphs (`(cid:…)` / `�`), and honest keyword coverage
@@ -24,6 +36,15 @@ that will carry it.
   project, MIT) — runs the identical report over a *rendered* CV's extracted text
   (`ats_report_for_pdf`), so the artifact actually attached to an application can be
   verified. pypdf → Poppler fallback; no PDF toolchain needed for the base install.
+- **Markdown → PDF CV render** (`apply/render.py`, `APPLY_RENDER_CV_PDF`, default off) —
+  closes the verify loop: with the flag on, the tailored CV is rendered to a PDF (fpdf2,
+  pure Python — added to the `apply` extra), that PDF is what `approve_and_send` attaches,
+  and the ATS report is run over *its* extracted text — so the report now describes the
+  exact bytes that get sent, not just the Markdown. Single-column by design (a parser
+  reads it cleanly); if the renderer is missing it degrades to verifying the Markdown and
+  attaching the static `profile.cv_path`, never blocking a draft. Ships off: an
+  auto-rendered CV is plainer than a hand-designed one, so keep your own PDF unless you
+  want this.
 - **Drafter → reviewer → revise loop** (`APPLY_REVIEW_ENABLED`, default off) — a second
   agent critiques the tailored CV and cover letter against the real CV and the posting,
   and the drafter revises. Both new prompts receive the CV (R1a) and re-assert the

@@ -10,12 +10,13 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 
 from jobagent.apply.email_send import send_email
 from jobagent.apply.generators import (
     draft_email, review_draft, revise_draft, tailor_cv, write_cover_letter,
 )
-from jobagent.apply.verify import AtsReport, ats_report
+from jobagent.apply.verify import AtsReport, ats_report, ats_report_for_pdf
 from jobagent.core.schemas import Application, ApplicationStatus, ApplyMethod, CVVariant, Event
 from jobagent.preferences import Profile
 from jobagent.store import Store
@@ -48,6 +49,13 @@ class AssetBundle:
     apply_method: str
     ats: AtsReport | None = None      # ATS-parseability report on the tailored CV
     review: dict | None = None        # reviewer verdicts, only when review is enabled
+    cv_pdf_path: str | None = None    # rendered CV PDF, only when APPLY_RENDER_CV_PDF is on
+
+
+def cv_pdf_path_for(application_id: str) -> Path:
+    """Deterministic path for an application's rendered CV, so prepare (which writes it)
+    and approve (which attaches it) agree without a DB column. Under gitignored artifacts/."""
+    return Path("artifacts") / f"cv_{application_id}.pdf"
 
 
 def _review_and_revise(kind: str, draft: str, cv_master_md: str, job: dict, llm, rounds: int) -> tuple[str, dict]:
@@ -83,8 +91,6 @@ def prepare_application(store: Store, job: dict, profile: Profile, cv_master_md:
 
     subject, body = draft_email(profile.name or "Candidate", job, llm, cv_master_md)
 
-    ats = ats_report(cv_md, job, name=profile.name, email=profile.email, phone=profile.phone)
-
     cv_id = store.insert_cv_variant(
         CVVariant(job_id=job["id"], base_cv_id="master",
                   content_markdown=cv_md, notes=f"Tailored to {job.get('company')} — {job.get('title')}")
@@ -99,13 +105,33 @@ def prepare_application(store: Store, job: dict, profile: Profile, cv_master_md:
             apply_method=ApplyMethod(job.get("apply_method") or "unknown"),
         )
     )
+
+    # Optionally render the tailored CV to a PDF and verify THAT — so the report
+    # describes the exact file approve_and_send will attach. Off by default; if the
+    # renderer is missing or fails, degrade to verifying the Markdown (never block a draft).
+    cv_pdf_path, ats = None, None
+    if settings is not None and getattr(settings, "apply_render_cv_pdf", False):
+        try:
+            from jobagent.apply.render import render_cv_pdf
+            path = str(cv_pdf_path_for(app_id))
+            render_cv_pdf(cv_md, path)
+            ats = ats_report_for_pdf(path, job, name=profile.name,
+                                     email=profile.email, phone=profile.phone)
+            cv_pdf_path = path
+        except Exception:  # noqa: BLE001 — RenderUnavailable or any render/extract error
+            cv_pdf_path, ats = None, None
+    if ats is None:
+        ats = ats_report(cv_md, job, name=profile.name, email=profile.email, phone=profile.phone)
+
     store.log_event(Event(kind="prepare", job_id=job["id"], payload={
         "application_id": app_id,
         "ats_ok": ats.ok, "ats_coverage": round(ats.coverage, 3),
-        "ats_missing": ats.missing[:8], "reviewed": review is not None,
+        "ats_missing": ats.missing[:8], "ats_extractor": ats.extractor,
+        "reviewed": review is not None, "cv_pdf": cv_pdf_path is not None,
     }))
     return AssetBundle(app_id, job, cv_md, cover, subject, body,
-                       job.get("apply_method") or "unknown", ats=ats, review=review)
+                       job.get("apply_method") or "unknown",
+                       ats=ats, review=review, cv_pdf_path=cv_pdf_path)
 
 
 def approve_and_send(store: Store, application_id: str, settings, profile: Profile, mailer=send_email) -> str:
@@ -132,12 +158,17 @@ def approve_and_send(store: Store, application_id: str, settings, profile: Profi
 
     draft = json.loads(app["email_draft"])
     now = datetime.now(timezone.utc).isoformat()
+    # Attach the tailored CV PDF if one was rendered at prepare time (the artifact the
+    # ATS report verified); otherwise fall back to the candidate's static CV.
+    rendered = cv_pdf_path_for(application_id)
+    attachment = str(rendered) if rendered.is_file() else (profile.cv_path or None)
     mailer(
         settings, to_addr, draft["subject"], draft["body"],
-        attachment_path=profile.cv_path or None,
+        attachment_path=attachment,
     )
     store.update_application(application_id, status=ApplicationStatus.submitted.value,
                              approved_at=now, submitted_at=now)
     store.log_event(Event(kind="submit", job_id=app["job_id"],
-                          payload={"to": to_addr, "subject": draft["subject"]}))
+                          payload={"to": to_addr, "subject": draft["subject"],
+                                   "cv": "tailored_pdf" if rendered.is_file() else "static"}))
     return f"✅ Sent to {to_addr} — “{draft['subject']}”."

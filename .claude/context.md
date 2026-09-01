@@ -200,5 +200,5 @@ not-seen-in-60-days would remove 3,417.
 
 - **11,700+** jobs scored in a live run (8,253 fetched in a single pass across 6 adapters)
 - **40** companies in the ATS watchlist (Greenhouse/Lever/Ashby)
-- **759** tests across 49 files — all run offline, no network, no credentials
+- **759** tests across 50 files — all run offline, no network, no credentials
 - **6** LLM providers with automatic failover (3 free, 3 paid)

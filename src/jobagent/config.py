@@ -36,11 +36,19 @@ class Settings(BaseSettings):
 
     # Advanced apply-review flags: a blank from CI/env means "use the default" rather
     # than a parse error (bool("") and int("") both raise in pydantic).
-    @field_validator("apply_review_enabled", mode="before")
+    @field_validator("apply_review_enabled", "apply_render_cv_pdf",
+                     "openrouter_free_fanout", "pollinations_enabled", mode="before")
     @classmethod
     def _blank_bool_false(cls, v):
         if isinstance(v, str) and v.strip() == "":
             return False
+        return v
+
+    @field_validator("openrouter_free_max", mode="before")
+    @classmethod
+    def _blank_free_max(cls, v):
+        if v is None or (isinstance(v, str) and v.strip() == ""):
+            return 6
         return v
 
     @field_validator("apply_review_rounds", mode="before")
@@ -68,6 +76,12 @@ class Settings(BaseSettings):
     # GitHub Models: free with a GitHub account. The credential is a PAT with the
     # `models:read` scope — not a vendor API key.
     github_models_token: str = Field("", alias="GITHUB_MODELS_TOKEN")
+    # More OpenAI-compatible providers with free/generous tiers. All slot into the same
+    # failover chain (llm_client._PROVIDERS); add a key and they activate in order.
+    sambanova_api_key: str = Field("", alias="SAMBANOVA_API_KEY")   # fast Llama inference, free tier
+    nvidia_api_key: str = Field("", alias="NVIDIA_API_KEY")         # NVIDIA NIM (integrate.api.nvidia.com)
+    mistral_api_key: str = Field("", alias="MISTRAL_API_KEY")       # Mistral La Plateforme
+    llama_api_key: str = Field("", alias="LLAMA_API_KEY")           # Meta Llama API (api.llama.com)
 
     # Per-provider model (sensible free defaults).
     # llama-3.3-70b-versatile over llama-3.1-8b-instant, measured on this project's own
@@ -85,19 +99,38 @@ class Settings(BaseSettings):
     # model that can complete a tool loop, and a default that silently can't would make
     # every agent task take the degraded path.
     groq_model: str = Field("openai/gpt-oss-20b", alias="GROQ_MODEL")
-    # The previous default (meta-llama/llama-3.3-70b-instruct:free) now 404s — OpenRouter
-    # moved it behind the paid slug, so the third provider in the chain was dead on every
-    # call. Verified live Aug 2026: gpt-oss-20b:free answers in ~12s (nemotron-3-super
-    # also works but takes ~30s), same family as the gpt-oss-120b measured at 20/20.
-    # :free slugs are withdrawn without notice — if this 404s, list the current ones at
+    # :free slugs are withdrawn without notice: meta-llama/llama-3.3-70b-instruct:free
+    # 404'd, then its replacement openai/gpt-oss-20b:free did too (verified Sep 2026).
+    # This is only the FALLBACK now — openrouter_free_fanout fetches the live free list and
+    # tries them all, so a dead slug self-heals. minimax-m3:free verified live (1M ctx,
+    # tools). If it 404s, the fan-out covers you; to refresh, list the current free slugs at
     # https://openrouter.ai/api/v1/models and pick one advertising "tools".
-    openrouter_model: str = Field("openai/gpt-oss-20b:free", alias="OPENROUTER_MODEL")
+    openrouter_model: str = Field("minimax/minimax-m3:free", alias="OPENROUTER_MODEL")
     openai_model: str = Field("gpt-4o-mini", alias="OPENAI_MODEL")
     gemini_model: str = Field("gemini-flash-latest", alias="GEMINI_MODEL")
     anthropic_model: str = Field("claude-sonnet-4-6", alias="ANTHROPIC_MODEL")
     qwen_model: str = Field("qwen-plus", alias="QWEN_MODEL")
     cerebras_model: str = Field("llama-3.3-70b", alias="CEREBRAS_MODEL")
     github_models_model: str = Field("openai/gpt-4o-mini", alias="GITHUB_MODELS_MODEL")
+    # Defaults are best-effort current free/low-cost slugs — override per each provider's
+    # model list if one 404s (the same way OpenRouter slugs rot).
+    sambanova_model: str = Field("Meta-Llama-3.3-70B-Instruct", alias="SAMBANOVA_MODEL")
+    nvidia_model: str = Field("meta/llama-3.3-70b-instruct", alias="NVIDIA_MODEL")
+    mistral_model: str = Field("mistral-small-latest", alias="MISTRAL_MODEL")
+    llama_model: str = Field("Llama-3.3-70B-Instruct", alias="LLAMA_MODEL")
+    pollinations_model: str = Field("openai", alias="POLLINATIONS_MODEL")
+
+    # OpenRouter free-model fan-out: fetch the live list of `:free` chat models and try
+    # them ALL as failover backends, so a withdrawn slug is just skipped for the next one.
+    # ON by default — it is the resilient behavior (verified: gated models 403, the router
+    # falls through to a working one), the fetch is cached hourly, and it degrades to the
+    # single configured model if the list can't be fetched. Only matters with an OpenRouter
+    # key. Set false to pin the single OPENROUTER_MODEL instead.
+    openrouter_free_fanout: bool = Field(True, alias="OPENROUTER_FREE_FANOUT")
+    openrouter_free_max: int = Field(6, alias="OPENROUTER_FREE_MAX")   # cap the fan-out
+    # Pollinations (text.pollinations.ai) needs no API key. Opt-in so a no-key install
+    # still reports "no LLM configured" instead of silently routing through a third party.
+    pollinations_enabled: bool = Field(False, alias="POLLINATIONS_ENABLED")
 
     # Custom OpenAI-compatible endpoint (Ollama / vLLM / any local or hosted server).
     custom_llm_base_url: str = Field("", alias="CUSTOM_LLM_BASE_URL")
@@ -140,6 +173,11 @@ class Settings(BaseSettings):
     # always-on ATS-parseability report (apply/verify.py) is independent of this flag.
     apply_review_enabled: bool = Field(False, alias="APPLY_REVIEW_ENABLED")
     apply_review_rounds: int = Field(1, alias="APPLY_REVIEW_ROUNDS")
+    # Render the tailored CV to a PDF and attach THAT (so the ATS report checks the exact
+    # bytes that get sent), instead of the static profile.cv_path. Needs fpdf2 (the
+    # `apply` extra). Ships OFF: it changes what is attached, and an auto-rendered CV is
+    # plainer than a hand-designed one — keep your own PDF unless you want this.
+    apply_render_cv_pdf: bool = Field(False, alias="APPLY_RENDER_CV_PDF")
 
     # --- Ingest gate (dashboard-editable; see ingestion/gate.py) -------------------
     # Applied between fetch and store, so filtered postings never enter the store and

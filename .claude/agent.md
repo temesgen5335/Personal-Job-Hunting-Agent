@@ -145,6 +145,7 @@ src/jobagent/
 │   ├── generators.py        # tailor_cv(), write_cover_letter(), draft_email(); review_draft()/revise_draft()
 │   ├── verify.py            # ats_report(): pure ATS-parseability check on the CV (always on, read-only)
 │   ├── pdf_verify.py        # optional PDF text-layer extractor (vendored, MIT) for ats_report_for_pdf()
+│   ├── render.py            # optional Markdown→PDF CV render (fpdf2); APPLY_RENDER_CV_PDF closes the verify loop
 │   ├── email_send.py        # SMTP sender with attachment
 │   ├── ats/fields.py        # detect_platform(), field_plan(), CAPTCHA_SELECTORS
 │   ├── ats/executor.py      # execute() (injectable page), apply_to_job() (Playwright)

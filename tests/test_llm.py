@@ -88,3 +88,67 @@ def test_paid_primary_keeps_free_backups():
     # Future: paid anthropic primary, free groq/gemini remain as backups.
     s = _settings(llm_provider="anthropic", anthropic_api_key="k", groq_api_key="k", gemini_api_key="k")
     assert build_llm(s).chain == ["anthropic", "groq", "gemini"]
+
+
+# --- new providers ---------------------------------------------------------------
+
+def test_new_openai_compatible_providers_register_when_keyed():
+    s = _settings(llm_provider="groq", groq_api_key="k",
+                  sambanova_api_key="k", mistral_api_key="k", nvidia_api_key="k")
+    # order follows _DEFAULT_ORDER: groq, …, sambanova, nvidia, mistral, …
+    assert build_llm(s).chain == ["groq", "sambanova", "nvidia", "mistral"]
+
+
+def test_pollinations_is_keyless_but_opt_in():
+    on = _settings(llm_provider="groq", groq_api_key="k", pollinations_enabled=True)
+    assert "pollinations" in build_llm(on).chain
+    off = _settings(llm_provider="groq", groq_api_key="k")   # flag unset → False
+    assert "pollinations" not in build_llm(off).chain
+
+
+def test_no_keys_still_none_even_though_pollinations_exists():
+    assert build_llm(_settings()) is None   # keyless provider is opt-in, so still None
+
+
+# --- OpenRouter free-model discovery + fan-out -----------------------------------
+
+def test_rank_free_keeps_free_chat_models_tools_and_big_context_first():
+    from jobagent.llm_client import _rank_free
+    text = {"input_modalities": ["text"], "output_modalities": ["text"]}
+    models = [
+        {"id": "a/small:free", "context_length": 8000, "architecture": text, "supported_parameters": []},
+        {"id": "a/big:free", "context_length": 1_000_000, "architecture": text, "supported_parameters": ["tools"]},
+        {"id": "a/audio:free", "context_length": 9, "architecture": {"input_modalities": ["text"], "output_modalities": ["audio"]}},
+        {"id": "a/paid", "context_length": 9, "architecture": text},  # not :free
+    ]
+    assert _rank_free(models) == ["a/big:free", "a/small:free"]   # tools+big first; audio & paid dropped
+
+
+def test_openrouter_free_models_returns_empty_on_fetch_failure(monkeypatch):
+    import httpx
+    from jobagent import llm_client
+    llm_client._free_cache.update(at=-1e18, ids=None)   # bust the cache
+
+    def boom(*a, **k):
+        raise httpx.ConnectError("no network")
+    monkeypatch.setattr(httpx, "get", boom)
+    assert llm_client.openrouter_free_models("k") == []   # degrades, never raises
+
+
+def test_build_llm_fans_out_over_live_free_models(monkeypatch):
+    monkeypatch.setattr("jobagent.llm_client.openrouter_free_models",
+                        lambda api_key, limit=6: ["nvidia/nemotron:free", "z-ai/glm-5.2:free"])
+    s = _settings(llm_provider="openrouter", openrouter_api_key="k", openrouter_free_fanout=True)
+    assert build_llm(s).chain == ["openrouter:nemotron", "openrouter:glm-5.2"]
+
+
+def test_openrouter_stays_single_model_when_fanout_off():
+    s = _settings(llm_provider="openrouter", openrouter_api_key="k")   # fanout unset → off
+    assert build_llm(s).chain == ["openrouter"]
+
+
+def test_fanout_falls_back_to_configured_model_when_list_empty(monkeypatch):
+    monkeypatch.setattr("jobagent.llm_client.openrouter_free_models",
+                        lambda api_key, limit=6: [])   # fetch failed
+    s = _settings(llm_provider="openrouter", openrouter_api_key="k", openrouter_free_fanout=True)
+    assert build_llm(s).chain == ["openrouter"]   # single configured model, not empty
