@@ -44,6 +44,7 @@ _DOMAIN_SATURATION = 3
 _PENALTY_NOT_REMOTE = 0.30
 _PENALTY_MUST_HAVE = 0.10
 _PENALTY_SENIORITY = 0.20
+_PENALTY_TZ = 0.15
 _EXCLUDED_CEILING = 0.15
 
 # Titles that mismatch a mid/senior individual-contributor profile. Kept deliberately
@@ -116,6 +117,89 @@ def _seniority_gap(title: str, profile: Profile) -> str | None:
     return None
 
 
+# --- geographic eligibility ---------------------------------------------------
+# A posting can *require* a work location the candidate cannot satisfy — "US-based",
+# "authorized to work in the United States", "Remote (US)". For a candidate outside that
+# region this is disqualifying however well the skills match, so a confirmed lock caps the
+# score like an exclusion. This runs only when the profile states a `location` (a profile
+# that never set one is unaffected), and it SPARES a lock naming the candidate's own region
+# — a US-based candidate is not penalized for US roles, so the dimension is reusable by
+# anyone (R22), not wired to one home country. Timezone-overlap requirements are a softer
+# signal (down-rank, not a cap): overlap is often negotiable where authorization is not.
+#
+# Precision over recall: a false lock buries a good job, so every trigger pairs a
+# requirement cue with a region token; a bare mention ("our HQ is in the US") never fires,
+# and short codes ("us", "uk") match only as whole tokens, never inside "Belarus".
+
+_REGIONS: dict[str, tuple[str, ...]] = {
+    "US": ("united states", "u.s.a.", "u.s.", "usa", "us"),
+    "UK": ("united kingdom", "u.k.", "great britain", "uk"),
+    "EU": ("european union", "eea"),
+    "Canada": ("canada",),
+    "India": ("india",),
+    "Australia": ("australia",),
+}
+
+# {r} is replaced by a region's word-boundaried alternation. A region counts as LOCKED
+# only when one of these fires.
+_LOCK_TEMPLATES: tuple[str, ...] = (
+    r"authori[sz]ed to work in (?:the )?{r}",
+    r"work authori[sz]ation in (?:the )?{r}",
+    r"{r} work authori[sz]ation",
+    r"must be (?:based|located|physically located) in (?:the )?{r}",
+    r"must reside in (?:the )?{r}",
+    r"must live in (?:the )?{r}",
+    r"eligible to work in (?:the )?{r}",
+    r"(?:residents?|citizens?) of (?:the )?{r}",
+    r"{r} citizens?",
+    r"{r}[- ]based",
+    r"{r} only",
+    r"remote[\s,\-–/()]{0,3}(?:in |within |only )?(?:the )?{r}",
+    r"{r}[- ]remote",
+)
+
+# US-timezone overlap requirement. Non-US timezone names (e.g. "Central European Time")
+# do not match, because the zone word must be followed directly by time/hours/zone.
+_TZ_LOCK = re.compile(
+    r"(?<![a-z])(?:pst|pdt|est|edt|cst|cdt|mst|mdt)(?![a-z])"
+    r"|(?:pacific|eastern|central|mountain)\s+(?:time|hours|time\s*zone)"
+    r"|overlap[^.]{0,20}?(?:pacific|eastern|u\.?s\.?)\b"
+)
+_US_TZ_TOKENS = ("pst", "pdt", "est", "edt", "cst", "cdt", "mst", "mdt", "utc-")
+
+
+def _region_frag(aliases: tuple[str, ...]) -> str:
+    """A word-boundaried alternation of a region's surface forms. Short codes like 'us'
+    match only as whole tokens (never inside 'Belarus'); longest alias first so
+    'united states' wins over the bare 'us'."""
+    ordered = sorted(aliases, key=len, reverse=True)
+    return r"(?<![a-z0-9])(?:" + "|".join(re.escape(a) for a in ordered) + r")(?![a-z0-9])"
+
+
+_REGION_FRAG = {label: re.compile(_region_frag(al)) for label, al in _REGIONS.items()}
+_LOCK_PATTERNS = [
+    (label, re.compile("|".join(
+        "(?:" + tpl.replace("{r}", _region_frag(al)) + ")" for tpl in _LOCK_TEMPLATES)))
+    for label, al in _REGIONS.items()
+]
+
+
+def _geo_locks(hay: str, profile: Profile) -> tuple[list[str], list[str]]:
+    """Return (hard_locks, soft_locks) for one posting.
+
+    hard_locks: regions the posting *requires* that the candidate's own location does not
+    satisfy. soft_locks: a US-timezone-overlap requirement the candidate's timezone doesn't
+    meet. `hay` is the lowercased location + title + body.
+    """
+    home = f"{profile.location} {profile.timezone}".lower()
+    hard = [label for label, pat in _LOCK_PATTERNS
+            if pat.search(hay) and not _REGION_FRAG[label].search(home)]
+    soft: list[str] = []
+    if _TZ_LOCK.search(hay) and not any(z in home for z in _US_TZ_TOKENS):
+        soft.append("US business hours")
+    return hard, soft
+
+
 def heuristic_score(job: dict, profile: Profile) -> tuple[float, str, list[str]]:
     """Return (score 0..1, rationale, gaps) for one job row (dict from the store)."""
     title = (job.get("title") or "").lower()
@@ -186,6 +270,19 @@ def heuristic_score(job: dict, profile: Profile) -> tuple[float, str, list[str]]
         score = min(score, _EXCLUDED_CEILING)
         gaps.append("excluded: " + ", ".join(exclude_hits))
 
+    # --- geographic eligibility (only when the profile says where the candidate is) ---
+    hard_locks: list[str] = []
+    if (profile.location or "").strip():
+        geo_hay = ((job.get("location") or "") + " " + text).lower()
+        hard_locks, soft_locks = _geo_locks(geo_hay, profile)
+        if hard_locks:
+            # A lock the candidate cannot satisfy is disqualifying — cap like an exclusion.
+            score = min(score, _EXCLUDED_CEILING)
+            gaps.append("region-locked: " + ", ".join(dict.fromkeys(hard_locks)))
+        if soft_locks:
+            score -= _PENALTY_TZ
+            gaps.append("timezone: " + ", ".join(dict.fromkeys(soft_locks)))
+
     score = max(0.0, min(1.0, score))
 
     # --- rationale ----------------------------------------------------------------
@@ -198,7 +295,7 @@ def heuristic_score(job: dict, profile: Profile) -> tuple[float, str, list[str]]
         parts.append("skills: " + ", ".join(ranked[:6]))
     if domain_hits:
         parts.append("domains: " + ", ".join(sorted(set(domain_hits))))
-    parts.append("remote" if remote_ok else "location unclear")
+    parts.append("region-locked" if hard_locks else ("remote" if remote_ok else "location unclear"))
     rationale = "; ".join(parts)
 
     return round(score, 3), rationale, gaps

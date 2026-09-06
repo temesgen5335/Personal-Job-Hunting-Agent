@@ -28,6 +28,10 @@ EVAL_PROFILE = Profile(
     target_roles=["AI Engineer", "Software Engineer", "Full-Stack Engineer",
                   "Frontend Engineer", "Machine Learning Engineer"],
     seniority="mid-to-senior",
+    # A globally-remote candidate outside the US/UK — exercises the geo-eligibility
+    # dimension. Deliberately not the live user's country, per this file's contract.
+    location="Remote (Nairobi, Kenya)",
+    timezone="EAT / UTC+3",
     core_skills=["Python", "TypeScript", "FastAPI", "Next.js", "React",
                  "LangChain", "RAG", "LLM fine-tuning", "agentic systems",
                  "Docker", "AWS", "PostgreSQL", "CI/CD"],
@@ -89,6 +93,11 @@ EXAMPLES: list[EvalJob] = [
     EvalJob("AI Engineer",
             "Greenfield agentic AI product. TypeScript and Python.",
             True, "short JD positive"),
+    EvalJob("AI Engineer",
+            "Fully remote, work from anywhere. Build agentic LLM systems with LangChain "
+            "and RAG in Python.",
+            True, "geo positive: worldwide-remote must NOT trip a region lock",
+            location="Remote - Worldwide"),
     # --- hard negatives: each one is a trap class that has actually bitten ------
     EvalJob("Warehouse Operations Associate",
             "Lift boxes. Forklift certification a plus.",
@@ -133,6 +142,18 @@ EXAMPLES: list[EvalJob] = [
     EvalJob("Data Entry Clerk (Remote)",
             "Type fast. Remote position, flexible hours.",
             False, "remote-only bait with zero signal"),
+    # --- geo-eligibility traps: strong skills, but the candidate cannot be hired ---
+    EvalJob("Senior AI Engineer",
+            "Build agentic LLM systems with LangChain and RAG in Python. Remote — but you "
+            "must be authorized to work in the United States.",
+            False, "geo trap: work-authorization lock (US) on an otherwise-perfect role"),
+    EvalJob("AI Engineer, Platform",
+            "Python, FastAPI, retrieval-augmented generation, agentic systems.",
+            False, "geo trap: Remote (US) in the location field",
+            location="Remote (US)"),
+    EvalJob("Machine Learning Engineer",
+            "LLM serving in Python and Docker. UK-based candidates only.",
+            False, "geo trap: region lock to a region the candidate is not in (UK)"),
 ]
 
 

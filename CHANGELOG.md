@@ -25,6 +25,19 @@ that will carry it.
   deleted.
 
 ### Added
+- **Geographic-eligibility scoring** (`matching/heuristic.py`) — the heuristic now reads a
+  posting's *work-location requirement*, not just whether the word "remote" appears. A
+  confirmed region lock the candidate can't satisfy ("US-based", "authorized to work in the
+  United States", `Remote (US)`, "UK-based only") caps the score at 0.15 like an exclusion and
+  surfaces a `region-locked: US` gap chip; a US-timezone-overlap requirement is a softer
+  down-rank, since overlap is negotiable where authorization is not. It is **profile-driven**:
+  it activates only when the profile states a `location`, and it spares a lock naming the
+  candidate's *own* region (a US-based candidate is not penalized for US roles), so the
+  dimension is reusable by anyone (R22) rather than wired to one home country. High-precision
+  by design — every trigger pairs a requirement cue with a region token, and short codes ("us",
+  "uk") match only as whole tokens, never inside "Belarus". Closes the standing gap that let a
+  San-Francisco-hybrid or remote-US role score ~0.95 for a globally-remote candidate. The eval
+  set gains geo trap classes (`matching/evalset.py`); precision@10 rose to 1.0.
 - **agentkit's reusable `LLMService` gains the live free-model fan-out** (`agentkit/llm/openrouter.py`,
   `agentkit/llm/chain.py`) — the domain-agnostic harness now carries the same capability as the
   app-side client, so any project embedding agentkit gets it. `openrouter.free_models()` is

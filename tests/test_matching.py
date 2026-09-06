@@ -215,3 +215,81 @@ def test_seniority_terms_are_word_boundary_matched():
     # A real CTO posting is still caught.
     _, _, gaps = heuristic_score(_job(title="CTO / Head of AI", is_remote=1, description="Python"), WEIGHTED)
     assert any("management-track" in g for g in gaps)
+
+
+# --- geographic eligibility (Layer 2) ----------------------------------------
+
+_GLOBAL = Profile(
+    target_roles=["AI Engineer"], core_skills=["Python", "LangChain", "RAG"],
+    must_haves=["remote"], keywords=["AI engineer", "LLM"],
+    location="Remote (Nairobi, Kenya)", timezone="EAT / UTC+3",
+)
+_US = Profile(
+    target_roles=["AI Engineer"], core_skills=["Python", "LangChain", "RAG"],
+    must_haves=["remote"], keywords=["AI engineer", "LLM"],
+    location="Austin, United States", timezone="CST / UTC-6",
+)
+_NO_LOCATION = Profile(
+    target_roles=["AI Engineer"], core_skills=["Python", "LangChain", "RAG"],
+    must_haves=["remote"], keywords=["AI engineer", "LLM"],
+)
+
+_STRONG_DESC = "Build agentic LLM systems with LangChain and RAG in Python."
+
+
+def test_region_lock_demotes_out_of_region_candidate():
+    job = _job(title="AI Engineer", is_remote=1,
+               description=_STRONG_DESC + " Must be authorized to work in the United States.")
+    score, _, gaps = heuristic_score(job, _GLOBAL)
+    assert any("region-locked: US" in g for g in gaps)
+    assert score <= 0.16  # disqualifying → capped like an exclusion
+
+
+def test_region_lock_spared_for_in_region_candidate():
+    """The same lock must NOT penalize a candidate who IS in that region (R22 reuse)."""
+    job = _job(title="AI Engineer", is_remote=1,
+               description=_STRONG_DESC + " Must be authorized to work in the United States.")
+    score, _, gaps = heuristic_score(job, _US)
+    assert not any("region-locked" in g for g in gaps)
+    assert score > 0.5
+
+
+def test_remote_us_in_location_field_is_region_locked():
+    job = _job(title="AI Engineer", is_remote=1, location="Remote (US)", description=_STRONG_DESC)
+    _, _, gaps = heuristic_score(job, _GLOBAL)
+    assert any("region-locked: US" in g for g in gaps)
+
+
+def test_geo_dimension_off_without_profile_location():
+    """A profile that never set a location is unaffected — no geo penalty, no gap."""
+    job = _job(title="AI Engineer", is_remote=1,
+               description=_STRONG_DESC + " Must be authorized to work in the United States.")
+    _, _, gaps = heuristic_score(job, _NO_LOCATION)
+    assert not any("region-locked" in g for g in gaps)
+
+
+def test_worldwide_remote_not_falsely_region_locked():
+    job = _job(title="AI Engineer", is_remote=1, location="Remote - Worldwide",
+               description="Fully remote, work from anywhere. " + _STRONG_DESC)
+    score, _, gaps = heuristic_score(job, _GLOBAL)
+    assert not any("region-locked" in g for g in gaps)
+    assert score > 0.5
+
+
+def test_region_code_not_matched_inside_a_place_name():
+    """The classic substring bug: 'us' inside 'Belarus' must not read as a US lock."""
+    job = _job(title="AI Engineer", is_remote=1,
+               description=_STRONG_DESC + " Our distributed team spans Belarus and Austria.")
+    _, _, gaps = heuristic_score(job, _GLOBAL)
+    assert not any("region-locked" in g for g in gaps)
+
+
+def test_timezone_overlap_is_a_soft_penalty_not_a_cap():
+    plain = _job(title="AI Engineer", is_remote=1, description=_STRONG_DESC)
+    tz = _job(title="AI Engineer", is_remote=1,
+              description=_STRONG_DESC + " You must overlap with PST business hours.")
+    base, _, _ = heuristic_score(plain, _GLOBAL)
+    lowered, _, gaps = heuristic_score(tz, _GLOBAL)
+    assert any("timezone" in g for g in gaps)
+    assert lowered < base            # demoted
+    assert lowered > 0.16            # but not floored — overlap is negotiable
