@@ -217,79 +217,98 @@ def test_seniority_terms_are_word_boundary_matched():
     assert any("management-track" in g for g in gaps)
 
 
-# --- geographic eligibility (Layer 2) ----------------------------------------
+# --- geographic eligibility (config-driven; matching/heuristic.py) -----------
 
+# remote_scope="global": only genuinely global-remote postings are eligible.
 _GLOBAL = Profile(
     target_roles=["AI Engineer"], core_skills=["Python", "LangChain", "RAG"],
-    must_haves=["remote"], keywords=["AI engineer", "LLM"],
-    location="Remote (Nairobi, Kenya)", timezone="EAT / UTC+3",
+    must_haves=["remote"], keywords=["AI engineer", "LLM"], remote_scope="global",
 )
-_US = Profile(
-    target_roles=["AI Engineer"], core_skills=["Python", "LangChain", "RAG"],
-    must_haves=["remote"], keywords=["AI engineer", "LLM"],
-    location="Austin, United States", timezone="CST / UTC-6",
-)
-_NO_LOCATION = Profile(
+# remote_scope defaults to "any": geo scoring is OFF (the reusable default).
+_OFF = Profile(
     target_roles=["AI Engineer"], core_skills=["Python", "LangChain", "RAG"],
     must_haves=["remote"], keywords=["AI engineer", "LLM"],
 )
-
 _STRONG_DESC = "Build agentic LLM systems with LangChain and RAG in Python."
 
 
-def test_region_lock_demotes_out_of_region_candidate():
-    job = _job(title="AI Engineer", is_remote=1,
-               description=_STRONG_DESC + " Must be authorized to work in the United States.")
+@pytest.mark.parametrize("loc", [
+    "Remote - US", "Remote (US)", "San Francisco", "New York, NY (HQ)",
+    "Remote - California", "Remote - CA", "Canada - Remote (ON, AB)", "China - Remote",
+    "Remote, Bangalore", "Ukraine Anywhere", "Remote - EMEA", "Remote - Europe",
+    "Americas, Europe, Asia, Africa",
+])
+def test_global_scope_locks_any_place_pinned_location(loc):
+    """Under global scope, ANY location that names a place — country, region, state or
+    city, gazetteer-free — is region-locked and capped."""
+    score, _, gaps = heuristic_score(
+        _job(title="AI Engineer", is_remote=1, location=loc, description=_STRONG_DESC), _GLOBAL)
+    assert any("region-locked" in g for g in gaps), (loc, gaps)
+    assert score <= 0.16
+
+
+@pytest.mark.parametrize("loc", [
+    "Remote", "Remote - Worldwide", "Anywhere", "Fully Remote", "Remote (Global)",
+    "Work from anywhere", "",
+])
+def test_global_scope_keeps_genuinely_global_remote(loc):
+    score, _, gaps = heuristic_score(
+        _job(title="AI Engineer", is_remote=1, location=loc, description=_STRONG_DESC), _GLOBAL)
+    assert not any("region-locked" in g for g in gaps), (loc, gaps)
+    assert score > 0.5
+
+
+def test_global_scope_locks_a_region_requirement_in_the_body():
+    """The location says 'Remote', but the body pins it to a region."""
+    job = _job(title="AI Engineer", is_remote=1, location="Remote",
+               description=_STRONG_DESC + " You must be authorized to work in the United States.")
     score, _, gaps = heuristic_score(job, _GLOBAL)
-    assert any("region-locked: US" in g for g in gaps)
-    assert score <= 0.16  # disqualifying → capped like an exclusion
+    assert any("region-locked" in g for g in gaps)
+    assert score <= 0.16
 
 
-def test_region_lock_spared_for_in_region_candidate():
-    """The same lock must NOT penalize a candidate who IS in that region (R22 reuse)."""
-    job = _job(title="AI Engineer", is_remote=1,
-               description=_STRONG_DESC + " Must be authorized to work in the United States.")
-    score, _, gaps = heuristic_score(job, _US)
+def test_geo_scoring_is_off_by_default():
+    """A profile that has not opted in (remote_scope='any') is unaffected — no lock."""
+    for loc in ("San Francisco", "Remote - US", "Canada - Remote"):
+        _, _, gaps = heuristic_score(
+            _job(title="AI Engineer", is_remote=1, location=loc, description=_STRONG_DESC), _OFF)
+        assert not any("region-locked" in g for g in gaps), loc
+
+
+def test_geo_eligible_include_list_overrides_a_lock():
+    """A user can allow-list a region; then it is not locked even under global scope."""
+    prof = _GLOBAL.model_copy(update={"geo_eligible": ["emea"]})
+    score, _, gaps = heuristic_score(
+        _job(title="AI Engineer", is_remote=1, location="Remote - EMEA", description=_STRONG_DESC), prof)
     assert not any("region-locked" in g for g in gaps)
     assert score > 0.5
 
 
-def test_remote_us_in_location_field_is_region_locked():
-    job = _job(title="AI Engineer", is_remote=1, location="Remote (US)", description=_STRONG_DESC)
-    _, _, gaps = heuristic_score(job, _GLOBAL)
-    assert any("region-locked: US" in g for g in gaps)
+def test_geo_blocked_list_demotes_even_when_scope_is_any():
+    """The exclude list is honoured without turning on global-only mode."""
+    prof = _OFF.model_copy(update={"geo_blocked": ["united states", "remote - uk"]})
+    score, _, gaps = heuristic_score(
+        _job(title="AI Engineer", is_remote=1, location="Remote - United States",
+             description=_STRONG_DESC), prof)
+    assert any("excluded location" in g for g in gaps)
+    assert score <= 0.16
 
 
-def test_geo_dimension_off_without_profile_location():
-    """A profile that never set a location is unaffected — no geo penalty, no gap."""
-    job = _job(title="AI Engineer", is_remote=1,
-               description=_STRONG_DESC + " Must be authorized to work in the United States.")
-    _, _, gaps = heuristic_score(job, _NO_LOCATION)
-    assert not any("region-locked" in g for g in gaps)
-
-
-def test_worldwide_remote_not_falsely_region_locked():
-    job = _job(title="AI Engineer", is_remote=1, location="Remote - Worldwide",
-               description="Fully remote, work from anywhere. " + _STRONG_DESC)
-    score, _, gaps = heuristic_score(job, _GLOBAL)
-    assert not any("region-locked" in g for g in gaps)
-    assert score > 0.5
+def test_custom_global_terms_replace_the_default_vocabulary():
+    """geo_global_terms lets the user redefine what 'globally open' means."""
+    prof = _GLOBAL.model_copy(update={"geo_global_terms": ["worldwide", "latam"]})
+    _, _, allow = heuristic_score(                       # LATAM now counts as global...
+        _job(title="AI Engineer", is_remote=1, location="Remote - LATAM", description=_STRONG_DESC), prof)
+    assert not any("region-locked" in g for g in allow)
+    _, _, lock = heuristic_score(                        # ...a place not in the list stays locked
+        _job(title="AI Engineer", is_remote=1, location="Remote - US", description=_STRONG_DESC), prof)
+    assert any("region-locked" in g for g in lock)
 
 
 def test_region_code_not_matched_inside_a_place_name():
-    """The classic substring bug: 'us' inside 'Belarus' must not read as a US lock."""
-    job = _job(title="AI Engineer", is_remote=1,
-               description=_STRONG_DESC + " Our distributed team spans Belarus and Austria.")
+    """The classic substring bug: a body mention of 'Belarus' must not read as a US lock,
+    and a worldwide location keeps the posting eligible."""
+    job = _job(title="AI Engineer", is_remote=1, location="Remote - Worldwide",
+               description=_STRONG_DESC + " Our team spans Belarus and Austria.")
     _, _, gaps = heuristic_score(job, _GLOBAL)
     assert not any("region-locked" in g for g in gaps)
-
-
-def test_timezone_overlap_is_a_soft_penalty_not_a_cap():
-    plain = _job(title="AI Engineer", is_remote=1, description=_STRONG_DESC)
-    tz = _job(title="AI Engineer", is_remote=1,
-              description=_STRONG_DESC + " You must overlap with PST business hours.")
-    base, _, _ = heuristic_score(plain, _GLOBAL)
-    lowered, _, gaps = heuristic_score(tz, _GLOBAL)
-    assert any("timezone" in g for g in gaps)
-    assert lowered < base            # demoted
-    assert lowered > 0.16            # but not floored — overlap is negotiable

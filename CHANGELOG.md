@@ -25,19 +25,22 @@ that will carry it.
   deleted.
 
 ### Added
-- **Geographic-eligibility scoring** (`matching/heuristic.py`) — the heuristic now reads a
-  posting's *work-location requirement*, not just whether the word "remote" appears. A
-  confirmed region lock the candidate can't satisfy ("US-based", "authorized to work in the
-  United States", `Remote (US)`, "UK-based only") caps the score at 0.15 like an exclusion and
-  surfaces a `region-locked: US` gap chip; a US-timezone-overlap requirement is a softer
-  down-rank, since overlap is negotiable where authorization is not. It is **profile-driven**:
-  it activates only when the profile states a `location`, and it spares a lock naming the
-  candidate's *own* region (a US-based candidate is not penalized for US roles), so the
-  dimension is reusable by anyone (R22) rather than wired to one home country. High-precision
-  by design — every trigger pairs a requirement cue with a region token, and short codes ("us",
-  "uk") match only as whole tokens, never inside "Belarus". Closes the standing gap that let a
-  San-Francisco-hybrid or remote-US role score ~0.95 for a globally-remote candidate. The eval
-  set gains geo trap classes (`matching/evalset.py`); precision@10 rose to 1.0.
+- **Geographic-eligibility scoring** (`matching/heuristic.py`, `preferences.py`) — the
+  heuristic now reads a posting's *work-location requirement*, not just whether the word
+  "remote" appears, and it is **fully configurable — no geography or home region is hardcoded**
+  (R22). `remote_scope="global"` keeps only genuinely global-remote postings and caps every
+  place-pinned one (remote-US, remote-UK, a city — and the candidate's own country too) at 0.15
+  like an exclusion, with a `region-locked` gap chip; `remote_scope="any"` (the default) leaves
+  it off. Three optional profile lists shape it: `geo_global_terms` (what "globally open" means),
+  `geo_eligible` (always-allow), and `geo_blocked` (always-demote, honoured in any scope). The
+  place test is **gazetteer-free** — it strips the remote/global vocabulary from the location and
+  locks it if any place name survives — so it needs no country list to maintain and handles
+  arbitrary places (China, Uruguay, `Remote - CA`, `Remote - EMEA`) uniformly. A region
+  requirement in the body ("authorized to work in the US") is caught even when the location says
+  only "Remote". The eval set gains geo trap and configurable-include classes
+  (`matching/evalset.py`); precision@10 is 1.0. Config lives in `config/preferences*.toml`
+  (`remote_scope` + `geo_*`). Measured on the live store: with `remote_scope="global"` the
+  strong-match queue fell from 311 to ~10 once place-locked jobs were demoted.
 - **agentkit's reusable `LLMService` gains the live free-model fan-out** (`agentkit/llm/openrouter.py`,
   `agentkit/llm/chain.py`) — the domain-agnostic harness now carries the same capability as the
   app-side client, so any project embedding agentkit gets it. `openrouter.free_models()` is

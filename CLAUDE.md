@@ -57,7 +57,7 @@ Writes need `DASHBOARD_PASSWORD` set — the API gates every non-GET route (R19)
 - **Secret store** (`src/jobagent/secrets_store.py`) — Fernet-encrypted config on disk, overlays `.env`.
 - **Auth** — every non-GET API route requires a bearer token from `DASHBOARD_PASSWORD`; fails closed (R19).
 - **Health** (`store.pipeline_health()`) — staleness, error count, per-source freshness; bannered in the dashboard and the digest.
-- **Matching** (`matching/heuristic.py`) — preference-weighted: `skill_weights`, title-vs-body role tiers, seniority and must-have checks.
+- **Matching** (`matching/heuristic.py`) — preference-weighted: `skill_weights`, title-vs-body role tiers, seniority and must-have checks, plus configurable geographic-eligibility (`remote_scope="global"` demotes any location-pinned posting; gazetteer-free, driven entirely by `geo_*` profile config — no hardcoded geography, R22).
 - **Lifecycle** (`core/schemas.ALLOWED_TRANSITIONS`) — enforced status graph; `correction=true` overrides and audits.
 - **Run ledger** — every pipeline pass has a run_id on all its events; `GET /runs` lists summaries, `GET /runs/{id}` reconstructs a pass.
 - **Eval harness** (`matching/evalset.py`) — labeled ranking floors (P@5=1.0); `scripts/eval_matching.py` is the tuning loop.
