@@ -67,12 +67,14 @@ class LLMService:
     breaker: Breaker = field(default_factory=Breaker)
     ledger: Ledger = field(default_factory=Ledger)
     skipped: list = field(default_factory=list)     # configured but unusable, with reasons
+    temperature: float | None = None                # default sampling temp for complete()
 
     # --- construction ---------------------------------------------------------
 
     @classmethod
     def from_settings(cls, settings, *, providers=DEFAULT_PROVIDERS,
-                      order=DEFAULT_ORDER, primary: str = "") -> "LLMService":
+                      order=DEFAULT_ORDER, primary: str = "",
+                      temperature: float | None = None) -> "LLMService":
         """Build from any object exposing the descriptor's field names.
 
         Deliberately duck-typed: `getattr(settings, "groq_api_key", "")`. A host with a
@@ -84,7 +86,8 @@ class LLMService:
         # "no GROQ_API_KEY" are the same symptom with very different fixes.
         report = build_chain(settings, providers=providers, order=order,
                              primary=primary, report=True)
-        return cls(backends=list(report.backends), skipped=list(report.skipped))
+        return cls(backends=list(report.backends), skipped=list(report.skipped),
+                   temperature=temperature)
 
     @classmethod
     def from_providers(cls, specs: list[ProviderSpec], settings, **kwargs) -> "LLMService":
@@ -155,7 +158,8 @@ class LLMService:
             try:
                 result = backend.chat(ChatRequest(
                     system=system, messages=[Message("user", user)],
-                    max_tokens=max_tokens, timeout_s=timeout_s))
+                    max_tokens=max_tokens, timeout_s=timeout_s,
+                    temperature=self.temperature))
                 text = result.text
                 if not (text or "").strip():
                     raise RuntimeError("empty response")

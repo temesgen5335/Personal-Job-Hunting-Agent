@@ -32,7 +32,7 @@ from jobagent.fit import assess_fit
 from jobagent.ingestion.gate import ALL_SOURCES, IngestGate, resolve_sources
 from jobagent.ingestion.registry import build_adapters
 from jobagent.ingestion.runner import run_ingestion
-from jobagent.llm_client import build_llm
+from jobagent.llm_client import AllProvidersFailed, build_llm
 from jobagent.matching import run_matching
 from jobagent.preferences import (
     Profile,
@@ -49,12 +49,11 @@ from jobagent.upskill import upskill_report
 
 _UNSET = object()
 
-# `MultiLLM.complete` raises this bare RuntimeError when every provider fails, and the
+# `LLMService.complete` raises AllProvidersFailed when every provider fails, and the
 # common cause is a free-tier daily limit — an expected, self-healing condition. Left
 # unhandled it surfaced as a 500 Internal Server Error, which tells the operator
 # nothing and reads like a code fault. Found by exercising the running system with all
 # three free tiers exhausted.
-_ALL_PROVIDERS_FAILED = "All LLM providers failed"
 
 
 def _llm_unavailable(exc: Exception) -> HTTPException:
@@ -659,7 +658,7 @@ def create_app(settings=None, profile=None, llm: Any = _UNSET, cv_master: str | 
             try:
                 subject, text = draft_followup(_profile().name or "", job, days, current_llm)
             except RuntimeError as exc:
-                if _ALL_PROVIDERS_FAILED in str(exc):
+                if isinstance(exc, AllProvidersFailed):
                     raise _llm_unavailable(exc) from exc
                 raise
             # Logged so the reminder stops firing until the next window.
@@ -754,7 +753,7 @@ def create_app(settings=None, profile=None, llm: Any = _UNSET, cv_master: str | 
         try:
             return assess_fit(job, _profile(), _cv_master(), _llm()).to_dict()
         except RuntimeError as exc:
-            if _ALL_PROVIDERS_FAILED in str(exc):
+            if isinstance(exc, AllProvidersFailed):
                 raise _llm_unavailable(exc) from exc
             raise
 
@@ -774,7 +773,7 @@ def create_app(settings=None, profile=None, llm: Any = _UNSET, cv_master: str | 
             try:
                 b = prepare_application(s, job, _profile(), cv_master, current_llm, settings=settings)
             except RuntimeError as exc:
-                if _ALL_PROVIDERS_FAILED in str(exc):
+                if isinstance(exc, AllProvidersFailed):
                     raise _llm_unavailable(exc) from exc
                 raise
             return {

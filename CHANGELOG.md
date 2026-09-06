@@ -12,7 +12,29 @@ scoped in [docs/VERSIONING.md](docs/VERSIONING.md) — which is worth reading, b
 Planned work is tracked in [docs/ROADMAP.md](docs/ROADMAP.md), grouped by the release
 that will carry it.
 
+### Changed
+- **The pipeline's LLM router is now the reusable agentkit service — no more duplicate.**
+  `jobagent/llm_client.py` was a second multi-provider router (its own registry, failover,
+  usage ledger, fan-out) parallel to `agentkit.llm`, which the assistant already used.
+  `build_llm(settings)` is now a thin adapter that returns an `LLMService` — one provider
+  registry, one failover path, plus agentkit's circuit breaker and capability routing, for
+  the pipeline too. `LLMService` gained a per-service `temperature` (from_settings kwarg) so
+  scoring/generation keep their deterministic 0.3; the API recognizes provider exhaustion by
+  the `AllProvidersFailed` type instead of scanning the message; the run ledger records
+  agentkit's richer per-backend trace. `MultiLLM`/`LLMUsage` and the duplicate fan-out are
+  deleted.
+
 ### Added
+- **agentkit's reusable `LLMService` gains the live free-model fan-out** (`agentkit/llm/openrouter.py`,
+  `agentkit/llm/chain.py`) — the domain-agnostic harness now carries the same capability as the
+  app-side client, so any project embedding agentkit gets it. `openrouter.free_models()` is
+  **stdlib-only** (urllib, injectable transport) — no new dependency, no host coupling (the
+  import-boundary/vocabulary tests still hold). `build_chain` fans out over the live `:free`
+  list when `openrouter_free_fanout` is set; `ProviderSpec` gains an `enabled_field` opt-in gate
+  so keyless **Pollinations** stays off until asked. Added SambaNova, Nvidia, Mistral, Meta Llama,
+  Pollinations to `DEFAULT_PROVIDERS`, and fixed the 404ing `openrouter_model` default. Verified
+  live: `LLMService.from_settings(SimpleNamespace(...))` fans out over 6 free models and serves a
+  real call — with `jobagent` absent from the path.
 - **Smart multi-provider LLM router with live free-model discovery** (`llm_client.py`) —
   the failover chain is now table-driven off one `_PROVIDERS` registry and gains SambaNova,
   Nvidia (NIM), Mistral, Meta Llama, and keyless **Pollinations** (opt-in) alongside the

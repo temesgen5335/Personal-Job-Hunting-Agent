@@ -1,6 +1,7 @@
 """LLM reranker — scores the top heuristic candidates with real fit analysis.
 
-Uses the shared MultiLLM (`.complete`), so it inherits multi-provider failover.
+Uses the shared LLM (`.complete` on agentkit's LLMService), so it inherits multi-provider
+failover, the circuit breaker, and the OpenRouter free-model fan-out.
 """
 
 from __future__ import annotations
