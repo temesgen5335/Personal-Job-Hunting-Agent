@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from jobagent.ingestion.adapters.ashby import AshbyAdapter
 from jobagent.ingestion.adapters.greenhouse import GreenhouseAdapter
+from jobagent.ingestion.adapters.himalayas import HimalayasAdapter
 from jobagent.ingestion.adapters.jsearch import JSearchAdapter
 from jobagent.ingestion.adapters.lever import LeverAdapter
 from jobagent.ingestion.adapters.remoteok import RemoteOKAdapter
@@ -42,6 +43,7 @@ def build_adapters(settings) -> list[BaseAdapter]:
     all_adapters = [
         RemoteOKAdapter(),
         RemotiveAdapter(),
+        HimalayasAdapter(),
         GreenhouseAdapter(_merge(wl.greenhouse, split_slugs(settings.greenhouse_slugs))),
         LeverAdapter(_merge(wl.lever, split_slugs(settings.lever_slugs))),
         AshbyAdapter(_merge(wl.ashby, split_slugs(settings.ashby_slugs))),

@@ -25,6 +25,13 @@ that will carry it.
   deleted.
 
 ### Added
+- **Himalayas ingestion source** (`ingestion/adapters/himalayas.py`) — a remote-first board
+  whose free JSON API ships an explicit `locationRestrictions` list per posting ("Worldwide",
+  "United States", or a country set). That maps straight onto the `location` field, so the
+  geo-eligibility scorer can tell a genuinely global role from a US-only "remote" one without
+  guessing — the structured signal the company-watchlist boards lack. No API key; toggled by
+  `[sources] himalayas`. Registered in the adapter registry and `ALL_SOURCES`; fixture-tested
+  and verified live against the API. Brings the adapter count to seven.
 - **Geographic-eligibility scoring** (`matching/heuristic.py`, `preferences.py`) — the
   heuristic now reads a posting's *work-location requirement*, not just whether the word
   "remote" appears, and it is **fully configurable — no geography or home region is hardcoded**

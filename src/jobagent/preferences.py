@@ -92,6 +92,7 @@ class Sources(BaseModel):
 
     remoteok: bool = True
     remotive: bool = True
+    himalayas: bool = True
     greenhouse: bool = True
     lever: bool = True
     ashby: bool = True

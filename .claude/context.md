@@ -49,7 +49,7 @@ Two interfaces, one backend:
 
 | Component | Status |
 |---|---|
-| Ingestion (6 adapters) | Done — RemoteOK, Remotive, Greenhouse, Lever, Ashby, Telegram |
+| Ingestion (7 adapters) | Done — RemoteOK, Remotive, Himalayas, Greenhouse, Lever, Ashby, Telegram (+ JSearch aggregator, key-gated) |
 | Matching (heuristic + LLM) | Done — word-boundary scoring + optional LLM rerank |
 | Telegram bot | Done — interactive /menu, /apply with fit-check, ATS path |
 | Tier-1 apply (email) | Done — CV tailor + cover letter + SMTP send with HITL gate |

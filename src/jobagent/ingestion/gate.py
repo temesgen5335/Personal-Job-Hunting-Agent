@@ -23,7 +23,7 @@ from datetime import datetime, timedelta, timezone
 
 # The selectable set for the dashboard, in display order. `aggregator` is listed because
 # the toggle exists, but it has no adapter yet — see docs/ARCHITECTURE.md.
-ALL_SOURCES = ["remoteok", "remotive", "greenhouse", "lever", "ashby", "telegram", "aggregator"]
+ALL_SOURCES = ["remoteok", "remotive", "himalayas", "greenhouse", "lever", "ashby", "telegram", "aggregator"]
 
 # Terms that mean "remote" as a structured fact rather than a place name.
 _REMOTE_WORDS = ("remote", "worldwide", "anywhere", "distributed")
