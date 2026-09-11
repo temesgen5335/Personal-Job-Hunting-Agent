@@ -213,7 +213,22 @@ def _names_a_place(location: str, global_terms) -> bool:
     return bool(re.sub(r"[^a-z]+", "", s))       # any letters left → a place is named
 
 
-def _geo_verdict(location: str, text: str, profile: Profile) -> str | None:
+# Some boards keep the location field global ("Distributed") but pin the role in the
+# TITLE — "Senior Customer Engineer - Charlotte, NC". A "City, ST" with a real US state
+# abbreviation is a high-precision signal (case-sensitive, so a role abbrev like "ML"/"AI"
+# after a comma does not trip it). This is a detection primitive, not a preference.
+_US_STATE_ABBR = frozenset((
+    "AL AK AZ AR CA CO CT DE FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS MO MT NE NV "
+    "NH NJ NM NY NC ND OH OK OR PA RI SC SD TN TX UT VT VA WA WV WI WY DC"
+).split())
+_CITY_STATE_RE = re.compile(r"\b[A-Z][A-Za-z.\-]+,\s*([A-Z]{2})\b")
+
+
+def _title_names_us_location(title: str) -> bool:
+    return any(m.group(1) in _US_STATE_ABBR for m in _CITY_STATE_RE.finditer(title or ""))
+
+
+def _geo_verdict(location: str, title: str, text: str, profile: Profile) -> str | None:
     """A gap string if the posting is out of the profile's geographic scope, else None.
     Entirely config-driven: with the defaults (remote_scope='any', empty lists) it always
     returns None, so a profile that has not opted in is unaffected."""
@@ -231,6 +246,8 @@ def _geo_verdict(location: str, text: str, profile: Profile) -> str | None:
     # is why "Ukraine Anywhere" locks (a place survives) while "Anywhere" does not.
     if not _match_any(getattr(profile, "geo_eligible", None), loc) and _names_a_place(loc, global_terms):
         return "region-locked (not global-remote)"
+    if _title_names_us_location(title):
+        return "region-locked (US location in title)"
     if any(pat.search(text) for pat in _LOCK_PATTERNS):
         return "region-locked (in description)"
     return None
@@ -307,7 +324,8 @@ def heuristic_score(job: dict, profile: Profile) -> tuple[float, str, list[str]]
         gaps.append("excluded: " + ", ".join(exclude_hits))
 
     # --- geographic eligibility (config-driven; off unless the profile opts in) --------
-    geo_gap = _geo_verdict(job.get("location") or "", text, profile)
+    # Original-case title so the "City, ST" check can require uppercase state abbreviations.
+    geo_gap = _geo_verdict(job.get("location") or "", job.get("title") or "", text, profile)
     if geo_gap:
         # Out of the profile's geographic scope — cap like an exclusion (visible, demoted).
         score = min(score, _EXCLUDED_CEILING)

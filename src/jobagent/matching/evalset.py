@@ -167,6 +167,10 @@ EXAMPLES: list[EvalJob] = [
             "Python, FastAPI, retrieval-augmented generation, agentic systems.",
             False, "geo trap: foreign country in the location field (Canada-remote)",
             location="Canada - Remote (ON, AB)"),
+    EvalJob("Senior AI Engineer - Austin, TX",
+            "Build agentic LLM systems with LangChain and RAG in Python.",
+            False, "geo trap: location field global but the TITLE pins a US City, ST",
+            location="Distributed"),
 ]
 
 

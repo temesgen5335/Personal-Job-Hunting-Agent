@@ -267,6 +267,23 @@ def test_global_scope_locks_a_region_requirement_in_the_body():
     assert score <= 0.16
 
 
+def test_global_scope_locks_a_us_city_state_in_the_title():
+    """Location field is global ('Distributed') but the TITLE pins a US 'City, ST'."""
+    job = _job(title="Senior Customer Engineer - Charlotte, NC", is_remote=1,
+               location="Distributed", description=_STRONG_DESC)
+    score, _, gaps = heuristic_score(job, _GLOBAL)
+    assert any("US location in title" in g for g in gaps)
+    assert score <= 0.16
+
+
+def test_role_abbreviation_after_comma_in_title_is_not_a_us_state():
+    """A role qualifier like 'ML'/'AI' after a comma must not read as a state abbreviation."""
+    for t in ("AI Engineer, ML Platform", "Software Engineer, AI"):
+        _, _, gaps = heuristic_score(
+            _job(title=t, is_remote=1, location="Remote", description=_STRONG_DESC), _GLOBAL)
+        assert not any("US location in title" in g for g in gaps), t
+
+
 def test_geo_scoring_is_off_by_default():
     """A profile that has not opted in (remote_scope='any') is unaffected — no lock."""
     for loc in ("San Francisco", "Remote - US", "Canada - Remote"):

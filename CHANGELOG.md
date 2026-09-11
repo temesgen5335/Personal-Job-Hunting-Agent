@@ -41,6 +41,10 @@ that will carry it.
   (`matching/evalset.py`); precision@10 is 1.0. Config lives in `config/preferences*.toml`
   (`remote_scope` + `geo_*`). Measured on the live store: with `remote_scope="global"` the
   strong-match queue fell from 311 to ~10 once place-locked jobs were demoted.
+- **Geo scoring also reads the job title** (`matching/heuristic.py`) — some boards keep the
+  location field global ("Distributed") but pin the role in the title ("… - Charlotte, NC").
+  A high-precision `City, ST` check (real US state abbreviations, case-sensitive so a role
+  qualifier like "ML"/"AI" after a comma never trips it) now locks those under global scope.
 - **agentkit's reusable `LLMService` gains the live free-model fan-out** (`agentkit/llm/openrouter.py`,
   `agentkit/llm/chain.py`) — the domain-agnostic harness now carries the same capability as the
   app-side client, so any project embedding agentkit gets it. `openrouter.free_models()` is
