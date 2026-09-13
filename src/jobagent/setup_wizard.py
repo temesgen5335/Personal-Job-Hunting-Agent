@@ -47,6 +47,23 @@ class Answers:
     llm_api_key: str = ""
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""
+    phone: str = ""
+    timezone: str = ""
+    domains: list[str] = field(default_factory=list)
+    remote_scope: str = "any"          # "any" | "global"
+    geo_eligible: list[str] = field(default_factory=list)
+    geo_blocked: list[str] = field(default_factory=list)
+    sources: dict[str, bool] = field(default_factory=dict)          # per-source toggles
+    watchlist: dict[str, list[str]] = field(default_factory=dict)   # greenhouse/lever/ashby slugs
+    llm_model: str = ""
+    keyless: bool = False
+    pollinations_enabled: bool = False
+    smtp_host: str = ""
+    smtp_port: str = ""
+    smtp_user: str = ""
+    smtp_password: str = ""
+    apply_from_email: str = ""
+    telegram_owner_id: str = ""
 
 
 def split_list(raw: str) -> list[str]:
@@ -102,17 +119,30 @@ def merge_env(existing: str, updates: dict[str, str]) -> str:
 
 
 def env_updates(answers: Answers, *, master_key: str) -> dict[str, str]:
-    """The .env keys a first run needs. Blank answers are omitted, not written as
-    empty — an explicit empty value would shadow a real one set elsewhere."""
+    """The .env keys onboarding writes. Blank answers are omitted, not written as empty —
+    an explicit empty value would shadow a real one set elsewhere."""
     updates = {
         "JOBAGENT_MASTER_KEY": master_key,
         "DASHBOARD_PASSWORD": answers.dashboard_password,
         "TELEGRAM_BOT_TOKEN": answers.telegram_bot_token,
         "TELEGRAM_CHAT_ID": answers.telegram_chat_id,
+        "TELEGRAM_OWNER_ID": answers.telegram_owner_id,
+        "SMTP_HOST": answers.smtp_host,
+        "SMTP_PORT": answers.smtp_port,
+        "SMTP_USER": answers.smtp_user,
+        "SMTP_PASSWORD": answers.smtp_password,
+        "APPLY_FROM_EMAIL": answers.apply_from_email,
     }
-    if answers.llm_provider and answers.llm_api_key:
+    if answers.keyless:
+        # Keyless path: no provider key; optionally turn on the keyless Pollinations backend
+        # so drafting works without a key (matching already works heuristic-only).
+        if answers.pollinations_enabled:
+            updates["POLLINATIONS_ENABLED"] = "true"
+    elif answers.llm_provider and answers.llm_api_key:
         updates["LLM_PROVIDER"] = answers.llm_provider
         updates[f"{answers.llm_provider.upper()}_API_KEY"] = answers.llm_api_key
+        if answers.llm_model:
+            updates[f"{answers.llm_provider.upper()}_MODEL"] = answers.llm_model
     return {k: v for k, v in updates.items() if v}
 
 
@@ -162,8 +192,24 @@ def profile_overlay(answers: Answers, existing: dict | None = None) -> dict:
             weights.setdefault(skill, 2.0)
         profile["skill_weights"] = weights
 
+    for key, value in (
+        ("phone", answers.phone),
+        ("timezone", answers.timezone),
+        ("domains", answers.domains),
+        ("geo_eligible", answers.geo_eligible),
+        ("geo_blocked", answers.geo_blocked),
+    ):
+        if value:
+            profile[key] = value
+    if answers.remote_scope in ("any", "global") and answers.remote_scope != "any":
+        profile["remote_scope"] = answers.remote_scope
+
     merged = dict(existing or {})
     merged["profile"] = profile
+    if answers.sources:
+        merged["sources"] = {**dict(merged.get("sources", {})), **answers.sources}
+    if answers.watchlist:
+        merged["watchlist"] = {**dict(merged.get("watchlist", {})), **answers.watchlist}
     return merged
 
 

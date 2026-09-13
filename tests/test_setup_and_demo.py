@@ -62,6 +62,27 @@ def test_env_updates_omits_a_provider_without_its_key():
     assert got["LLM_PROVIDER"] == "groq" and got["GROQ_API_KEY"] == "x"
 
 
+def test_env_updates_writes_model_smtp_owner_and_pollinations():
+    from jobagent.setup_wizard import Answers, env_updates
+    a = Answers(llm_provider="groq", llm_api_key="k", llm_model="llama-3.3-70b",
+                smtp_host="mail.x", smtp_user="u", smtp_password="p",
+                apply_from_email="me@x.com", telegram_owner_id="42",
+                keyless=False, pollinations_enabled=False)
+    got = env_updates(a, master_key="mk")
+    assert got["GROQ_MODEL"] == "llama-3.3-70b"
+    assert got["SMTP_HOST"] == "mail.x" and got["SMTP_USER"] == "u" and got["SMTP_PASSWORD"] == "p"
+    assert got["APPLY_FROM_EMAIL"] == "me@x.com"
+    assert got["TELEGRAM_OWNER_ID"] == "42"
+    assert "POLLINATIONS_ENABLED" not in got            # only when keyless+pollinations
+
+
+def test_env_updates_keyless_enables_pollinations_and_omits_provider_key():
+    from jobagent.setup_wizard import Answers, env_updates
+    got = env_updates(Answers(keyless=True, pollinations_enabled=True), master_key="mk")
+    assert got["POLLINATIONS_ENABLED"] == "true"
+    assert "LLM_PROVIDER" not in got and "GROQ_API_KEY" not in got
+
+
 def test_split_list_drops_empties():
     """An empty skill matches nothing and reads as a bug in the matcher."""
     assert split_list("Python, , Go,  ,SQL") == ["Python", "Go", "SQL"]
@@ -93,6 +114,27 @@ def test_remote_only_sets_both_the_mode_and_the_must_have():
     out = profile_overlay(Answers(remote_only=True))
     assert out["profile"]["work_mode"] == "remote"
     assert "remote" in out["profile"]["must_haves"]
+
+
+def test_profile_overlay_writes_geo_sources_and_watchlist():
+    from jobagent.setup_wizard import Answers, profile_overlay
+    a = Answers(name="Me", phone="+1", timezone="EAT/UTC+3", domains=["AI"],
+                remote_scope="global", geo_eligible=["worldwide"], geo_blocked=["remote us"],
+                sources={"telegram": False, "himalayas": True},
+                watchlist={"greenhouse": ["stripe"], "lever": [], "ashby": ["openai"]})
+    out = profile_overlay(a)
+    p = out["profile"]
+    assert p["phone"] == "+1" and p["timezone"] == "EAT/UTC+3" and p["domains"] == ["AI"]
+    assert p["remote_scope"] == "global" and p["geo_eligible"] == ["worldwide"] and p["geo_blocked"] == ["remote us"]
+    assert out["sources"] == {"telegram": False, "himalayas": True}
+    assert out["watchlist"] == {"greenhouse": ["stripe"], "lever": [], "ashby": ["openai"]}
+
+
+def test_profile_overlay_omits_empty_sections():
+    from jobagent.setup_wizard import Answers, profile_overlay
+    out = profile_overlay(Answers(name="Me"))       # no sources/watchlist/geo given
+    assert "sources" not in out and "watchlist" not in out
+    assert out["profile"]["name"] == "Me"
 
 
 def test_next_steps_lead_with_something_that_works_without_credentials():
