@@ -31,8 +31,8 @@ from agentkit.llm.types import ToolCall
 from agentkit.permissions import NONCE_TTL_S, args_digest
 from agentkit.session import Surface
 from jobagent.assistant import build_assistant
-from jobagent.assistant.config_policy import ConfigRefused, preview
-from jobagent.core.schemas import Event
+from jobagent.assistant.card import render_card
+from jobagent.assistant.sink import StoreSink
 
 MAX_QUESTION_CHARS = 2000
 
@@ -80,35 +80,11 @@ class PendingRegistry:
             del self._items[key]
 
 
-class EventSink:
-    """The agent's trail goes onto the same `events` table as everything else."""
-
-    def __init__(self, store):
-        self.store = store
-
-    def emit(self, kind: str, payload: dict) -> None:
-        self.store.log_event(Event(kind=kind, payload=payload))
-
-
 def register(app, *, store_factory, settings_factory, auth, read_auth=None, limit=None):
     """Mount the assistant routes. Both are auth-gated: `ask` spends LLM quota and
     `confirm` performs a privileged write, so neither may be reachable anonymously."""
 
     pending = PendingRegistry()
-
-    def _card_for(name: str, args: dict, policy, store, settings) -> str:
-        """The confirmation card. Rendered from validated arguments and computed
-        numbers — never from anything the model wrote."""
-        if name == "apply_config_change":
-            try:
-                return preview(str(args.get("field", "")), str(args.get("value", "")),
-                               settings, store).render()
-            except ConfigRefused as exc:
-                return f"REFUSED: {exc}"
-        described = policy.describes if policy is not None else ""
-        lines = [described] if described else []
-        lines += [f"{k}: {v}" for k, v in args.items()]
-        return "\n".join(lines)
 
     @app.post("/assistant/ask", dependencies=auth + (limit or []))
     def ask(req: AskReq):
@@ -131,13 +107,13 @@ def register(app, *, store_factory, settings_factory, auth, read_auth=None, limi
                 separately, against arguments the client never held.
                 """
                 nonce = __import__("secrets").token_urlsafe(24)
-                card = _card_for(name, args, policy, store, settings)
+                card = render_card(name, args, policy, settings, store)
                 pending.add(nonce, name, args, card)
                 captured.append({"nonce": nonce, "tool": name, "card": card})
                 return False
 
             assistant = build_assistant(
-                store=store, settings=settings, sink=EventSink(store),
+                store=store, settings=settings, sink=StoreSink(store),
                 surface=Surface.WEB, ask=capture)
 
             if req.reindex:
@@ -186,7 +162,7 @@ def register(app, *, store_factory, settings_factory, auth, read_auth=None, limi
         store = store_factory()
         try:
             assistant = build_assistant(
-                store=store, settings=settings, sink=EventSink(store),
+                store=store, settings=settings, sink=StoreSink(store),
                 surface=Surface.WEB,
                 # Approved by the operator in the request that reached here. The
                 # gatekeeper still mints and redeems its own argument-bound nonce

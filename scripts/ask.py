@@ -29,45 +29,22 @@ from agentkit.llm.runner import Runner  # noqa: E402
 from agentkit.llm.tasks import NoCapableModel  # noqa: E402
 from agentkit.session import Surface  # noqa: E402
 from jobagent.assistant import build_assistant  # noqa: E402
-from jobagent.assistant.config_policy import ConfigRefused, preview  # noqa: E402
+from jobagent.assistant.card import render_card  # noqa: E402
+from jobagent.assistant.sink import StoreSink  # noqa: E402
 from jobagent.config import get_settings  # noqa: E402
-from jobagent.core.schemas import Event  # noqa: E402
 from jobagent.store import Store  # noqa: E402
 
 
-class EventSink:
-    """Writes the agent's trail onto the same `events` table the pipeline uses, so an
-    assistant session shows up in `GET /runs` beside the scheduled work."""
-
-    def __init__(self, store):
-        self.store = store
-
-    def emit(self, kind: str, payload: dict) -> None:
-        self.store.log_event(Event(kind=kind, payload=payload))
-
-
 def confirm_at_the_terminal(name: str, args: dict, policy) -> bool:
-    """Render the confirmation from computed values, then ask.
-
-    The impact line comes from `preview()` — real arithmetic over stored rows — not from
-    anything the model said about what it intends to do.
-    """
+    """Print the shared card, then ask. The card is computed from stored rows and
+    validated arguments — not from anything the model said about what it intends."""
     print(f"\n  ┌─ {name} needs your approval")
-    if policy is not None and policy.describes:
-        print(f"  │  {policy.describes}")
-    if name == "apply_config_change":
-        try:
-            impact = preview(str(args.get("field", "")), str(args.get("value", "")),
-                             get_settings(), _STORE)
-            for line in impact.render().splitlines():
-                print(f"  │  {line}")
-        except ConfigRefused as exc:
-            print(f"  │  REFUSED: {exc}")
-            print("  └─ not offering this.\n")
-            return False
-    else:
-        for key, value in args.items():
-            print(f"  │  {key}: {value}")
+    card = render_card(name, args, policy, get_settings(), _STORE)
+    for line in card.splitlines():
+        print(f"  │  {line}")
+    if card.startswith("REFUSED:"):
+        print("  └─ not offering this.\n")
+        return False
     try:
         answer = input("  └─ approve? [y/N] ").strip().lower()
     except (EOFError, KeyboardInterrupt):
@@ -103,7 +80,7 @@ def main() -> int:
 
     try:
         assistant = build_assistant(
-            store=store, settings=settings, sink=EventSink(store),
+            store=store, settings=settings, sink=StoreSink(store),
             surface=Surface.CLI,
             ask=None if args.read_only else confirm_at_the_terminal,
         )
