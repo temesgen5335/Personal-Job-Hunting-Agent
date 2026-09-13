@@ -223,3 +223,21 @@ def test_plain_prose_reply_becomes_the_body():
     subject, body = draft_email("T", {"title": "AI Eng"}, ProseLLM(), "CV")
     assert subject == "Application for AI Eng"
     assert body == "Dear Hiring Manager, I am interested."
+
+
+def test_the_draft_path_module_does_not_import_a_mailer():
+    """draft_application (the MCP/agent tool) imports prepare_application; that path must
+    not drag in a sender, or the R2 reachability guard would fail through it."""
+    import ast
+    import pathlib
+
+    text = (pathlib.Path(__file__).resolve().parent.parent
+            / "src" / "jobagent" / "apply" / "prepare.py").read_text()
+    assert "smtplib" not in text and "email_send" not in text
+    modules = []
+    for node in ast.walk(ast.parse(text)):
+        if isinstance(node, ast.ImportFrom) and node.module:
+            modules.append(node.module)
+    assert not any("email_send" in m for m in modules)
+    # And it really is where prepare_application lives now.
+    from jobagent.apply.prepare import prepare_application  # noqa: F401
