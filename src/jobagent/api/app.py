@@ -27,11 +27,12 @@ from jobagent.apply.ats_flow import create_ats_application, run_ats
 from jobagent.apply.email_send import send_email
 from jobagent.bot.service import MatchFilter, ranked_matches
 from jobagent.config import get_settings, reload_settings
-from jobagent.core.schemas import ApplicationStatus, Event, allowed_next, can_transition
+from jobagent.core.schemas import Event, allowed_next
 from jobagent.fit import assess_fit
 from jobagent.ingestion.gate import ALL_SOURCES, IngestGate, resolve_sources
 from jobagent.ingestion.registry import build_adapters
 from jobagent.ingestion.runner import run_ingestion
+from jobagent.lifecycle import IllegalTransition, NoSuchApplication, VALID_STATUSES, transition
 from jobagent.llm_client import AllProvidersFailed, build_llm
 from jobagent.matching import run_matching
 from jobagent.preferences import (
@@ -163,9 +164,6 @@ class StatusReq(BaseModel):
     # Escape hatch for fixing a mis-click. Bypasses the transition map and logs an
     # event, so an out-of-order change is possible but never silent.
     correction: bool = False
-
-
-_VALID_STATUSES = {s.value for s in ApplicationStatus}
 
 
 def _token_for(password: str, master_key: str) -> str:
@@ -457,31 +455,26 @@ def create_app(settings=None, profile=None, llm: Any = _UNSET, cv_master: str | 
 
     @app.patch("/applications/{app_id}", dependencies=auth)
     def update_application(app_id: str, body: StatusReq):
-        if body.status not in _VALID_STATUSES:
-            raise HTTPException(400, f"Invalid status. One of: {sorted(_VALID_STATUSES)}")
+        if body.status not in VALID_STATUSES:
+            raise HTTPException(400, f"Invalid status. One of: {sorted(VALID_STATUSES)}")
         s = store()
         try:
-            existing = s.get_application(app_id)
-            if not existing:
-                raise HTTPException(404, "Application not found.")
-            current = existing["status"]
-            if not can_transition(current, body.status):
-                if not body.correction:
-                    # 422: the value is a real status, but the move is not part of the
-                    # process. Name the legal moves so the caller can act on it.
-                    raise HTTPException(422, {
-                        "message": f"Cannot move {current} → {body.status}.",
-                        "current": current,
-                        "allowed": sorted(allowed_next(current)),
-                        "hint": "Pass correction=true to override a mis-click (audited).",
-                    })
-                s.log_event(Event(kind="status_correction", job_id=existing.get("job_id"), payload={
-                    "application_id": app_id, "from": current, "to": body.status,
-                }))
-            s.update_application(app_id, status=body.status)
+            try:
+                t = transition(s, app_id, body.status, correction=body.correction, source="api")
+            except NoSuchApplication:
+                raise HTTPException(404, "Application not found.") from None
+            except IllegalTransition as exc:
+                # 422: the value is a real status, but the move is not part of the
+                # process. Name the legal moves so the caller can act on it.
+                raise HTTPException(422, {
+                    "message": f"Cannot move {exc.current} → {exc.target}.",
+                    "current": exc.current,
+                    "allowed": exc.allowed,
+                    "hint": "Pass correction=true to override a mis-click (audited).",
+                }) from None
         finally:
             s.close()
-        return {"id": app_id, "status": body.status, "allowed_next": sorted(allowed_next(body.status))}
+        return {"id": app_id, "status": t.status, "allowed_next": list(t.allowed_next)}
 
     @app.post("/triage/{job_id}", dependencies=auth + write_limit)
     def triage(job_id: str, body: TriageReq):
@@ -592,29 +585,29 @@ def create_app(settings=None, profile=None, llm: Any = _UNSET, cv_master: str | 
             if body.action != "accept":
                 raise HTTPException(400, "action must be accept | dismiss")
 
-            app_row = s.get_application(proposal["application_id"])
-            if not app_row:
-                raise HTTPException(404, "Application not found.")
-            current, target = app_row["status"], proposal["proposed"]
-            if not can_transition(current, target):
+            try:
+                t = transition(s, proposal["application_id"], proposal["proposed"],
+                               source="inbox")
+            except NoSuchApplication:
+                raise HTTPException(404, "Application not found.") from None
+            except IllegalTransition as exc:
                 raise HTTPException(422, {
-                    "message": f"Cannot move {current} → {target}.",
-                    "current": current,
-                    "allowed": sorted(allowed_next(current)),
+                    "message": f"Cannot move {exc.current} → {exc.target}.",
+                    "current": exc.current,
+                    "allowed": exc.allowed,
                     "hint": "Dismiss this proposal, or change the status by hand.",
-                })
-            s.update_application(proposal["application_id"], status=target)
+                }) from None
             s.set_proposal_state(proposal_id, "accepted")
             # Audited: an outcome that entered the record from an email should be
             # distinguishable from one the operator typed, forever.
-            s.log_event(Event(kind="outcome_accepted", job_id=app_row.get("job_id"),
+            s.log_event(Event(kind="outcome_accepted", job_id=t.job_id,
                               payload={"application_id": proposal["application_id"],
-                                       "from": current, "to": target,
+                                       "from": t.previous, "to": t.status,
                                        "source": "inbox", "proposal_id": proposal_id,
                                        "message_id": proposal["message_id"]}))
         finally:
             s.close()
-        return {"id": proposal_id, "state": "accepted", "status": target}
+        return {"id": proposal_id, "state": "accepted", "status": t.status}
 
     @app.get("/followups", dependencies=read_auth)
     def followups(after_days: int = 7):
