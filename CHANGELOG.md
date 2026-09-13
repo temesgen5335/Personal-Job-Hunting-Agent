@@ -12,7 +12,56 @@ scoped in [docs/VERSIONING.md](docs/VERSIONING.md) — which is worth reading, b
 Planned work is tracked in [docs/ROADMAP.md](docs/ROADMAP.md), grouped by the release
 that will carry it.
 
+### Changed
+- **The pipeline's LLM router is now the reusable agentkit service — no more duplicate.**
+  `jobagent/llm_client.py` was a second multi-provider router (its own registry, failover,
+  usage ledger, fan-out) parallel to `agentkit.llm`, which the assistant already used.
+  `build_llm(settings)` is now a thin adapter that returns an `LLMService` — one provider
+  registry, one failover path, plus agentkit's circuit breaker and capability routing, for
+  the pipeline too. `LLMService` gained a per-service `temperature` (from_settings kwarg) so
+  scoring/generation keep their deterministic 0.3; the API recognizes provider exhaustion by
+  the `AllProvidersFailed` type instead of scanning the message; the run ledger records
+  agentkit's richer per-backend trace. `MultiLLM`/`LLMUsage` and the duplicate fan-out are
+  deleted.
+
 ### Added
+- **Himalayas ingestion source** (`ingestion/adapters/himalayas.py`) — a remote-first board
+  whose free JSON API ships an explicit `locationRestrictions` list per posting ("Worldwide",
+  "United States", or a country set). That maps straight onto the `location` field, so the
+  geo-eligibility scorer can tell a genuinely global role from a US-only "remote" one without
+  guessing — the structured signal the company-watchlist boards lack. No API key; toggled by
+  `[sources] himalayas`. Registered in the adapter registry and `ALL_SOURCES`; fixture-tested
+  and verified live against the API. Brings the adapter count to seven.
+- **Geographic-eligibility scoring** (`matching/heuristic.py`, `preferences.py`) — the
+  heuristic now reads a posting's *work-location requirement*, not just whether the word
+  "remote" appears, and it is **fully configurable — no geography or home region is hardcoded**
+  (R22). `remote_scope="global"` keeps only genuinely global-remote postings and caps every
+  place-pinned one (remote-US, remote-UK, a city — and the candidate's own country too) at 0.15
+  like an exclusion, with a `region-locked` gap chip; `remote_scope="any"` (the default) leaves
+  it off. Three optional profile lists shape it: `geo_global_terms` (what "globally open" means),
+  `geo_eligible` (always-allow), and `geo_blocked` (always-demote, honoured in any scope). The
+  place test is **gazetteer-free** — it strips the remote/global vocabulary from the location and
+  locks it if any place name survives — so it needs no country list to maintain and handles
+  arbitrary places (China, Uruguay, `Remote - CA`, `Remote - EMEA`) uniformly. A region
+  requirement in the body ("authorized to work in the US") is caught even when the location says
+  only "Remote". The eval set gains geo trap and configurable-include classes
+  (`matching/evalset.py`); precision@10 is 1.0. Config lives in `config/preferences*.toml`
+  (`remote_scope` + `geo_*`). Measured on the live store: with `remote_scope="global"` the
+  strong-match queue fell from 311 to ~10 once place-locked jobs were demoted.
+- **Geo scoring also reads the job title** (`matching/heuristic.py`) — some boards keep the
+  location field global ("Distributed") but pin the role in the title ("… - Charlotte, NC").
+  A high-precision `City, ST` check (real US state abbreviations, case-sensitive so a role
+  qualifier like "ML"/"AI" after a comma never trips it) now locks those under global scope.
+- **agentkit's reusable `LLMService` gains the live free-model fan-out** (`agentkit/llm/openrouter.py`,
+  `agentkit/llm/chain.py`) — the domain-agnostic harness now carries the same capability as the
+  app-side client, so any project embedding agentkit gets it. `openrouter.free_models()` is
+  **stdlib-only** (urllib, injectable transport) — no new dependency, no host coupling (the
+  import-boundary/vocabulary tests still hold). `build_chain` fans out over the live `:free`
+  list when `openrouter_free_fanout` is set; `ProviderSpec` gains an `enabled_field` opt-in gate
+  so keyless **Pollinations** stays off until asked. Added SambaNova, Nvidia, Mistral, Meta Llama,
+  Pollinations to `DEFAULT_PROVIDERS`, and fixed the 404ing `openrouter_model` default. Verified
+  live: `LLMService.from_settings(SimpleNamespace(...))` fans out over 6 free models and serves a
+  real call — with `jobagent` absent from the path.
 - **Smart multi-provider LLM router with live free-model discovery** (`llm_client.py`) —
   the failover chain is now table-driven off one `_PROVIDERS` registry and gains SambaNova,
   Nvidia (NIM), Mistral, Meta Llama, and keyless **Pollinations** (opt-in) alongside the

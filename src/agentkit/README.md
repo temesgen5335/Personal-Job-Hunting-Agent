@@ -59,22 +59,30 @@ adding a key is the whole integration.
 | `cerebras` | `cerebras_api_key` | `cerebras_model` | `llama-3.3-70b` |
 | `gemini` | `gemini_api_key` | `gemini_model` | `gemini-flash-latest` |
 | `github` | `github_models_token` | `github_models_model` | `openai/gpt-4o-mini` |
-| `openrouter` | `openrouter_api_key` | `openrouter_model` | `openai/gpt-oss-20b:free` |
+| `openrouter` | `openrouter_api_key` | `openrouter_model` | `minimax/minimax-m3:free` |
+| `sambanova` | `sambanova_api_key` | `sambanova_model` | `Meta-Llama-3.3-70B-Instruct` |
+| `nvidia` | `nvidia_api_key` | `nvidia_model` | `meta/llama-3.3-70b-instruct` |
+| `mistral` | `mistral_api_key` | `mistral_model` | `mistral-small-latest` |
+| `llama` | `llama_api_key` | `llama_model` | `Llama-3.3-70B-Instruct` |
+| `pollinations` | — (keyless) | `pollinations_model` | `openai` (needs `pollinations_enabled`) |
 | `qwen` | `qwen_api_key` | `qwen_model` | `qwen-plus` |
 | `custom` | `custom_llm_api_key` | `custom_llm_model` | — (needs `custom_llm_base_url`) |
 | `openai` | `openai_api_key` | `openai_model` | `gpt-4o-mini` |
 | `anthropic` | `anthropic_api_key` | `anthropic_model` | `claude-sonnet-4-6` |
 
-Two more attributes are read if present:
+More attributes are read if present:
 
 | Attribute | Meaning |
 |---|---|
 | `llm_provider` | Name of the preferred provider. Ordering only — see the note below. |
 | `custom_llm_base_url` | Enables the `custom` provider (Ollama, vLLM, LiteLLM, any OpenAI-compatible server). No key needed. |
+| `openrouter_free_fanout` | Try **all** of OpenRouter's live `:free` chat models as failover backends (fetched by `openrouter.free_models`, ranked tools+context first, cached hourly). A withdrawn slug is simply skipped for the next; degrades to the single `openrouter_model` if the list can't be fetched. Off by default. |
+| `openrouter_free_max` | Cap how many free models join the chain (default 6). |
+| `pollinations_enabled` | Opt in to the keyless `pollinations` provider — off by default so a no-key install stays empty rather than silently routing through a third party. |
 
-Default fallback order: `groq → cerebras → gemini → github → openrouter → qwen → custom
-→ openai → anthropic`. Free and fast first, so a paid key is a deliberate escalation
-rather than a surprise on the bill.
+Default fallback order: `groq → cerebras → gemini → github → openrouter → sambanova →
+nvidia → mistral → llama → qwen → pollinations → custom → openai → anthropic`. Free and
+fast first, so a paid key is a deliberate escalation rather than a surprise on the bill.
 
 > **`llm_provider` orders, it does not admit.** With the `Runner` (§5), a preferred
 > provider that cannot do the task — no tool support, context too small — is skipped

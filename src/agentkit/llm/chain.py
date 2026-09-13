@@ -33,6 +33,7 @@ class ProviderSpec:
     default_model: str = ""
     base_url_field: str = ""        # for self-hosted / custom endpoints
     requires_key: bool = True       # local servers often need none
+    enabled_field: str = ""         # opt-in gate: keyless providers stay off unless truthy
 
 
 # Every provider the harness can speak to. All the OpenAI-compatible ones share one
@@ -59,9 +60,11 @@ DEFAULT_PROVIDERS: tuple[ProviderSpec, ...] = (
                  default_model="qwen-plus"),
     ProviderSpec("openrouter", "openrouter_api_key", "openrouter_model",
                  "https://openrouter.ai/api/v1",
-                 # :free slugs are withdrawn without notice — the previous default
-                 # started 404ing. Verified live Aug 2026.
-                 default_model="openai/gpt-oss-20b:free"),
+                 # :free slugs are withdrawn without notice — gpt-oss-20b:free 404'd once
+                 # it lost its free tier. This is only the FALLBACK: with openrouter_free_fanout
+                 # set, build_chain fans out over the live free list (openrouter.free_models),
+                 # so a dead slug self-heals. minimax-m3:free verified live Sep 2026.
+                 default_model="minimax/minimax-m3:free"),
     ProviderSpec("cerebras", "cerebras_api_key", "cerebras_model",
                  "https://api.cerebras.ai/v1",
                  default_model="llama-3.3-70b"),
@@ -70,14 +73,30 @@ DEFAULT_PROVIDERS: tuple[ProviderSpec, ...] = (
     ProviderSpec("github", "github_models_token", "github_models_model",
                  "https://models.github.ai/inference",
                  default_model="openai/gpt-4o-mini"),
+    # More OpenAI-compatible providers with free/generous tiers. Endpoints only; the
+    # caller supplies keys and (if desired) model overrides.
+    ProviderSpec("sambanova", "sambanova_api_key", "sambanova_model",
+                 "https://api.sambanova.ai/v1", default_model="Meta-Llama-3.3-70B-Instruct"),
+    ProviderSpec("nvidia", "nvidia_api_key", "nvidia_model",
+                 "https://integrate.api.nvidia.com/v1", default_model="meta/llama-3.3-70b-instruct"),
+    ProviderSpec("mistral", "mistral_api_key", "mistral_model",
+                 "https://api.mistral.ai/v1", default_model="mistral-small-latest"),
+    ProviderSpec("llama", "llama_api_key", "llama_model",
+                 "https://api.llama.com/compat/v1", default_model="Llama-3.3-70B-Instruct"),
+    # Pollinations needs NO API key. Opt-in via `pollinations_enabled` so a keyless install
+    # still builds an empty chain instead of silently routing through a third party.
+    ProviderSpec("pollinations", "", "pollinations_model",
+                 "https://text.pollinations.ai/openai", default_model="openai",
+                 requires_key=False, enabled_field="pollinations_enabled"),
     ProviderSpec("custom", "custom_llm_api_key", "custom_llm_model",
                  None, base_url_field="custom_llm_base_url", requires_key=False),
 )
 
 # Tried in this order after the configured primary. Free and fast first, so a paid key
 # is a deliberate escalation rather than a surprise on the bill.
-DEFAULT_ORDER = ("groq", "cerebras", "gemini", "github", "openrouter", "qwen",
-                 "custom", "openai", "anthropic")
+DEFAULT_ORDER = ("groq", "cerebras", "gemini", "github", "openrouter", "sambanova",
+                 "nvidia", "mistral", "llama", "qwen", "pollinations", "custom",
+                 "openai", "anthropic")
 
 
 @dataclass
@@ -123,7 +142,11 @@ def build_chain(settings, *, primary: str = "", providers=DEFAULT_PROVIDERS,
         spec = by_name.get(name)
         if spec is None:
             continue
-        api_key = getattr(settings, spec.key_field, "") or ""
+        if spec.enabled_field and not getattr(settings, spec.enabled_field, False):
+            out.skipped.append((name, f"{spec.enabled_field} not set"))
+            continue
+        api_key = getattr(settings, spec.key_field, "") if spec.key_field else ""
+        api_key = api_key or ""
         base_url = spec.base_url
         if spec.base_url_field:
             base_url = getattr(settings, spec.base_url_field, "") or None
@@ -133,6 +156,20 @@ def build_chain(settings, *, primary: str = "", providers=DEFAULT_PROVIDERS,
         if spec.requires_key and not api_key:
             out.skipped.append((name, f"no {spec.key_field}"))
             continue
+
+        # OpenRouter fan-out: try every currently-free model as a failover backend, so a
+        # withdrawn slug is just skipped for the next. Opt-in; degrades to the single
+        # configured model when off or when the live list can't be fetched.
+        if name == "openrouter" and getattr(settings, "openrouter_free_fanout", False):
+            from agentkit.llm.openrouter import free_models
+            ids = free_models(api_key, limit=getattr(settings, "openrouter_free_max", 6) or 6)
+            if ids:
+                for mid in ids:
+                    be = _make_backend(spec, api_key or "not-needed", mid, base_url)
+                    be.name = f"openrouter:{mid.rsplit('/', 1)[-1].replace(':free', '')}"
+                    be.card = resolve_card("openrouter", mid, settings)
+                    out.backends.append(be)
+                continue
 
         model = getattr(settings, spec.model_field, "") or spec.default_model
         if not model:

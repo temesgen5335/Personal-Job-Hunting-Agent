@@ -134,7 +134,7 @@ src/jobagent/
 │   ├── util.py              # strip_html, make_client, split_slugs, get_with_retry (R21)
 │   ├── runner.py            # run_ingestion() — resilient per-adapter with RunReport
 │   ├── registry.py          # build_adapters() — watchlist + env slugs, filtered by Sources
-│   └── adapters/            # remoteok, remotive, greenhouse, lever, ashby, telegram
+│   └── adapters/            # remoteok, remotive, himalayas, greenhouse, lever, ashby, telegram, jsearch
 ├── matching/
 │   ├── heuristic.py         # heuristic_score() — word-boundary keyword matching
 │   ├── llm.py               # llm_score() — LLM rerank of top candidates

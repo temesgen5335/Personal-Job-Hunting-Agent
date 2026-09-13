@@ -129,8 +129,8 @@ def test_ingest_sources_overrides_the_toml_toggles():
 
 
 def test_blank_ingest_sources_falls_back_to_toml():
-    toml = Sources(remoteok=True, remotive=False, greenhouse=False, lever=False,
-                   ashby=False, telegram=False)
+    toml = Sources(remoteok=True, remotive=False, himalayas=False, greenhouse=False,
+                   lever=False, ashby=False, telegram=False)
     assert resolve_sources(Settings(_env_file=None), toml) == {"remoteok"}
 
 

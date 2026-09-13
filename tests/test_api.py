@@ -441,14 +441,16 @@ def test_provider_exhaustion_is_a_503_not_a_500(client, monkeypatch):
     Found by exercising the running system with all three free tiers exhausted.
     """
     from jobagent.api import app as api
+    from agentkit.llm.service import AllProvidersFailed
 
     class Exhausted:
         chain = ["groq"]
 
         def complete(self, system, user, json_mode=False):
-            raise RuntimeError(
-                "All LLM providers failed:\n"
-                "  groq: RateLimitError: Error code: 429 - tokens per day (TPD)")
+            # What LLMService.complete raises when every backend fails — the API
+            # recognizes it by type now, not by scanning the message text.
+            raise AllProvidersFailed([("groq", "openai/gpt-oss-20b",
+                                       "429 - tokens per day (TPD) rate_limit")])
 
     app = api.create_app(
         settings=Settings(_env_file=None),

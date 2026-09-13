@@ -101,7 +101,56 @@ def test_next_steps_lead_with_something_that_works_without_credentials():
     assert any("Optional" in s and "LLM" in s for s in steps)
 
 
+def test_bootstrap_env_adds_missing_secrets():
+    from jobagent.setup_wizard import bootstrap_env, parse_env
+    out = bootstrap_env("", password="pw", master_key="mk")
+    p = parse_env(out)
+    assert p["DASHBOARD_PASSWORD"] == "pw"
+    assert p["JOBAGENT_MASTER_KEY"] == "mk"
+
+
+def test_bootstrap_env_never_clobbers_existing_secrets():
+    from jobagent.setup_wizard import bootstrap_env, parse_env
+    existing = "DASHBOARD_PASSWORD=mine\nJOBAGENT_MASTER_KEY=k0\n"
+    out = bootstrap_env(existing, password="new", master_key="new")
+    p = parse_env(out)
+    assert p["DASHBOARD_PASSWORD"] == "mine"      # kept
+    assert p["JOBAGENT_MASTER_KEY"] == "k0"       # kept
+
+
 # --- the demo seeder must never touch a real store ---------------------------
+
+def test_seed_if_empty_seeds_only_an_empty_store(tmp_path):
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from seed_demo import seed_if_empty
+
+    db = tmp_path / "store.db"
+    stats = seed_if_empty(str(db), jobs=12)
+    assert stats is not None and stats["total_jobs"] == 12
+    s = Store(str(db))
+    try:
+        assert all((j["source_job_id"] or "").startswith("demo-") for j in s.get_jobs())
+    finally:
+        s.close()
+
+
+def test_seed_if_empty_is_a_noop_on_a_populated_store(tmp_path):
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from seed_demo import seed_if_empty
+    from jobagent.core.schemas import JobPosting, Source
+
+    db = tmp_path / "store.db"
+    s = Store(str(db)); s.init_schema()
+    s.upsert_job(JobPosting(source=Source.remoteok, title="Real", company="Real Co"))
+    s.close()
+
+    assert seed_if_empty(str(db)) is None            # refused — store not empty
+    s = Store(str(db))
+    try:
+        assert s.count_jobs() == 1                    # untouched
+    finally:
+        s.close()
+
 
 def test_seed_demo_refuses_a_store_that_already_has_jobs(tmp_path):
     """The guard that matters: demo rows mixed into a real store are indistinguishable

@@ -476,6 +476,69 @@ def test_a_local_endpoint_needs_a_url_not_a_key():
     assert chain[0].card.tier.name == "STANDARD"      # inferred from 32b
 
 
+def test_the_new_openai_compatible_providers_join_when_keyed():
+    from agentkit.llm import build_chain
+    chain = build_chain(_settings(groq_api_key="k", sambanova_api_key="k",
+                                  nvidia_api_key="k", mistral_api_key="k", llama_api_key="k"))
+    assert {b.name for b in chain} >= {"groq", "sambanova", "nvidia", "mistral", "llama"}
+
+
+def test_pollinations_is_keyless_but_opt_in():
+    from agentkit.llm import build_chain
+    assert build_chain(_settings()) == []                               # keyless ≠ always-on
+    on = build_chain(_settings(pollinations_enabled=True))
+    assert [b.name for b in on] == ["pollinations"]                     # no key needed once enabled
+
+
+# --- OpenRouter free-model discovery + fan-out -----------------------------------
+
+_CATALOGUE = {"data": [
+    {"id": "a/small:free", "context_length": 8000,
+     "architecture": {"input_modalities": ["text"], "output_modalities": ["text"]},
+     "supported_parameters": []},
+    {"id": "a/big:free", "context_length": 1_000_000,
+     "architecture": {"input_modalities": ["text"], "output_modalities": ["text"]},
+     "supported_parameters": ["tools"]},
+    {"id": "a/audio:free", "context_length": 9,
+     "architecture": {"input_modalities": ["text"], "output_modalities": ["audio"]}},
+    {"id": "a/paid", "context_length": 9,
+     "architecture": {"input_modalities": ["text"], "output_modalities": ["text"]}},
+]}
+
+
+def test_free_models_ranks_and_never_touches_the_network_without_a_transport():
+    from agentkit.llm import openrouter
+    openrouter.reset_cache()
+    ids = openrouter.free_models("k", fetch=lambda url, key, timeout: _CATALOGUE)
+    assert ids == ["a/big:free", "a/small:free"]        # tools+big first; audio & paid dropped
+
+
+def test_free_models_degrades_to_empty_on_fetch_failure():
+    from agentkit.llm import openrouter
+    openrouter.reset_cache()
+
+    def boom(url, key, timeout):
+        raise OSError("no network")
+    assert openrouter.free_models("k", fetch=boom) == []
+
+
+def test_build_chain_fans_out_over_openrouter_free_models(monkeypatch):
+    from agentkit.llm import build_chain, openrouter
+    monkeypatch.setattr(openrouter, "free_models",
+                        lambda api_key, limit=6: ["nvidia/nemotron:free", "z-ai/glm-5.2:free"])
+    chain = build_chain(_settings(llm_provider="openrouter", openrouter_api_key="k",
+                                  openrouter_free_fanout=True))
+    assert [b.name for b in chain] == ["openrouter:nemotron", "openrouter:glm-5.2"]
+
+
+def test_fan_out_falls_back_to_the_single_model_when_the_list_is_empty(monkeypatch):
+    from agentkit.llm import build_chain, openrouter
+    monkeypatch.setattr(openrouter, "free_models", lambda api_key, limit=6: [])
+    chain = build_chain(_settings(llm_provider="openrouter", openrouter_api_key="k",
+                                  openrouter_free_fanout=True))
+    assert [b.name for b in chain] == ["openrouter"]     # single configured model, not empty
+
+
 def test_the_report_explains_why_a_provider_was_skipped():
     from agentkit.llm import build_chain
     rep = build_chain(_settings(groq_api_key="k"), report=True)

@@ -252,45 +252,6 @@ def test_no_command_emits_none_into_a_message(wired):
     assert leaks == {}, f"handlers rendered None into user-visible text: {leaks}"
 
 
-# --- LLM usage accounting -----------------------------------------------------
-
-def test_usage_counts_calls_failures_and_estimates_tokens():
-    """Estimates, and named so everywhere. A number presented as billed usage when it
-    is a guess gets trusted, which is worse than having no number."""
-    from jobagent.llm_client import LLMUsage
-
-    usage = LLMUsage()
-    usage.record("groq", "p" * 400, "c" * 200)
-    usage.record("groq", "p" * 400, "c" * 200)
-    usage.record_failure("gemini")
-
-    data = usage.as_dict()
-    assert data["calls"] == 2 and data["failures"] == 1
-    assert data["estimated_tokens"] == 300          # 1200 chars / 4
-    assert "estimated" in "".join(k for k in data if "token" in k)
-    assert data["by_provider"]["gemini"]["failures"] == 1
-
-
-def test_a_failing_provider_is_recorded_even_though_it_returned_nothing():
-    """A chain whose first backend is dead is otherwise invisible — the answer still
-    arrives from the next one. That is exactly how two dead model slugs went unnoticed
-    for weeks."""
-    from jobagent.llm_client import MultiLLM
-
-    class Dead:
-        name = "dead"
-
-        def generate(self, system, user):
-            raise RuntimeError("404 model_not_found")
-
-    class Alive:
-        name = "alive"
-
-        def generate(self, system, user):
-            return "answer"
-
-    llm = MultiLLM([Dead(), Alive()])
-    assert llm.complete("s", "u") == "answer"
-    data = llm.usage.as_dict()
-    assert data["by_provider"]["dead"]["failures"] == 1
-    assert data["by_provider"]["alive"]["calls"] == 1
+# LLM usage accounting moved to agentkit's trace ledger when the pipeline adopted the
+# shared LLMService — it is covered by tests/test_llm_service.py and the agentkit ledger
+# tests, not here. jobagent no longer carries its own MultiLLM/LLMUsage.

@@ -23,6 +23,7 @@ import json
 import os
 import tomllib
 from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -69,6 +70,14 @@ class Profile(BaseModel):
     exclude_locations: list[str] = Field(default_factory=list)
     keywords: list[str] = Field(default_factory=list)
     links: dict = Field(default_factory=dict)
+    # Geographic-eligibility scoring (matching/heuristic.py). All optional; the default
+    # ("any" + empty lists) leaves the dimension OFF, so nothing is assumed about any user
+    # (R22). Set remote_scope="global" to keep only genuinely global-remote postings and
+    # demote every location-pinned one (US/UK/Canada — and your own country too).
+    remote_scope: Literal["any", "global"] = "any"
+    geo_global_terms: list[str] = Field(default_factory=list)  # what "globally open" means
+    geo_eligible: list[str] = Field(default_factory=list)      # always-eligible location patterns
+    geo_blocked: list[str] = Field(default_factory=list)       # always-demoted location/text patterns
 
 
 class Watchlist(BaseModel):
@@ -83,6 +92,7 @@ class Sources(BaseModel):
 
     remoteok: bool = True
     remotive: bool = True
+    himalayas: bool = True
     greenhouse: bool = True
     lever: bool = True
     ashby: bool = True

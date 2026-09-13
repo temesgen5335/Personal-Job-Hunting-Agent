@@ -78,7 +78,8 @@ def test_the_provider_table_in_the_readme_matches_the_code():
 
     text = README.read_text()
     for spec in DEFAULT_PROVIDERS:
-        assert f"`{spec.key_field}`" in text, f"README omits {spec.key_field}"
+        if spec.key_field:      # a keyless provider (Pollinations) has no key attribute
+            assert f"`{spec.key_field}`" in text, f"README omits {spec.key_field}"
         assert f"`{spec.model_field}`" in text, f"README omits {spec.model_field}"
 
 

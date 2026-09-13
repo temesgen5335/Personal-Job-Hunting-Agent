@@ -355,3 +355,19 @@ def test_the_default_probe_budget_leaves_room_for_reasoning_tokens():
     from agentkit.llm.probe import PROBE_MAX_TOKENS
 
     assert PROBE_MAX_TOKENS >= 64
+
+
+# --- temperature (added when the pipeline adopted the shared service) ----------
+
+def test_a_service_temperature_is_threaded_into_every_completion():
+    fb = FakeBackend("groq")
+    LLMService(backends=[fb], temperature=0.3).complete("s", "u")
+    assert fb.seen[0].temperature == 0.3
+
+
+def test_temperature_defaults_to_none_and_from_settings_can_set_it():
+    fb = FakeBackend("groq")
+    LLMService(backends=[fb]).complete("s", "u")
+    assert fb.seen[0].temperature is None                       # provider default
+    cfg = SimpleNamespace(groq_api_key="k", llm_provider="groq")
+    assert LLMService.from_settings(cfg, temperature=0.2).temperature == 0.2

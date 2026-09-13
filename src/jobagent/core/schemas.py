@@ -24,6 +24,7 @@ class Source(str, Enum):
 
     remoteok = "remoteok"
     remotive = "remotive"
+    himalayas = "himalayas"    # remote-first board; carries an explicit location restriction
     greenhouse = "greenhouse"
     lever = "lever"
     ashby = "ashby"

@@ -350,6 +350,10 @@ class Store:
         strong = self.conn.execute(
             "SELECT COUNT(*) AS n FROM matches WHERE score >= 0.7"
         ).fetchone()["n"]
+        demo_jobs = self.conn.execute(
+            "SELECT COUNT(*) AS n FROM jobs WHERE source_job_id LIKE 'demo-%'"
+        ).fetchone()["n"]
+        total = self.count_jobs()
         last_ingest = self.conn.execute(
             "SELECT created_at FROM events WHERE kind='ingest' ORDER BY id DESC LIMIT 1"
         ).fetchone()
@@ -370,7 +374,7 @@ class Store:
             (_now(),),
         ).fetchone()["n"]
         return {
-            "total_jobs": self.count_jobs(),
+            "total_jobs": total,
             "by_source": by_source,
             "matches": matches,
             "strong_matches": strong,
@@ -378,6 +382,8 @@ class Store:
             "last_ingest": last_ingest["created_at"] if last_ingest else None,
             "apps": apps,
             "total_apps": sum(a["n"] for a in apps),
+            "demo": demo_jobs > 0,
+            "first_run": (total - demo_jobs) == 0,
             "health": self.pipeline_health(),
         }
 

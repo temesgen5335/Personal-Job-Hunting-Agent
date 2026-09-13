@@ -95,3 +95,50 @@ def test_runner_survives_failing_adapter(tmp_path):
 
     assert report.results[0].error is not None      # bad adapter recorded error
     assert report.results[1].new == 2               # good adapter still ran
+
+
+# --- Himalayas (remote-first board with an explicit location restriction) ----
+
+from jobagent.ingestion.adapters.himalayas import HimalayasAdapter  # noqa: E402
+
+_HIMALAYAS_FEED = {"jobs": [
+    {"guid": "abc1", "title": "Senior Backend Engineer", "companyName": "Globex",
+     "locationRestrictions": ["Worldwide"], "description": "<p>Python, FastAPI.</p>",
+     "applicationLink": "https://himalayas.app/jobs/abc1", "pubDate": 1725500000,
+     "categories": ["Software Development"], "seniority": ["Senior"]},
+    {"guid": "abc2", "title": "Frontend Engineer", "companyName": "Initech",
+     "locationRestrictions": ["United States"], "description": "React.",
+     "applicationLink": "https://himalayas.app/jobs/abc2", "pubDate": 1725500000},
+    {"guid": "abc3", "title": "Data Engineer", "companyName": "Acme",
+     "locationRestrictions": [], "description": "SQL.", "pubDate": "not-a-date"},
+]}
+
+
+def _himalayas_with(feed):
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=feed)
+    return HimalayasAdapter(client=httpx.Client(transport=httpx.MockTransport(handler)))
+
+
+def test_himalayas_carries_location_restrictions_into_the_location_field():
+    jobs = list(_himalayas_with(_HIMALAYAS_FEED).fetch())
+    assert len(jobs) == 3
+    j0 = jobs[0]
+    assert j0.source == Source.himalayas
+    assert j0.title == "Senior Backend Engineer" and j0.company == "Globex"
+    assert j0.location == "Worldwide"                 # global → the geo scorer keeps it
+    assert j0.is_remote is True
+    assert "Python" in j0.description and "<p>" not in j0.description   # HTML stripped
+    assert j0.apply_url.endswith("abc1")
+    assert "Software Development" in j0.tags and "Senior" in j0.tags
+    assert j0.posted_at is not None                   # unix timestamp parsed
+    # A US-only restriction is carried verbatim so the geo scorer can region-lock it.
+    assert jobs[1].location == "United States"
+    # Empty restrictions default to Remote; a bad date degrades to None, not a crash.
+    assert jobs[2].location == "Remote" and jobs[2].posted_at is None
+
+
+def test_himalayas_tolerates_a_non_dict_payload():
+    empty = HimalayasAdapter(client=httpx.Client(
+        transport=httpx.MockTransport(lambda r: httpx.Response(200, json=[]))))
+    assert list(empty.fetch()) == []

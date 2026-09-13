@@ -215,3 +215,117 @@ def test_seniority_terms_are_word_boundary_matched():
     # A real CTO posting is still caught.
     _, _, gaps = heuristic_score(_job(title="CTO / Head of AI", is_remote=1, description="Python"), WEIGHTED)
     assert any("management-track" in g for g in gaps)
+
+
+# --- geographic eligibility (config-driven; matching/heuristic.py) -----------
+
+# remote_scope="global": only genuinely global-remote postings are eligible.
+_GLOBAL = Profile(
+    target_roles=["AI Engineer"], core_skills=["Python", "LangChain", "RAG"],
+    must_haves=["remote"], keywords=["AI engineer", "LLM"], remote_scope="global",
+)
+# remote_scope defaults to "any": geo scoring is OFF (the reusable default).
+_OFF = Profile(
+    target_roles=["AI Engineer"], core_skills=["Python", "LangChain", "RAG"],
+    must_haves=["remote"], keywords=["AI engineer", "LLM"],
+)
+_STRONG_DESC = "Build agentic LLM systems with LangChain and RAG in Python."
+
+
+@pytest.mark.parametrize("loc", [
+    "Remote - US", "Remote (US)", "San Francisco", "New York, NY (HQ)",
+    "Remote - California", "Remote - CA", "Canada - Remote (ON, AB)", "China - Remote",
+    "Remote, Bangalore", "Ukraine Anywhere", "Remote - EMEA", "Remote - Europe",
+    "Americas, Europe, Asia, Africa",
+])
+def test_global_scope_locks_any_place_pinned_location(loc):
+    """Under global scope, ANY location that names a place — country, region, state or
+    city, gazetteer-free — is region-locked and capped."""
+    score, _, gaps = heuristic_score(
+        _job(title="AI Engineer", is_remote=1, location=loc, description=_STRONG_DESC), _GLOBAL)
+    assert any("region-locked" in g for g in gaps), (loc, gaps)
+    assert score <= 0.16
+
+
+@pytest.mark.parametrize("loc", [
+    "Remote", "Remote - Worldwide", "Anywhere", "Fully Remote", "Remote (Global)",
+    "Work from anywhere", "",
+])
+def test_global_scope_keeps_genuinely_global_remote(loc):
+    score, _, gaps = heuristic_score(
+        _job(title="AI Engineer", is_remote=1, location=loc, description=_STRONG_DESC), _GLOBAL)
+    assert not any("region-locked" in g for g in gaps), (loc, gaps)
+    assert score > 0.5
+
+
+def test_global_scope_locks_a_region_requirement_in_the_body():
+    """The location says 'Remote', but the body pins it to a region."""
+    job = _job(title="AI Engineer", is_remote=1, location="Remote",
+               description=_STRONG_DESC + " You must be authorized to work in the United States.")
+    score, _, gaps = heuristic_score(job, _GLOBAL)
+    assert any("region-locked" in g for g in gaps)
+    assert score <= 0.16
+
+
+def test_global_scope_locks_a_us_city_state_in_the_title():
+    """Location field is global ('Distributed') but the TITLE pins a US 'City, ST'."""
+    job = _job(title="Senior Customer Engineer - Charlotte, NC", is_remote=1,
+               location="Distributed", description=_STRONG_DESC)
+    score, _, gaps = heuristic_score(job, _GLOBAL)
+    assert any("US location in title" in g for g in gaps)
+    assert score <= 0.16
+
+
+def test_role_abbreviation_after_comma_in_title_is_not_a_us_state():
+    """A role qualifier like 'ML'/'AI' after a comma must not read as a state abbreviation."""
+    for t in ("AI Engineer, ML Platform", "Software Engineer, AI"):
+        _, _, gaps = heuristic_score(
+            _job(title=t, is_remote=1, location="Remote", description=_STRONG_DESC), _GLOBAL)
+        assert not any("US location in title" in g for g in gaps), t
+
+
+def test_geo_scoring_is_off_by_default():
+    """A profile that has not opted in (remote_scope='any') is unaffected — no lock."""
+    for loc in ("San Francisco", "Remote - US", "Canada - Remote"):
+        _, _, gaps = heuristic_score(
+            _job(title="AI Engineer", is_remote=1, location=loc, description=_STRONG_DESC), _OFF)
+        assert not any("region-locked" in g for g in gaps), loc
+
+
+def test_geo_eligible_include_list_overrides_a_lock():
+    """A user can allow-list a region; then it is not locked even under global scope."""
+    prof = _GLOBAL.model_copy(update={"geo_eligible": ["emea"]})
+    score, _, gaps = heuristic_score(
+        _job(title="AI Engineer", is_remote=1, location="Remote - EMEA", description=_STRONG_DESC), prof)
+    assert not any("region-locked" in g for g in gaps)
+    assert score > 0.5
+
+
+def test_geo_blocked_list_demotes_even_when_scope_is_any():
+    """The exclude list is honoured without turning on global-only mode."""
+    prof = _OFF.model_copy(update={"geo_blocked": ["united states", "remote - uk"]})
+    score, _, gaps = heuristic_score(
+        _job(title="AI Engineer", is_remote=1, location="Remote - United States",
+             description=_STRONG_DESC), prof)
+    assert any("excluded location" in g for g in gaps)
+    assert score <= 0.16
+
+
+def test_custom_global_terms_replace_the_default_vocabulary():
+    """geo_global_terms lets the user redefine what 'globally open' means."""
+    prof = _GLOBAL.model_copy(update={"geo_global_terms": ["worldwide", "latam"]})
+    _, _, allow = heuristic_score(                       # LATAM now counts as global...
+        _job(title="AI Engineer", is_remote=1, location="Remote - LATAM", description=_STRONG_DESC), prof)
+    assert not any("region-locked" in g for g in allow)
+    _, _, lock = heuristic_score(                        # ...a place not in the list stays locked
+        _job(title="AI Engineer", is_remote=1, location="Remote - US", description=_STRONG_DESC), prof)
+    assert any("region-locked" in g for g in lock)
+
+
+def test_region_code_not_matched_inside_a_place_name():
+    """The classic substring bug: a body mention of 'Belarus' must not read as a US lock,
+    and a worldwide location keeps the posting eligible."""
+    job = _job(title="AI Engineer", is_remote=1, location="Remote - Worldwide",
+               description=_STRONG_DESC + " Our team spans Belarus and Austria.")
+    _, _, gaps = heuristic_score(job, _GLOBAL)
+    assert not any("region-locked" in g for g in gaps)

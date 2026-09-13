@@ -58,7 +58,8 @@ class Settings(BaseSettings):
             return 1
         return v
 
-    # --- LLM: multi-provider with failover (see jobagent/llm_client.py) ---
+    # --- LLM: multi-provider with failover. These fields are read by agentkit's
+    # LLMService (jobagent/llm_client.build_llm is a thin adapter over it). ---
     # Primary provider; the rest become automatic backups. Free providers stay as
     # backups even after you add a paid one and point LLM_PROVIDER at it.
     llm_provider: str = Field("groq", alias="LLM_PROVIDER")

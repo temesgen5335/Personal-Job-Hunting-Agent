@@ -107,6 +107,24 @@ def seed(db_path: str, *, jobs: int, seed_value: int = 7) -> dict:
     return stats
 
 
+def seed_if_empty(db_path: str, *, jobs: int = 40) -> dict | None:
+    """Seed demo rows into `db_path` ONLY when it holds no jobs (idempotent, safe).
+
+    Returns the store stats when it seeded, or None (a no-op) when the store already has
+    any jobs — so it can be called on every boot without ever mixing demo data into a
+    real store. Demo rows are tagged (`source_job_id` prefix `demo-`, description marked
+    with MARK), so they can be found and purged later.
+    """
+    probe = Store(db_path)
+    probe.init_schema()
+    try:
+        if probe.count_jobs() > 0:
+            return None
+    finally:
+        probe.close()
+    return seed(db_path, jobs=jobs)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description="Seed a demo store to explore the UI.")
     ap.add_argument("--db", default=DEMO_DB, help=f"target store (default {DEMO_DB})")

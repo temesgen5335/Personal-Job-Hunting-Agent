@@ -53,11 +53,11 @@ Writes need `DASHBOARD_PASSWORD` set — the API gates every non-GET route (R19)
 - **Telegram bot** (`src/jobagent/bot/`) — calls service layer in-process (no HTTP hop).
 - **Dashboard** (`dashboard/`) — Astro SSR, fetches FastAPI REST API.
 - **Store** (`src/jobagent/store/db.py`) — SQLite, per-request open/close for thread safety.
-- **MultiLLM** (`src/jobagent/llm_client.py`) — table-driven ordered failover over any OpenAI-compatible provider (Groq, Cerebras, Gemini, OpenRouter, SambaNova, Nvidia, Mistral, Llama, GitHub, Pollinations-keyless, custom, OpenAI, Anthropic). `OPENROUTER_FREE_FANOUT` fetches the live `:free` model list and tries them all; withdrawn slugs self-heal.
+- **LLM** (`src/jobagent/llm_client.py`) — `build_llm(settings)` is now a thin adapter over agentkit's reusable `LLMService` (no second router): one provider registry, failover, circuit breaker, and OpenRouter `:free` fan-out, shared with the assistant. `OPENROUTER_FREE_FANOUT` (default on) fetches the live `:free` list and tries them all; withdrawn slugs self-heal.
 - **Secret store** (`src/jobagent/secrets_store.py`) — Fernet-encrypted config on disk, overlays `.env`.
 - **Auth** — every non-GET API route requires a bearer token from `DASHBOARD_PASSWORD`; fails closed (R19).
 - **Health** (`store.pipeline_health()`) — staleness, error count, per-source freshness; bannered in the dashboard and the digest.
-- **Matching** (`matching/heuristic.py`) — preference-weighted: `skill_weights`, title-vs-body role tiers, seniority and must-have checks.
+- **Matching** (`matching/heuristic.py`) — preference-weighted: `skill_weights`, title-vs-body role tiers, seniority and must-have checks, plus configurable geographic-eligibility (`remote_scope="global"` demotes any location-pinned posting; gazetteer-free, driven entirely by `geo_*` profile config — no hardcoded geography, R22).
 - **Lifecycle** (`core/schemas.ALLOWED_TRANSITIONS`) — enforced status graph; `correction=true` overrides and audits.
 - **Run ledger** — every pipeline pass has a run_id on all its events; `GET /runs` lists summaries, `GET /runs/{id}` reconstructs a pass.
 - **Eval harness** (`matching/evalset.py`) — labeled ranking floors (P@5=1.0); `scripts/eval_matching.py` is the tuning loop.
@@ -67,7 +67,7 @@ Writes need `DASHBOARD_PASSWORD` set — the API gates every non-GET route (R19)
 ### The agent harness (added Aug 2026)
 
 - **`src/agentkit/`** — a **domain-agnostic** agent harness. It may import stdlib + pydantic only; never `jobagent`, FastAPI, or a provider SDK at module scope. Two tests hold the line (import boundary + vocabulary), and a third forbids import cycles.
-- **`agentkit/llm/`** — capability-aware multi-LLM. `resolve_card()` answers *what can this model do* (measured entry → family pattern → parameter size → UNKNOWN); `plans_for()` returns a ranked plan queue that **doubles as the failover queue**, so failover can never land on an incapable model; `Runner` walks it, classifying failures before acting on them.
+- **`agentkit/llm/`** — capability-aware multi-LLM. `resolve_card()` answers *what can this model do* (measured entry → family pattern → parameter size → UNKNOWN); `plans_for()` returns a ranked plan queue that **doubles as the failover queue**, so failover can never land on an incapable model; `Runner` walks it, classifying failures before acting on them. Providers live in one `DEFAULT_PROVIDERS` table (Groq/Cerebras/Gemini/GitHub/OpenRouter/SambaNova/Nvidia/Mistral/Llama/Qwen/Pollinations-keyless/custom/OpenAI/Anthropic); `openrouter_free_fanout` fans out over OpenRouter's live `:free` models via **stdlib-only** `openrouter.free_models()` (no new dependency).
 - **Degradation** (`agentkit/llm/strategies.py`) — nine executors behind one signature. `prefetch_single_shot` is the load-bearing one: Python runs the plan, the model only writes the answer, so a model that cannot use a tool *result* still answers correctly.
 - **Governed tools** (`agentkit/guard.py`) — `GuardedToolBox` has the same shape as `ToolBox`, so it drops into the `Runner` and **there is no ungoverned path**. Order inside `execute()` is fixed: audit intent → allow-list → policy → audit decision → run → audit result.
 - **`src/jobagent/assistant/`** — the domain half: 15 in-process tools, `CONFIG_WRITABLE` (frozen is the *computed complement*), impact previews dry-run over real stored rows, FTS5 search over postings marked `Trust.UNTRUSTED`.

@@ -61,6 +61,19 @@ exclude_keywords = [
 preferred_locations = []                       # e.g. ["remote", "worldwide", "EMEA"]
 exclude_locations = ["US only", "United States only"]
 
+# Geographic-eligibility SCORING (matching/heuristic.py). Shapes the ranked queue you see
+# (dashboard, bot, digest) by lowering the score of jobs you cannot take. Off by default.
+#   remote_scope = "any"    → off.
+#   remote_scope = "global" → keep ONLY genuinely global-remote jobs and demote every job
+#     pinned to a place (remote-US, remote-UK, a city, or even your own country) — for when
+#     you want real "work from anywhere" roles, not location-restricted "remote".
+# The place test is gazetteer-free (it strips remote/global words and sees if a place name
+# survives), so it needs no country list. Tune it with the three lists below.
+remote_scope = "any"
+geo_global_terms = []        # what "globally open" means; empty = built-in default set
+geo_eligible = []            # always eligible, even under global scope, e.g. ["latam", "emea"]
+geo_blocked = []             # always demote, in any scope, e.g. ["remote us", "pst hours"]
+
 # Free-text positive keywords for the keyword prefilter.
 keywords = [
     "backend", "Python", "API",
@@ -85,6 +98,7 @@ linkedin = "https://linkedin.com/in/you"
 [sources]
 remoteok = true
 remotive = true
+himalayas = true     # remote-first board; carries an explicit location restriction per job
 greenhouse = true
 lever = true
 ashby = true
