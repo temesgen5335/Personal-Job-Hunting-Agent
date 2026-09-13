@@ -4,7 +4,6 @@
 - **Status:** Draft for review — not committed (R12). Implementation waits for approval of this spec and of the plan that follows it.
 - **Type:** Architectural (new subsystem `src/jobagent/mcp/`, new interface, new `Surface`, service extractions).
 - **Inputs:** `2026-09-13-mcp-server-brief.md`, `2026-09-13-mcp-server-investigation.md` (every fact cited here is verified there), `2026-09-12-personalagent-public-ready-design.md` (companion, in flight).
-- **Author:** temesgen5335
 
 ---
 
