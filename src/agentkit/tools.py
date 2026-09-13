@@ -19,7 +19,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from agentkit.llm.types import ToolCall, ToolResult, ToolSpec, validate_tool_schema
+from agentkit.llm.types import ToolCall, ToolOutput, ToolResult, ToolSpec, validate_tool_schema
 
 # Truncated so one chatty tool cannot eat the whole context window.
 MAX_RESULT_CHARS = 4000
@@ -83,7 +83,10 @@ class ToolBox:
             return ToolResult(call.id, call.name,
                               f"{type(exc).__name__}: {exc}", is_error=True)
 
+        data = None
+        if isinstance(output, ToolOutput):
+            data, output = output.data, output.text
         text = output if isinstance(output, str) else str(output)
         if len(text) > self.max_result_chars:
             text = text[:self.max_result_chars] + f"\n…[truncated at {self.max_result_chars} chars]"
-        return ToolResult(call.id, call.name, text)
+        return ToolResult(call.id, call.name, text, data=data)

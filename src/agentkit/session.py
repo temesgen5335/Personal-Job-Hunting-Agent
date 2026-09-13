@@ -29,6 +29,11 @@ class Surface(StrEnum):
     CLI = "cli"
     WEB = "web"
     CHAT = "chat"
+    # A coding agent driving the host through a protocol. A person is usually present,
+    # but the host cannot prove who answered a confirmation dialog — an agentic client
+    # may auto-answer — so hosts should treat this like CHAT for ADMIN unless they trust
+    # the client's UI.
+    AGENT = "agent"
 
 
 @dataclass(frozen=True)

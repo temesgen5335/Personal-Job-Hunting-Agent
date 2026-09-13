@@ -446,3 +446,42 @@ def test_the_universal_exclusions_survive_a_hosts_own_policy_book():
                          Auditor())
     with pytest.raises(ExcludedTool):
         box.register(spec("execute_sql"), lambda a: "", ToolPolicy("execute_sql"))
+
+
+# --- structured output and the agent surface ---------------------------------------
+
+def test_a_tool_may_return_structured_data_alongside_its_text():
+    """A coding agent sorting 200 rows wants JSON; a chat model wants a sentence. Both
+    come from one call: text is the model contract, data rides beside it untouched."""
+    from agentkit.llm.types import ToolOutput
+
+    box = ToolBox()
+    box.register(spec("count"), lambda a: ToolOutput("3 items", data={"total": 3}))
+    out = box.execute(ToolCall("c1", "count", {"id": "x"}))
+    assert out.content == "3 items"
+    assert out.data == {"total": 3}
+    assert not out.is_error
+
+
+def test_a_plain_string_result_carries_no_data():
+    box = ToolBox()
+    box.register(spec("look"), lambda a: "ok")
+    assert box.execute(ToolCall("c1", "look", {"id": "x"})).data is None
+
+
+def test_structured_data_survives_text_truncation():
+    box = ToolBox(max_result_chars=10)
+    from agentkit.llm.types import ToolOutput
+    box.register(spec("big"), lambda a: ToolOutput("x" * 50, data=[1, 2, 3]))
+    out = box.execute(ToolCall("c1", "big", {"id": "x"}))
+    assert "truncated" in out.content and out.data == [1, 2, 3]
+
+
+def test_the_agent_surface_exists_and_can_be_kept_out_of_admin():
+    """A coding agent's confirmation dialog cannot prove a person answered it, so a host
+    may keep ADMIN off this surface exactly as it does for chat."""
+    ctx = SessionContext(surface=Surface.AGENT,
+                         admin_surfaces=frozenset({Surface.WEB, Surface.CLI}))
+    assert Surface("agent") is Surface.AGENT
+    assert not ctx.may_confirm_admin()
+    assert SessionContext(surface=Surface.AGENT).may_confirm_admin()   # empty = any surface
