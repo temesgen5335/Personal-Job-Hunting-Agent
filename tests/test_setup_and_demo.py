@@ -137,6 +137,27 @@ def test_profile_overlay_omits_empty_sections():
     assert out["profile"]["name"] == "Me"
 
 
+def test_answers_from_mapping_builds_answers_and_tolerates_strings():
+    from jobagent.setup_wizard import answers_from_mapping
+    a = answers_from_mapping({
+        "name": "Me", "target_roles": "AI Engineer, Backend",  # comma-string
+        "core_skills": ["Python", "Go"],                        # list
+        "remote_scope": "global", "keyless": True,
+        "sources": {"telegram": False}, "unknown_key": "ignored",
+    })
+    assert a.name == "Me"
+    assert a.target_roles == ["AI Engineer", "Backend"]         # split
+    assert a.core_skills == ["Python", "Go"]                    # passed through
+    assert a.remote_scope == "global" and a.keyless is True
+    assert a.sources == {"telegram": False}
+
+
+def test_onboard_example_is_a_valid_mapping():
+    from jobagent.setup_wizard import ONBOARD_EXAMPLE, answers_from_mapping
+    a = answers_from_mapping(ONBOARD_EXAMPLE)   # must not raise
+    assert isinstance(a.target_roles, list)
+
+
 def test_next_steps_lead_with_something_that_works_without_credentials():
     steps = next_steps(Answers(), has_llm=False, has_telegram=False)
     assert "make pipeline" in steps[0]

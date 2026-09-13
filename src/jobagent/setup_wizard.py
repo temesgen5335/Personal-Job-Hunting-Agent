@@ -18,7 +18,7 @@ Two rules the wizard must never break:
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from pathlib import Path
 
 # Only what a first run actually needs. Everything else in .env.example is optional and
@@ -70,6 +70,42 @@ def split_list(raw: str) -> list[str]:
     """Comma-separated free text → a clean list. Empty entries are dropped rather than
     stored, because an empty skill silently matches nothing and looks like a bug."""
     return [part.strip() for part in (raw or "").split(",") if part.strip()]
+
+
+# List-valued Answers fields — a config file may give these as a list or a comma-string.
+_LIST_FIELDS = ("target_roles", "core_skills", "domains", "geo_eligible", "geo_blocked")
+
+
+def answers_from_mapping(data: dict) -> Answers:
+    """Build Answers from a plain mapping (a --config JSON), so onboarding can run fully
+    non-interactively. List fields accept a list or a comma-string; unknown keys are
+    ignored; missing keys keep their Answers default."""
+    known = {f.name for f in fields(Answers)}
+    kwargs: dict = {}
+    for key, value in (data or {}).items():
+        if key not in known:
+            continue
+        if key in _LIST_FIELDS and isinstance(value, str):
+            value = split_list(value)
+        kwargs[key] = value
+    return Answers(**kwargs)
+
+
+ONBOARD_EXAMPLE: dict = {
+    "name": "Your Name", "headline": "Your one-line headline", "email": "you@example.com",
+    "phone": "", "location": "Your City, Country", "timezone": "UTC+0",
+    "target_roles": ["Software Engineer", "Backend Engineer"],
+    "core_skills": ["Python", "SQL"], "domains": ["developer tools"], "seniority": "mid",
+    "remote_only": True, "remote_scope": "any", "geo_eligible": [], "geo_blocked": [],
+    "sources": {"remoteok": True, "remotive": True, "himalayas": True, "greenhouse": True,
+                "lever": True, "ashby": True, "telegram": False},
+    "watchlist": {"greenhouse": [], "lever": [], "ashby": []},
+    "keyless": True, "pollinations_enabled": False,
+    "llm_provider": "", "llm_api_key": "", "llm_model": "",
+    "smtp_host": "", "smtp_port": "", "smtp_user": "", "smtp_password": "", "apply_from_email": "",
+    "telegram_bot_token": "", "telegram_chat_id": "", "telegram_owner_id": "",
+    "dashboard_password": "",
+}
 
 
 def parse_env(text: str) -> dict[str, str]:
