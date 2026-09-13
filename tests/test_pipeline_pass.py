@@ -91,6 +91,16 @@ def test_sources_narrow_the_adapters_and_unknown_names_are_refused(store, settin
         run_pass(store, settings, Preferences().profile, sources=["linkedin"])
 
 
+def test_bad_sources_with_a_held_lock_still_releases_it(store, settings, adapters):
+    assert store.try_acquire_lock(LOCK_NAME, "abc123")
+    with pytest.raises(UnknownSource):
+        run_pass(store, settings, Preferences().profile, run_id="abc123",
+                 lock_held=True, sources=["linkedin"])
+    # run_pass owns release under this run_id even on the error path
+    assert store.try_acquire_lock(LOCK_NAME, "next")
+    store.release_lock(LOCK_NAME, "next")
+
+
 def test_after_match_and_extra_summary_land_on_the_run_event(store, settings, adapters):
     seen = []
 

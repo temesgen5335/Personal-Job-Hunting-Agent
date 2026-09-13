@@ -68,16 +68,18 @@ def run_pass(store, settings, profile, *, llm=None, run_id: str | None = None,
     """
     run_id = run_id or new_run_id()
     report = PassReport(run_id=run_id)
-    if sources is not None:
-        unknown = set(sources) - set(ALL_SOURCES)
-        if unknown:
-            raise UnknownSource(unknown)
     if not lock_held and not store.try_acquire_lock(LOCK_NAME, run_id):
         report.skipped = "another pass holds the lock (stale locks expire after 2h)"
         return report
 
     started = time.monotonic()
     try:
+        # Validated inside the try so a caller with lock_held=True still gets its
+        # lock released by the finally below when `sources` is bad.
+        if sources is not None:
+            unknown = set(sources) - set(ALL_SOURCES)
+            if unknown:
+                raise UnknownSource(unknown)
         # Age of the previous successful ingest, measured before this run touches the
         # store — afterwards it always reads as zero.
         report.gap_hours_before = store.pipeline_health()["hours_since_ingest"]
