@@ -11,8 +11,6 @@ Usage:
 
 import argparse
 import sys
-import time
-import uuid
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
@@ -20,13 +18,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from jobagent.bot.notify import send_message  # noqa: E402
 from jobagent.bot.service import jobs_text  # noqa: E402
 from jobagent.config import get_settings  # noqa: E402
-from jobagent.core.schemas import Event  # noqa: E402
 from jobagent.digest import format_followups, health_banner  # noqa: E402
-from jobagent.ingestion.gate import IngestGate  # noqa: E402
-from jobagent.ingestion.registry import build_adapters  # noqa: E402
-from jobagent.ingestion.runner import run_ingestion  # noqa: E402
 from jobagent.llm_client import build_llm  # noqa: E402
-from jobagent.matching import run_matching  # noqa: E402
+from jobagent.pipeline import new_run_id, run_pass  # noqa: E402
 from jobagent.preferences import load_preferences  # noqa: E402
 from jobagent.store import Store  # noqa: E402
 
@@ -42,90 +36,52 @@ def main() -> None:
     store = Store(settings.db_path)
     store.init_schema()
 
-    # One id for the whole pass — every event below carries it, so a slow or failing
-    # run is reconstructable from the events table (store.events_for_run).
-    run_id = uuid.uuid4().hex[:12]
-    started = time.monotonic()
-
-    # One pass at a time (M5): a timer firing during a manual run would double-fetch
-    # sources and interleave the ledger. The TTL frees a crashed holder's lock.
-    if not store.try_acquire_lock("pipeline", run_id):
-        print("[run] another pipeline pass holds the lock — exiting (stale locks expire after 2h)")
-        store.close()
-        return
+    run_id = new_run_id()
     print(f"[run] {run_id}")
-    try:
-        # Age of the previous successful ingest, measured before this run touches the
-        # store. Afterwards it always reads as zero, so it must be captured here — this
-        # is what makes a skipped schedule visible when it eventually recovers.
-        gap_hours = store.pipeline_health()["hours_since_ingest"]
 
-        # 1) Ingest — the gate rejects postings before they are stored.
-        gate = IngestGate.from_settings(settings)
-        adapters = build_adapters(settings)
-        print(f"[ingest] sources: {', '.join(a.source.value for a in adapters) or 'none'}")
-        print(f"[ingest] gate: {gate.describe()}")
-        report = run_ingestion(adapters, store, run_id=run_id, gate=gate)
-        print(f"[ingest] {report.total_new} new / {report.total_fetched} fetched"
-              + (f" / {report.total_dropped} filtered {report.drops_by_reason}"
-                 if report.total_dropped else ""))
-        for r in report.results:
-            if r.error:
-                print(f"[ingest]   {r.source}: ERROR {r.error}")
-
-        # 2) Match
-        llm = build_llm(settings)
-        mreport = run_matching(store, profile, llm=llm, run_id=run_id)
-        mode = f"heuristic+LLM ({' → '.join(llm.chain)})" if mreport.used_llm else "heuristic"
-        print(f"[match] scored {mreport.scored} ({mode}); LLM-reranked {mreport.llm_reranked}")
-
-        # 3) Digest — carries a health banner so a degraded run announces itself.
-        health = store.pipeline_health()
-        banner = health_banner(report, health, gap_hours=gap_hours)
-        # Quiet applications ride along with the digest rather than needing their own run.
-        followups = format_followups(store.applications_needing_followup())
+    def digest(store_, report) -> dict:
+        """Stage 3, run between matching and the summary so its outcome lands on the
+        same `run` row. Carries a health banner so a degraded run announces itself."""
+        health = store_.pipeline_health()
+        banner = health_banner(report.ingest, health, gap_hours=report.gap_hours_before)
+        followups = format_followups(store_.applications_needing_followup())
         if banner:
             print("[health] " + banner.strip().replace("\n", "\n[health] "))
         if args.no_send:
-            digest_status = "skipped (--no-send)"
             print("[digest] skipped (--no-send)")
-        elif not (settings.telegram_bot_token and settings.telegram_destination):
-            digest_status = "skipped (no bot creds)"
+            return {"digest": "skipped (--no-send)"}
+        if not (settings.telegram_bot_token and settings.telegram_destination):
             print("[digest] skipped (no TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID)")
-        else:
-            try:
-                sent = send_message(
-                    settings.telegram_bot_token, settings.telegram_destination,
-                    banner + jobs_text(store, args.top) + followups,
-                )
-                digest_status = f"sent ({sent} message(s))"
-                print(f"[digest] sent in {sent} message(s)")
-            except Exception as exc:  # noqa: BLE001 — report, don't fail the whole run
-                digest_status = f"failed: {exc}"
-                print(f"[digest] send failed: {exc}")
+            return {"digest": "skipped (no bot creds)"}
+        try:
+            sent = send_message(settings.telegram_bot_token, settings.telegram_destination,
+                                banner + jobs_text(store_, args.top) + followups)
+            print(f"[digest] sent in {sent} message(s)")
+            return {"digest": f"sent ({sent} message(s))"}
+        except Exception as exc:  # noqa: BLE001 — report, don't fail the whole run
+            print(f"[digest] send failed: {exc}")
+            return {"digest": f"failed: {exc}"}
 
-        # 4) Run summary — the ledger row `store.list_runs()` and GET /runs read.
-        store.log_event(Event(kind="run", payload={
-            "run_id": run_id,
-            # agentkit's per-backend trace (calls, failures, latencies, verdicts).
-            # Recorded on the run spine so a pass is reconstructable alongside what it
-            # fetched and scored.
-            "llm": llm.ledger.as_dict() if llm is not None else None,
-            "duration_s": round(time.monotonic() - started, 1),
-            "gap_hours_before_run": round(gap_hours, 1) if gap_hours is not None else None,
-            "ingest": {"fetched": report.total_fetched, "new": report.total_new,
-                       "dropped": report.total_dropped, "drops": report.drops_by_reason,
-                       "gate": gate.describe(),
-                       "sources": [a.source.value for a in adapters],
-                       "errors": [r.source for r in report.results if r.error]},
-            "match": {"scored": mreport.scored, "llm_reranked": mreport.llm_reranked},
-            "digest": digest_status,
-        }))
-        print(f"[run] {run_id} done in {round(time.monotonic() - started, 1)}s")
+    try:
+        llm = build_llm(settings)
+        report = run_pass(store, settings, profile, llm=llm, run_id=run_id,
+                          trigger="pipeline", after_match=digest)
+        if report.skipped:
+            print(f"[run] {report.skipped} — exiting")
+            return
+        ing = report.ingest
+        print(f"[ingest] {ing.total_new} new / {ing.total_fetched} fetched"
+              + (f" / {ing.total_dropped} filtered {ing.drops_by_reason}"
+                 if ing.total_dropped else ""))
+        for r in ing.results:
+            if r.error:
+                print(f"[ingest]   {r.source}: ERROR {r.error}")
+        mode = (f"heuristic+LLM ({' → '.join(llm.chain)})" if report.match.used_llm
+                else "heuristic")
+        print(f"[match] scored {report.match.scored} ({mode}); "
+              f"LLM-reranked {report.match.llm_reranked}")
+        print(f"[run] {run_id} done in {report.duration_s}s")
     finally:
-        # An exception in any stage must still free the lock — the TTL is the
-        # crash backstop, not the normal path.
-        store.release_lock("pipeline", run_id)
         store.close()
 
 

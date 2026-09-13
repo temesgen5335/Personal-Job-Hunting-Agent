@@ -29,12 +29,11 @@ from jobagent.bot.service import MatchFilter, ranked_matches
 from jobagent.config import get_settings, reload_settings
 from jobagent.core.schemas import Event, allowed_next
 from jobagent.fit import assess_fit
-from jobagent.ingestion.gate import ALL_SOURCES, IngestGate, resolve_sources
-from jobagent.ingestion.registry import build_adapters
-from jobagent.ingestion.runner import run_ingestion
+from jobagent.ingestion.gate import ALL_SOURCES, resolve_sources
 from jobagent.lifecycle import IllegalTransition, NoSuchApplication, VALID_STATUSES, transition
 from jobagent.llm_client import AllProvidersFailed, build_llm
 from jobagent.matching import run_matching
+from jobagent.pipeline import run_pass
 from jobagent.preferences import (
     Profile,
     Sources,
@@ -171,15 +170,13 @@ def _token_for(password: str, master_key: str) -> str:
 
 
 def _ingest_task(db_path: str, settings, profile, llm, run_id: str) -> None:
+    """The background half of POST /ingest. The endpoint acquired the lock under this
+    run_id before scheduling us; `run_pass` releases it."""
     store = Store(db_path)
     try:
-        # Same gate the scheduled pipeline uses — one seam, no drift.
-        run_ingestion(build_adapters(settings), store, run_id=run_id,
-                      gate=IngestGate.from_settings(get_settings()))
-        run_matching(store, profile, llm=llm, run_id=run_id)
+        run_pass(store, settings, profile, llm=llm, run_id=run_id, lock_held=True,
+                 trigger="api")
     finally:
-        # The endpoint acquired the lock under this run_id before scheduling us.
-        store.release_lock("pipeline", run_id)
         store.close()
 
 
@@ -695,7 +692,7 @@ def create_app(settings=None, profile=None, llm: Any = _UNSET, cv_master: str | 
                 raise HTTPException(409, "An ingestion pass is already running.")
         finally:
             s.close()
-        bg.add_task(_ingest_task, settings.db_path, settings, _profile(), _llm(), run_id)
+        bg.add_task(_ingest_task, settings.db_path, get_settings(), _profile(), _llm(), run_id)
         return {"status": "started", "run_id": run_id}
 
     @app.get("/sources", dependencies=read_auth)
