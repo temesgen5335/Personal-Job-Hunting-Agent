@@ -156,6 +156,8 @@ def build_assistant(*, store, settings, sink=None, surface: Surface = Surface.CL
 
     for reg in build_tools(store=store, settings=settings,
                            links=default_links(base_url), index=index):
+        if reg.surfaces is not None and surface not in reg.surfaces:
+            continue        # not offered here: neither shown nor callable (R26-adjacent)
         box.register(reg.spec, reg.run, reg.policy)
 
     return Assistant(toolbox=box, auditor=auditor, index=index, context=context)

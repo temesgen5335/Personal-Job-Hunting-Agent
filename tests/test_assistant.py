@@ -579,3 +579,28 @@ def test_a_config_write_without_a_master_key_explains_itself_and_snapshots_nothi
     assert not out.content.startswith("RuntimeError")
     snaps = tmp_path / "data" / "config_snapshots"
     assert not snaps.exists() or list(snaps.glob("*.enc")) == []
+
+
+# --- per-surface visibility ---------------------------------------------------------
+
+def test_a_registration_can_be_limited_to_surfaces(store, settings, monkeypatch):
+    """Operator actions (pull, draft, status moves) must not tax every chat turn with
+    their schemas — memory.md measured tool schemas as the dominant per-turn cost — so
+    a registration names the surfaces it is offered on. None means everywhere."""
+    from agentkit.llm.types import ToolSpec
+    from agentkit.permissions import Confirm, Permission, ToolPolicy
+    from jobagent.assistant import manifest
+    from jobagent.assistant.tools import Registration
+
+    empty = {"type": "object", "properties": {}}
+    everywhere = Registration(ToolSpec("everywhere", "d", empty), lambda a: "ok",
+                              ToolPolicy("everywhere", Permission.READ, Confirm.NEVER))
+    agent_only = Registration(ToolSpec("agent_only", "d", empty), lambda a: "ok",
+                              ToolPolicy("agent_only", Permission.READ, Confirm.NEVER),
+                              surfaces=frozenset({Surface.AGENT, Surface.CLI}))
+    monkeypatch.setattr(manifest, "build_tools", lambda **kw: [everywhere, agent_only])
+
+    chat = {s.name for s in assistant(store, settings, surface=Surface.CHAT).toolbox.specs()}
+    agent = {s.name for s in assistant(store, settings, surface=Surface.AGENT).toolbox.specs()}
+    assert chat == {"everywhere"}
+    assert agent == {"everywhere", "agent_only"}

@@ -22,6 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from agentkit.llm.chain import build_chain  # noqa: E402
 from agentkit.llm.runner import Runner  # noqa: E402
+from agentkit.session import Surface  # noqa: E402
 from jobagent.assistant import build_assistant  # noqa: E402
 from jobagent.assistant.evalset import CASES, Report, run_case  # noqa: E402
 from jobagent.config import get_settings  # noqa: E402
@@ -73,7 +74,8 @@ def main() -> int:
         for case in CASES:
             if args.case and case.name != args.case:
                 continue
-            assistant = build_assistant(store=store, settings=settings, ask=None)
+            assistant = build_assistant(store=store, settings=settings, ask=None,
+                                        surface=Surface.WEB)
             result = run_case(
                 case, assistant=assistant, backends=backends, store=store,
                 runner_factory=lambda box: Runner(backends=backends, toolbox=box))

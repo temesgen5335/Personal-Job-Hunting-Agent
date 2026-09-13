@@ -26,6 +26,7 @@ from dataclasses import dataclass
 
 from agentkit.llm.types import ToolSpec
 from agentkit.permissions import Confirm, Permission, ToolPolicy
+from agentkit.session import Surface
 
 # Structural exclusions. Names, not policies — see the module docstring and R26.
 EXCLUDED: frozenset[str] = frozenset({
@@ -64,6 +65,10 @@ class Registration:
     spec: ToolSpec
     run: object
     policy: ToolPolicy
+    # Surfaces this tool is offered on; None = every surface. Operator actions declare
+    # {AGENT, CLI} so the chat assistant's per-turn schema cost does not grow with tools
+    # it was never meant to hold (memory.md: 1,047 of ~1,258 tokens per turn are schemas).
+    surfaces: frozenset[Surface] | None = None
 
 
 def build_tools(*, store, settings, links, index=None) -> list[Registration]:
