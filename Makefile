@@ -18,7 +18,7 @@ PY           := $(VENV)/bin/python
 API_PORT     ?= 8077
 DASH_PORT    ?= 1234
 
-.PHONY: install setup demo inbox run run_backend run_bot run_dashboard check test pipeline ask upskill doctor eval_assistant docker_up docker_down
+.PHONY: install setup demo quickstart inbox run run_backend run_bot run_dashboard check test pipeline ask upskill doctor eval_assistant docker_up docker_down
 
 install: ## backend + dashboard deps (idempotent)
 	@if command -v uv >/dev/null 2>&1; then \
@@ -38,6 +38,10 @@ demo: ## seed a throwaway store so the UI has something to show (never touches y
 	@$(PY) scripts/seed_demo.py
 	@echo ""
 	@echo "  run it with:  JOBAGENT_DB_PATH=data/demo.db make run"
+
+quickstart: ## keyless one-command first run: ready .env + demo store, then `make run`
+	@[ -x "$(PY)" ] || { echo "❌ run: make install first"; exit 1; }
+	@$(PY) scripts/quickstart.py
 
 docker_up: ## build + start API and dashboard in containers (needs .env)
 	@[ -f .env ] || { echo "❌ .env missing — run: make setup"; exit 1; }
