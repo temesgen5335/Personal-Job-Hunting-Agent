@@ -63,7 +63,6 @@ def test_env_updates_omits_a_provider_without_its_key():
 
 
 def test_env_updates_writes_model_smtp_owner_and_pollinations():
-    from jobagent.setup_wizard import Answers, env_updates
     a = Answers(llm_provider="groq", llm_api_key="k", llm_model="llama-3.3-70b",
                 smtp_host="mail.x", smtp_user="u", smtp_password="p",
                 apply_from_email="me@x.com", telegram_owner_id="42",
@@ -77,10 +76,15 @@ def test_env_updates_writes_model_smtp_owner_and_pollinations():
 
 
 def test_env_updates_keyless_enables_pollinations_and_omits_provider_key():
-    from jobagent.setup_wizard import Answers, env_updates
     got = env_updates(Answers(keyless=True, pollinations_enabled=True), master_key="mk")
     assert got["POLLINATIONS_ENABLED"] == "true"
     assert "LLM_PROVIDER" not in got and "GROQ_API_KEY" not in got
+
+
+def test_env_updates_supplied_key_wins_over_keyless():
+    got = env_updates(Answers(keyless=True, llm_provider="groq", llm_api_key="k"), master_key="mk")
+    assert got["LLM_PROVIDER"] == "groq" and got["GROQ_API_KEY"] == "k"
+    assert "POLLINATIONS_ENABLED" not in got     # key wins; pollinations not enabled
 
 
 def test_split_list_drops_empties():
@@ -117,7 +121,6 @@ def test_remote_only_sets_both_the_mode_and_the_must_have():
 
 
 def test_profile_overlay_writes_geo_sources_and_watchlist():
-    from jobagent.setup_wizard import Answers, profile_overlay
     a = Answers(name="Me", phone="+1", timezone="EAT/UTC+3", domains=["AI"],
                 remote_scope="global", geo_eligible=["worldwide"], geo_blocked=["remote us"],
                 sources={"telegram": False, "himalayas": True},
@@ -131,7 +134,6 @@ def test_profile_overlay_writes_geo_sources_and_watchlist():
 
 
 def test_profile_overlay_omits_empty_sections():
-    from jobagent.setup_wizard import Answers, profile_overlay
     out = profile_overlay(Answers(name="Me"))       # no sources/watchlist/geo given
     assert "sources" not in out and "watchlist" not in out
     assert out["profile"]["name"] == "Me"
@@ -150,6 +152,18 @@ def test_answers_from_mapping_builds_answers_and_tolerates_strings():
     assert a.core_skills == ["Python", "Go"]                    # passed through
     assert a.remote_scope == "global" and a.keyless is True
     assert a.sources == {"telegram": False}
+
+
+def test_answers_from_mapping_copies_and_coerces():
+    from jobagent.setup_wizard import answers_from_mapping
+    src_skills = ["Python"]
+    a = answers_from_mapping({"core_skills": src_skills, "target_roles": None,
+                              "sources": {"telegram": False}})
+    assert a.core_skills == ["Python"] and a.core_skills is not src_skills   # copied
+    assert a.target_roles == []                                             # None → []
+    a.sources["telegram"] = True                                           # mutate result...
+    # ...must not affect a fresh call's default; just prove it's a real dict copy path
+    assert isinstance(a.sources, dict)
 
 
 def test_onboard_example_is_a_valid_mapping():

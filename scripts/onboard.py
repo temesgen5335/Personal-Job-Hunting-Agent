@@ -14,6 +14,7 @@ Secrets and env-shaped settings go to .env; profile/sources/watchlist to the ove
 
 import argparse
 import json
+import secrets
 import sys
 from getpass import getpass
 from pathlib import Path
@@ -109,7 +110,6 @@ def main() -> None:
     else:
         answers = _interactive()
 
-    import secrets
     if not answers.dashboard_password:
         answers.dashboard_password = secrets.token_urlsafe(18)
 

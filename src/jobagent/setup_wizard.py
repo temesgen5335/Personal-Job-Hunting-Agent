@@ -85,8 +85,17 @@ def answers_from_mapping(data: dict) -> Answers:
     for key, value in (data or {}).items():
         if key not in known:
             continue
-        if key in _LIST_FIELDS and isinstance(value, str):
-            value = split_list(value)
+        if key in _LIST_FIELDS:
+            if isinstance(value, str):
+                value = split_list(value)
+            elif value is None:
+                value = []
+            elif isinstance(value, list):
+                value = list(value)
+        elif isinstance(value, list):
+            value = list(value)
+        elif isinstance(value, dict):
+            value = dict(value)
         kwargs[key] = value
     return Answers(**kwargs)
 
@@ -169,7 +178,7 @@ def env_updates(answers: Answers, *, master_key: str) -> dict[str, str]:
         "SMTP_PASSWORD": answers.smtp_password,
         "APPLY_FROM_EMAIL": answers.apply_from_email,
     }
-    if answers.keyless:
+    if answers.keyless and not answers.llm_api_key:
         # Keyless path: no provider key; optionally turn on the keyless Pollinations backend
         # so drafting works without a key (matching already works heuristic-only).
         if answers.pollinations_enabled:
@@ -237,7 +246,7 @@ def profile_overlay(answers: Answers, existing: dict | None = None) -> dict:
     ):
         if value:
             profile[key] = value
-    if answers.remote_scope in ("any", "global") and answers.remote_scope != "any":
+    if answers.remote_scope == "global":
         profile["remote_scope"] = answers.remote_scope
 
     merged = dict(existing or {})
