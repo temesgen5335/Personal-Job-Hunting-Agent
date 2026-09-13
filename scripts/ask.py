@@ -79,10 +79,13 @@ def main() -> int:
     store.init_schema()
 
     try:
+        from jobagent.assistant.operator_tools import OperatorDeps  # noqa: E402
+        deps = OperatorDeps(db_path=settings.db_path)
         assistant = build_assistant(
             store=store, settings=settings, sink=StoreSink(store),
             surface=Surface.CLI,
             ask=None if args.read_only else confirm_at_the_terminal,
+            deps=deps,
         )
 
         if args.reindex:

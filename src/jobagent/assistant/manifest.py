@@ -133,7 +133,7 @@ class Assistant:
 def build_assistant(*, store, settings, sink=None, surface: Surface = Surface.CLI,
                     ask=None, actor: str = "operator", base_url: str = "http://localhost:1234",
                     admin_surfaces=frozenset({Surface.WEB, Surface.CLI}),
-                    cost_budget: int | None = 20, search: bool = True) -> Assistant:
+                    cost_budget: int | None = 20, search: bool = True, deps=None) -> Assistant:
     """Wire one session.
 
     `admin_surfaces` defaults to web and CLI — deliberately excluding chat. A single
@@ -155,7 +155,7 @@ def build_assistant(*, store, settings, sink=None, surface: Surface = Surface.CL
         index.ensure()      # self-healing: an existing database upgrades in place
 
     for reg in build_tools(store=store, settings=settings,
-                           links=default_links(base_url), index=index):
+                           links=default_links(base_url), index=index, deps=deps):
         if reg.surfaces is not None and surface not in reg.surfaces:
             continue        # not offered here: neither shown nor callable (R26-adjacent)
         box.register(reg.spec, reg.run, reg.policy)

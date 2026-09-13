@@ -631,3 +631,46 @@ def test_the_store_sink_writes_events_on_the_shared_table(store):
 
     StoreSink(store).emit("tool_intent", {"run_id": "r1", "tool": "x", "args": {}})
     assert store.events_for_run("r1")[0]["kind"] == "tool_intent"
+
+
+# --- operator tools extend the absences, not the escape hatches --------------------
+
+def test_the_new_absences_cannot_be_registered():
+    """Deleters and credential-writers are absences too (R26), enforced at wiring."""
+    from jobagent.assistant.tools import EXCLUDED
+    for name in ("purge_jobs", "delete_jobs", "save_cv", "write_env", "set_secret",
+                 "approve_pending", "confirm_pending"):
+        assert name in EXCLUDED
+
+
+def test_no_sender_is_reachable_from_the_operator_tools_either():
+    """The reachability walk that guards the chat tools must also start at the operator
+    tools and the MCP package — draft_application imports the draft path, which must not
+    drag in a mailer."""
+    import ast
+    import pathlib
+
+    root = pathlib.Path(__file__).resolve().parent.parent / "src"
+    seen, frontier, offenders = set(), [
+        "jobagent.assistant.operator_tools", "jobagent.mcp.bridge", "jobagent.mcp.operator",
+    ], []
+    while frontier:
+        mod = frontier.pop()
+        if mod in seen:
+            continue
+        seen.add(mod)
+        path = root / (mod.replace(".", "/") + ".py")
+        if not path.exists():
+            continue
+        text = path.read_text()
+        if "smtplib" in text or "SMTP(" in text:
+            offenders.append(mod)
+        for node in ast.walk(ast.parse(text)):
+            if isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+                if node.module.startswith("jobagent"):
+                    frontier.append(node.module)
+            elif isinstance(node, ast.Import):
+                frontier += [a.name for a in node.names if a.name.startswith("jobagent")]
+
+    assert offenders == [], f"a mail sender is reachable from the operator surface: {offenders}"
+    assert len(seen) > 5, f"import walk covered too little to be meaningful: {seen}"
