@@ -552,6 +552,17 @@ def create_app(settings=None, profile=None, llm: Any = _UNSET, cv_master: str | 
         result["run_id"] = run_id
         return result
 
+    @app.post("/demo/clear", dependencies=auth)
+    def demo_clear():
+        """Remove the seeded demo data. The 'go live' path is this call followed by
+        POST /ingest (a real, keyless pull). Auth-gated (R19)."""
+        s = store()
+        try:
+            cleared = s.clear_demo()
+            return {"cleared": cleared, "stats": s.stats()}
+        finally:
+            s.close()
+
     @app.get("/inbox/proposals", dependencies=read_auth)
     def inbox_proposals(state: str = "pending", limit: int = 50):
         """Detected outcomes awaiting a decision. Read-only: nothing here has been

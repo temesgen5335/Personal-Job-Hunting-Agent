@@ -1,257 +1,233 @@
-# Personal Job Agent
+# Forager 🐻
 
-A self-hosted, personal job-hunting agent. It ingests job postings from Telegram
-channels and job boards, scores them against **your** CV and preferences, and helps
-you apply — drafting tailored CVs, cover letters, and emails, and (with your
-approval) filling ATS application forms. You drive it through a **Telegram bot**; an
-**Astro dashboard** is a triage cockpit: a queue of strong untriaged matches with
-dismiss/snooze/note (or a one-at-a-time mode), pipeline health per source, on-demand
-fit checks, application tracking with follow-up nudges, and credential editing. It runs scheduled and autonomous on a VPS, or as a free daily digest on
-GitHub Actions.
+**Find the jobs you can actually land.**
 
-**Reusable by anyone:** clone it, add your own credentials, and run your own private
-instance. No identity, search profile, or company watchlist is committed — the repo
-ships templates, and everything personal lives in gitignored config you own.
+[![CI](https://github.com/temesgen5335/forager/actions/workflows/tests.yml/badge.svg)](https://github.com/temesgen5335/forager/actions/workflows/tests.yml)
+&nbsp;·&nbsp; 1,156 offline tests &nbsp;·&nbsp; self-hosted &nbsp;·&nbsp; runs with zero credentials
 
-**It runs with zero credentials.** Five of the six sources are public APIs and matching
-falls back to heuristics with no LLM key, so `make install && make pipeline` gives you
-real ranked jobs before you sign up for anything.
+> **Baer** is a bear that never sleeps: it *senses* every board, *hunts* the roles you can
+> actually take, *scavenges* the ones others miss, and *stashes* them in your **den** until
+> you say go.
 
----
+Forager is a self-hosted job-hunting agent you run on your own machine. **Baer** — the
+assistant inside it — watches Telegram channels and job boards, scores every posting
+against **your** CV and preferences, drafts tailored CVs / cover letters / emails, and
+fills ATS forms — but **applies only when you approve**. Remote, hybrid, or onsite, it
+surfaces the roles you're *truly eligible for*, not a wall of "remote (US only)" you can't
+take. You drive it from a Telegram bot, a web dashboard, or the CLI.
 
-## Architecture (at a glance)
-
-```
-Telegram channels ─┐
-RemoteOK/Remotive  ┤
-Greenhouse/Lever/  ┼─▶ ingestion adapters ─▶ SQLite store ─▶ matching (heuristic + LLM)
-Ashby              ┤        (normalize+dedup)      │                     │
-(aggregator: soon) ┘                               ▼                     ▼
-                                          Telegram bot  ◀──────  ranked digest / /apply
-                                          Astro dashboard (analytics + triage)
-                                          Assistant     ◀──────  ask it about any of this
-```
-Multi-provider LLM with automatic failover (Groq → Gemini → OpenRouter → OpenAI →
-Anthropic, or any OpenAI-compatible endpoint). See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
-
-A **FastAPI orchestrator** sits between the interfaces and the data: the dashboard
-calls it over REST, and the bot calls the same service layer in-process.
-
-## Status: v3.7 (759 tests passing, CI on every push)
-Ingestion · matching · Telegram bot (menu + filters) · Tier-1 email apply · Tier-2
-ATS form-fill · multi-LLM failover · FastAPI orchestrator · Astro dashboard with
-config UI, fit-checker, analytics, and pipeline health · VPS + GitHub Actions deploy
-· **an assistant that can answer questions about the whole system**.
-
-**Security note:** every state-changing API route requires a bearer token, so
-`DASHBOARD_PASSWORD` must be set for applying, status edits, fit checks, or config
-changes to work. Read-only endpoints stay open. Never expose the API publicly without
-it — those routes can send email as you.
+**Private by design.** No identity, search profile, or company list is ever committed —
+the repo ships templates, and everything personal lives in gitignored config you own. Your
+data stays in your den; secrets are encrypted at rest; nothing phones home.
 
 ---
 
-## Setup (self-host, ~15 min)
-
-### Prerequisites
-- Python 3.11+ and [uv](https://docs.astral.sh/uv/)
-- Node 18+ (only for the dashboard)
-- A Telegram account + a bot from [@BotFather](https://t.me/BotFather)
-- At least one LLM API key (free options below)
-
-### 0. The fast path
+## Quickstart — a demo in one command (keyless, ~5 minutes)
 
 ```bash
-git clone https://github.com/temesgen5335/personalAgent && cd personalAgent
-make install       # venv + dashboard deps
-make setup         # interactive: .env + your profile (safe to re-run)
-make pipeline      # ingest + match — no credentials needed
-make run           # API :8077 + dashboard :1234
+git clone https://github.com/temesgen5335/forager && cd forager
+make install       # backend venv + dashboard deps
+make quickstart    # writes a ready .env + seeds a demo den, prints your dashboard password
+make run           # dashboard on http://127.0.0.1:1234, API on :8077
 ```
 
-Just want to look at it first? `make demo` seeds a throwaway store with fictional
-postings so every page has something to show, without touching your real one:
+Open the dashboard and you're looking at **ranked demo matches immediately** — no keys, no
+sign-ups. When you're ready to make it yours (still no API key required):
 
 ```bash
-make demo
-JOBAGENT_DB_PATH=data/demo.db make run
+make onboard       # guided setup: profile, sources, LLM (free or paid), email, Telegram
+make pipeline      # a real forage (ingest → match) against the public boards
 ```
 
-Prefer containers? `make docker_up` (see [step 6](#6-docker)).
+**Zero credentials, really.** Six of the seven sources are public APIs, and matching falls
+back to transparent heuristics with no LLM key — so you get real, ranked jobs before you
+sign up for anything. Add a (free) LLM key later and Baer also drafts your CV and cover
+letters.
 
-The rest of this section is what `make setup` does, for anyone who would rather do it
-by hand.
+---
 
-### 1. Install
-```bash
-uv venv
-uv pip install -e ".[telegram,llm,apply]"   # telegram reader, LLM, Playwright ATS
-.venv/bin/playwright install chromium        # only if you want Tier-2 ATS form-fill
-```
+## What Forager does
 
-### 2. Configure credentials — `.env`
-```bash
-cp .env.example .env      # then edit
-```
-Fill in what you'll use:
-- **LLM (pick ≥1):** `GROQ_API_KEY` / `GEMINI_API_KEY` / `OPENROUTER_API_KEY` /
-  `OPENAI_API_KEY` / `ANTHROPIC_API_KEY`, and `LLM_PROVIDER` (primary; the rest are
-  automatic fallbacks). Per-provider model overrides are optional.
-- **Telegram bot (talk to it):** `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` (your numeric id).
-- **Telegram channel reading (optional):** `TELEGRAM_API_ID`/`TELEGRAM_API_HASH`
-  (from [my.telegram.org](https://my.telegram.org)), `TELEGRAM_PHONE`, `TELEGRAM_CHANNELS`.
-- **Email apply (optional):** `SMTP_*`, `APPLY_FROM_EMAIL`.
+- **Senses** seven sources — Telegram, RemoteOK, Remotive, Himalayas, Greenhouse, Lever,
+  Ashby — normalizes and de-duplicates them, and stashes matches in your **den** (a local
+  SQLite store).
+- **Hunts** the roles you can *actually take* — preference-weighted scoring plus a
+  configurable geographic filter, so `remote_scope="global"` keeps genuinely worldwide-remote
+  roles and demotes the ones locked to a region you're not in. On one live 17k-posting den,
+  turning it on cut the "strong match" queue from **311 to the handful of genuinely reachable
+  roles** — the rest were remote-US / remote-UK / onsite you couldn't take.
+- **Applies** only when you say go — Baer drafts a tailored CV + cover letter + email, shows
+  you *exactly what will be sent*, and submits only on your explicit approval. It never
+  fabricates experience, and there is deliberately **no auto-apply button**.
 
-### 3. Configure your profile
+## Why Forager
 
-**This step is not optional.** Matching scores every posting against your roles, skills
-and weights, so an unedited profile gives generic results — `make check` will say so
-while it is still the template.
+- **It finds jobs you can land, not just "remote."** The geographic filter is the wedge —
+  most tools can't tell a truly global role from a US-only one wearing a "remote" label.
+- **Human-in-the-loop, never spam.** Baer hands you the send button; you click it. Quality
+  over a thousand auto-fired applications employers now filter out.
+- **Never fabricates.** Tailoring reframes real experience from your CV — nothing invented.
+- **Private + self-hosted.** Your den, your machine; credentials encrypted at rest; the
+  assistant can read your data but has **no tool that can send, submit, or approve** — a
+  structural property, not a promise.
+- **Serious engineering under the hood.** 1,156 offline tests (zero network), CI on every
+  push, a multi-provider LLM harness with automatic failover, and a run-id **trail** that
+  audits every action.
 
-Two ways, same destination:
+## Baer's dialect
 
-**A. In the browser (recommended).** Start the app (step 5) and open
-**Settings → Profile**. Every tab — identity, CV, search preferences, sources,
-watchlist — saves to a gitignored `data/profile.json` overlay. Nothing personal ever
-touches the repo.
+Forager speaks in one consistent vocabulary — it's how the docs, and increasingly the tool,
+talk about what's happening:
 
-**B. In a file.**
-```bash
-cp config/preferences.example.toml config/preferences.toml   # gitignored
-```
-- `[profile]` — identity plus what defines the search: `target_roles`, `core_skills`,
-  `domains`, `must_haves`, `exclude_keywords`, `preferred_locations`.
-- **`[profile.skill_weights]`** — per-skill importance (unlisted skills weigh 1.0).
-  Raise what you want to be hired for and lower generic tooling; this is what stops a
-  posting that merely mentions Docker + AWS from ranking like one built on your
-  differentiators.
-- `[sources]` — turn whole sources on/off (`remoteok`, `greenhouse`, `telegram`, …).
-- `[watchlist]` — Greenhouse/Lever/Ashby company slugs to track. **Replace the examples**
-  — these are the employers polled directly.
+| Term                | What it is                                                          |
+| ------------------- | ------------------------------------------------------------------- |
+| **Senses**    | your ingestion sources                                              |
+| **Forage**    | one pipeline pass — ingest → match (run it with`make pipeline`) |
+| **Hunt**      | the matcher — the roles you can actually take                      |
+| **Scavenge**  | recovery + de-duplication across scattered sources                  |
+| **Den**       | your self-hosted SQLite store — private, local, yours              |
+| **Trail**     | the run-id audit trail — what Baer did, and why                    |
+| **Stash**     | triage — snooze or set a posting aside for later                   |
+| **The catch** | a strong match, or a landed application                             |
 
-Your CV text goes in **Settings → CV & background** (stored at `data/cv_master.md`), and
-the PDF at whatever `cv_path` you set — that PDF is what gets attached to email
-applications. **Hard rule:** tailoring reframes real experience, never invents.
+*(Today the CLI still uses the plain names — `make pipeline`, the "store", the "run ledger".
+The dialect lands in the tooling itself in a follow-up.)*
 
-Layering, lowest priority first: `preferences.example.toml` (fallback for a fresh clone)
-→ `preferences.toml` → `preferences.local.toml` (legacy) → `data/profile.json` (what the
-UI writes, and the only layer ever written).
-
-### 4. Initialize + first run
-```bash
-.venv/bin/python scripts/init_db.py
-.venv/bin/python scripts/telegram_login.py    # one-time, only if using channel reading
-.venv/bin/python scripts/pipeline.py --no-send # ingest + match (no Telegram push)
-```
-
-### 5. Use it
-```bash
-make run                                        # API (:8077) + dashboard (:1234) together
-make run_bot                                    # the interactive bot — then DM it /menu
-```
-Or without make: `.venv/bin/python scripts/run_api.py`, then
-`cd dashboard && npm install && npm run dev`, then `scripts/run_bot.py`. The dashboard
-needs the **API running** — it is a client of it, not a direct reader of the store.
-
-`make check` runs a preflight (missing env vars, occupied ports, absent store) and
-`make install` sets up both halves. See [Running](#running) for all targets.
-In Telegram: **`/menu`** → set Date/Location/keyword filters → **Show jobs** → tap **📨 N** to apply.
-
-### Ask it things
+## Ask Baer
 
 ```bash
 make ask Q="is the pipeline healthy?"
 make ask Q="which strong matches am I ignoring?"
-make doctor                                     # why is it using that model? (offline)
+make doctor                                   # why is it using that model? (offline)
 ```
-Also at `/assistant` in the dashboard, and `/ask <question>` in Telegram.
 
-The assistant reads your pipeline, runs, queue, applications and settings. **It cannot
-send, submit or approve anything** — no such tool exists, which is a structural
-property rather than a rule it follows. When something needs sending it hands you a
-link instead. Config changes are limited to an explicit allow-list (search filters and
-which model answers); anything that decides *where data goes* or *who can reach the
-system* is frozen and cannot be delegated.
+Also at `/assistant` in the dashboard and `/ask <question>` in Telegram. Baer reads your
+forages, queue, applications and settings — but it **cannot send, submit or approve
+anything**; when something needs sending, it hands you a link. Even on an LLM too weak to
+run a tool loop it degrades gracefully: retrieval runs in Python and the model only writes
+the answer (measured 100% tool-selection / 100% answer-grounding on the free tier).
 
-It degrades rather than failing: on a model too weak to run a tool loop, the retrieval
-runs in Python and the model only writes the answer. Measured on the free tier at
-100% tool-selection and 100% answer-grounding through that degraded path.
+---
 
-## LLM options (all OpenAI-compatible except Anthropic)
-| Provider | Free tier | Set | Notes |
-|---|---|---|---|
-| Groq | ✅ generous | `GROQ_API_KEY` | fast; good default primary |
-| Google Gemini | ✅ (check quota) | `GEMINI_API_KEY` | via OpenAI-compat endpoint |
-| OpenRouter | ✅ `:free` models | `OPENROUTER_API_KEY` | 200+ models incl. free |
-| OpenAI | ❌ paid | `OPENAI_API_KEY` | |
-| Anthropic | ❌ paid | `ANTHROPIC_API_KEY` | |
-| Local/OSS (Ollama, vLLM) | ✅ self-run | *(v2: custom base_url)* | any OpenAI-compatible server |
+<details>
+<summary><b>Advanced — manual setup, LLM providers, Docker, deploy, and internals</b></summary>
 
-Set `LLM_PROVIDER` to your primary; the others become automatic failover backups.
+### Prerequisites
 
-### 6. Docker
+- Python 3.11+ and [uv](https://docs.astral.sh/uv/)
+- Node 18+ (only for the dashboard)
+- Optional: a Telegram bot from [@BotFather](https://t.me/BotFather); at least one LLM key
+  (free options below)
+
+### Security note
+
+Every state-changing API route requires a bearer token, so `DASHBOARD_PASSWORD` must be set
+for applying, status edits, fit checks, or config changes. Read-only endpoints stay open.
+Never expose the API publicly without it — those routes can send email as you. `make quickstart` and `make onboard` generate this password for you.
+
+### Manual setup (what `make onboard` does, by hand)
 
 ```bash
-cp .env.example .env      # or: make setup
-make docker_up            # API + dashboard; data/ is a mounted volume
+uv venv && uv pip install -e ".[telegram,llm,apply]"
+.venv/bin/playwright install chromium        # only for Tier-2 ATS form-fill
+cp .env.example .env                          # then edit — see keys below
+cp config/preferences.example.toml config/preferences.toml   # or edit in Settings → Profile
+```
+
+Your profile decides everything the hunt scores against (`target_roles`, `core_skills`,
+per-skill `skill_weights`, `remote_scope`, `[sources]`, `[watchlist]`). Edit it in
+**Settings → Profile** (writes a gitignored `data/profile.json`) or in the TOML. Your CV
+text goes in **Settings → CV & background** (`data/cv_master.md`); the PDF at `cv_path` is
+what gets attached to email applications. Layering, lowest priority first:
+`config/preferences.example.toml` → your gitignored `preferences.toml` → the legacy
+`preferences.local.toml` → `data/profile.json` (the only layer the UI writes).
+
+### LLM options (all OpenAI-compatible except Anthropic)
+
+| Provider                 | Free tier          | Set                     | Notes                                 |
+| ------------------------ | ------------------ | ----------------------- | ------------------------------------- |
+| Groq                     | ✅ generous        | `GROQ_API_KEY`        | fast; good default primary            |
+| Google Gemini            | ✅ (check quota)   | `GEMINI_API_KEY`      | via OpenAI-compat endpoint            |
+| OpenRouter               | ✅`:free` models | `OPENROUTER_API_KEY`  | 200+ models incl. a live free fan-out |
+| OpenAI                   | ❌ paid            | `OPENAI_API_KEY`      |                                       |
+| Anthropic                | ❌ paid            | `ANTHROPIC_API_KEY`   |                                       |
+| Local/OSS (Ollama, vLLM) | ✅ self-run        | `CUSTOM_LLM_BASE_URL` | any OpenAI-compatible server          |
+
+Set `LLM_PROVIDER` to your primary; the rest become automatic failover. No key at all → the
+hunt runs heuristic-only (apply-drafting is the only thing that needs a model).
+
+### Docker
+
+```bash
+cp .env.example .env                          # or: make setup
+make docker_up                                # API + dashboard; data/ is a mounted volume
+docker compose --profile bot up -d            # add the Telegram bot
+docker compose run --rm pipeline              # one forage
 make docker_down
-docker compose --profile bot up -d          # add the Telegram bot
-docker compose run --rm pipeline            # one ingest+match pass
 ```
 
-Host ports bind to `127.0.0.1` only, because GET routes are unauthenticated — see
-[SECURITY.md](SECURITY.md) before changing that. Playwright is not installed by
-default (it adds ~400 MB); build with `--build-arg WITH_BROWSER=1` if you want
-Tier-2 ATS form-fill.
+Host ports bind to `127.0.0.1` only, because GET routes are unauthenticated — read
+[SECURITY.md](SECURITY.md) before changing that.
 
-## Deploy
-- **Free daily digest (no server):** GitHub Actions — see [docs/DEPLOYMENT_ALTERNATIVES.md](docs/DEPLOYMENT_ALTERNATIVES.md).
-- **Full autonomous (bot + scheduled ingest):** VPS — see [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) (Oracle free-tier quickstart included).
+### Deploy
 
-## Running
+- **Free daily digest (no server):** GitHub Actions — [docs/DEPLOYMENT_ALTERNATIVES.md](docs/DEPLOYMENT_ALTERNATIVES.md).
+- **Full autonomous (bot + scheduled forages):** VPS — [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) (Oracle free-tier quickstart included).
+
+### Running & commands
+
 ```bash
-make install     # backend venv + dashboard node_modules (idempotent)
 make check       # preflight: .env, required vars, free ports, store presence
-make run         # API (:8077) + dashboard (:1234), prefixed logs, one Ctrl-C stops both
-make run_bot     # the Telegram bot (separate long-lived process)
-make pipeline    # one ingest → match pass, no Telegram push
+make run_bot     # the Telegram bot (separate long-lived process) — then DM it /menu
 make test        # the offline test suite
+make run API_PORT=9000 DASH_PORT=4322         # override ports
 ```
-Individual services: `make run_backend`, `make run_dashboard`. Override ports with
-`make run API_PORT=9000 DASH_PORT=4322`.
 
-**Deploying the dashboard away from the API** (e.g. dashboard on Vercel, API on a
-VPS): set `PUBLIC_JOBAGENT_API_URL` to the API's public address. Browser-side actions
-use it, while server-side rendering uses `JOBAGENT_API_URL`. Also add the dashboard's
-origin to `JOBAGENT_CORS_ORIGINS`, which defaults to localhost only.
+Deploying the dashboard away from the API: set `PUBLIC_JOBAGENT_API_URL` (browser-side) and
+`JOBAGENT_API_URL` (SSR), and add the dashboard origin to `JOBAGENT_CORS_ORIGINS`.
 
-## Commands
 ```bash
-.venv/bin/python scripts/pipeline.py            # ingest → match → send digest
 .venv/bin/python scripts/match.py 12            # rescore + print top matches
 .venv/bin/python scripts/apply.py prepare 3     # draft a Tier-1 (email) application
 .venv/bin/python scripts/apply_ats.py preview 3 # Tier-2 ATS fill + screenshot (no submit)
-.venv/bin/pytest -q                             # run the test suite
 ```
 
-## Reusing the agent harness
-`src/agentkit/` is domain-agnostic — multi-provider LLM with capability routing,
-governed tools, fenced retrieval, a fail-closed audit trail — and imports nothing from
-this application. Copy the directory into another project and it works.
-Full guide with every config key: [src/agentkit/README.md](src/agentkit/README.md).
+### Architecture
 
-## Versions & roadmap
-Current release and what changed: [CHANGELOG.md](CHANGELOG.md).
-What ships next and why, in priority order: [docs/ROADMAP.md](docs/ROADMAP.md).
-How versions are decided (SemVer, scoped to *your data and config* rather than a Python
-API): [docs/VERSIONING.md](docs/VERSIONING.md).
+```
+Telegram / RemoteOK / Remotive / Himalayas / Greenhouse / Lever / Ashby
+        └─▶ senses (adapters) ─▶ den (SQLite) ─▶ hunt (heuristic + LLM)
+                                     │                    │
+                                     ▼                    ▼
+                        Telegram bot · dashboard · Baer  ◀─  ranked catch / apply
+```
+
+A **FastAPI orchestrator** sits between the interfaces and the data; the dashboard calls it
+over REST and the bot calls the same service layer in-process. Multi-provider LLM with
+automatic failover. Full write-up: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+### Reusing the agent harness
+
+`src/agentkit/` is domain-agnostic — multi-provider LLM with capability routing, governed
+tools, fenced retrieval, a fail-closed audit trail — and imports nothing from this
+application. Full guide: [src/agentkit/README.md](src/agentkit/README.md).
+
+</details>
 
 ## Hard rules
-See [.claude/rules.md](.claude/rules.md) (and the original [.agent/rules.md](.agent/rules.md)):
-never fabricate CVs · never submit without per-job approval · prefer APIs over scraping ·
-secrets only in `.env` / the encrypted store · don't fight CAPTCHA.
+
+See [.claude/rules.md](.claude/rules.md): never fabricate CVs · never submit without
+per-job approval · prefer APIs over scraping · secrets only in `.env` / the encrypted store
+· don't fight CAPTCHA.
+
+## Versions & roadmap
+
+What changed: [CHANGELOG.md](CHANGELOG.md) · what ships next: [docs/ROADMAP.md](docs/ROADMAP.md)
+· how versions are decided: [docs/VERSIONING.md](docs/VERSIONING.md).
 
 ## Contributing / onboarding an agent
-Start at [CLAUDE.md](CLAUDE.md) (or [AGENTS.md](AGENTS.md) for other tools), which
-points at `.claude/`: `context.md` (problem, vision, current state), `rules.md` (hard
-constraints), `agent.md` (architecture, stack, module map), `memory.md` (why the design
-is the way it is). Read those before changing anything.
+
+Start at [CLAUDE.md](CLAUDE.md) (or [AGENTS.md](AGENTS.md) for other tools), which points at
+`.claude/`: `context.md` (problem, vision, current state), `rules.md` (hard constraints),
+`agent.md` (architecture, stack, module map), `memory.md` (why the design is the way it is).
+Read those before changing anything.
