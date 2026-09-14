@@ -18,7 +18,7 @@ PY           := $(VENV)/bin/python
 API_PORT     ?= 8077
 DASH_PORT    ?= 1234
 
-.PHONY: install setup demo quickstart inbox run run_backend run_bot run_dashboard check test pipeline ask upskill doctor eval_assistant docker_up docker_down
+.PHONY: install setup demo quickstart inbox run run_backend run_bot run_dashboard check test pipeline ask upskill doctor eval_assistant docker_up docker_down mcp mcp_check
 
 install: ## backend + dashboard deps (idempotent)
 	@if command -v uv >/dev/null 2>&1; then \
@@ -88,6 +88,12 @@ eval_assistant: ## run the assistant eval set (spends LLM quota)
 
 ask: ## ask the assistant, e.g. make ask Q="is the pipeline healthy?"
 	@$(PY) scripts/ask.py $(if $(EXPLAIN),--explain) "$(Q)"
+
+mcp: ## MCP operator server on stdio for a coding agent (Claude Code reads .mcp.json; ADMIN=1 exposes config tools)
+	@$(PY) -m jobagent.mcp $(if $(ADMIN),--admin)
+
+mcp_check: ## build the MCP server in-process, list its tools/resources/prompts, assert no send/approve tool exists (offline)
+	@$(PY) -m jobagent.mcp --check
 
 upskill: ## skill-gap heatmap + learning plan from recorded match gaps (MIN=0.5)
 	@$(PY) scripts/upskill.py $(MIN)

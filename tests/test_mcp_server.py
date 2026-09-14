@@ -104,3 +104,37 @@ def test_the_prompts_carry_the_process_and_the_boundaries(rig):
     assert "request_human_action" in text and "set_application_status" in text
     assert "setup_status" in onboard.messages[0].content.text
     assert "cannot send" in INSTRUCTIONS and "never ask the operator for a credential" in INSTRUCTIONS.lower()
+
+
+def test_check_mode_lists_the_surface_and_exits_zero(tmp_path, monkeypatch, capsys):
+    from jobagent.mcp.__main__ import main
+
+    settings = _settings(tmp_path, monkeypatch)
+    code = main(["--check", "--db", str(tmp_path / "t.db")],
+                settings_factory=lambda: settings, chdir=False)
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "tools" in out and "pipeline_health" in out and "prompts" in out
+    assert "apply_config_change" not in out           # admin off by default
+
+
+def test_building_the_server_writes_nothing_to_stdout(tmp_path, monkeypatch, capsys):
+    settings = _settings(tmp_path, monkeypatch)
+    op = Operator(settings, deps=_deps(tmp_path))
+    try:
+        build_server(settings, operator=op)
+    finally:
+        op.close()
+    assert capsys.readouterr().out == ""
+
+
+def test_the_committed_client_config_points_at_this_package():
+    import importlib.util
+    from pathlib import Path
+
+    cfg = json.loads((Path(__file__).resolve().parent.parent / ".mcp.json").read_text())
+    entry = cfg["mcpServers"]["personalagent"]
+    assert entry["type"] == "stdio" and entry["command"].endswith("python")
+    assert entry["args"][:2] == ["-m", "jobagent.mcp"]
+    assert importlib.util.find_spec("jobagent.mcp") is not None
+    assert "JOBAGENT_DB_PATH" in entry["env"]
