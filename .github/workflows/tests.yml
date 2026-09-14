@@ -21,7 +21,7 @@ jobs:
           cache: pip
 
       - name: Install
-        run: pip install -e ".[dev,api,llm,telegram]"
+        run: pip install -e ".[dev,api,llm,telegram,mcp]"
 
       - name: Lint (undefined names are runtime NameErrors)
         run: ruff check --select F821 src/ scripts/

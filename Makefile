@@ -23,10 +23,10 @@ DASH_PORT    ?= 1234
 install: ## backend + dashboard deps (idempotent)
 	@if command -v uv >/dev/null 2>&1; then \
 		[ -d $(VENV) ] || uv venv $(VENV); \
-		uv pip install -q -e ".[dev,api,llm,telegram]" --python $(PY); \
+		uv pip install -q -e ".[dev,api,llm,telegram,mcp]" --python $(PY); \
 	else \
 		[ -d $(VENV) ] || python3 -m venv $(VENV); \
-		$(PY) -m pip install -q -e ".[dev,api,llm,telegram]"; \
+		$(PY) -m pip install -q -e ".[dev,api,llm,telegram,mcp]"; \
 	fi
 	@cd dashboard && npm install --silent
 	@echo "✅ install done. Optional Tier-2 ATS: $(PY) -m playwright install chromium"
