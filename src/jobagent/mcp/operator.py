@@ -142,5 +142,7 @@ class Operator:
                                              admin=self.admin, refusals=box.refusals)
             finally:
                 self.store.close()
-        self.run(_close)
-        self._pool.shutdown(wait=True)
+        try:
+            self.run(_close)
+        finally:
+            self._pool.shutdown(wait=True)

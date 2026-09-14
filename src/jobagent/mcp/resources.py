@@ -20,8 +20,10 @@ def _read(op: Operator, name: str, args: dict, *, as_json: bool) -> str:
         # A refusal or a tool error is content, not a protocol failure: the reader sees
         # the same sentence the model would.
         return result.content
-    if as_json and result.data is not None:
-        return json.dumps(result.data, indent=2, default=str)
+    if as_json:
+        if result.data is not None:
+            return json.dumps(result.data, indent=2, default=str)
+        return json.dumps({"error": result.content}, indent=2, default=str)
     return result.content
 
 

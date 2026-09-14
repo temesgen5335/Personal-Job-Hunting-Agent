@@ -646,7 +646,16 @@ def test_the_new_absences_cannot_be_registered():
 def test_no_sender_is_reachable_from_the_operator_tools_either():
     """The reachability walk that guards the chat tools must also start at the operator
     tools and the MCP package — draft_application imports the draft path, which must not
-    drag in a mailer."""
+    drag in a mailer.
+
+    Limitation: this walk models direct and lazy `from jobagent...`/`import jobagent...`
+    statements that appear in each module's own source; it does not follow a package's
+    `__init__.py` side-effect imports (e.g. `jobagent.apply.__init__` importing `flow.py`,
+    which imports `email_send`/smtplib at runtime). So a clean run here proves "no sender
+    is imported by the operator/mcp modules themselves," not "no sender is import-loaded
+    anywhere in the process." The real R2 guarantee is structural, not import-graph-based:
+    no send/approve tool is registered, and `draft_application` only calls
+    `apply.prepare.prepare_application`, which does not import the mailer."""
     import ast
     import pathlib
 
