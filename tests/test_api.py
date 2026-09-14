@@ -549,3 +549,39 @@ def test_purge_is_covered_by_the_route_table_auth_invariant(client):
     assert anon.post("/jobs/purge", json={"below_score": 0.7}).status_code in (401, 403)
     paths = {r.path for r in client.app.routes}
     assert "/jobs/purge" in paths
+
+
+def test_demo_clear_removes_demo_and_updates_stats(tmp_path, monkeypatch):
+    """POST /demo/clear is the 'go live' step: wipe the seeded demo rows and report
+    fresh stats in one round trip, so the caller doesn't need a second /stats fetch."""
+    import sys
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent
+    sys.path.insert(0, str(root / "scripts"))
+    from seed_demo import seed_if_empty
+
+    db = tmp_path / "api.db"
+    seed_if_empty(str(db), jobs=20)
+
+    monkeypatch.setenv("JOBAGENT_DB_PATH", str(db))
+    monkeypatch.setenv("DASHBOARD_PASSWORD", "test-pw")
+    monkeypatch.setenv("JOBAGENT_MASTER_KEY", "")
+    settings = Settings(_env_file=None)
+    app = create_app(settings=settings, profile=Profile(name="Tester"), llm=None, cv_master="x")
+    c = TestClient(app)
+    token = c.post("/auth/login", json={"password": "test-pw"}).json()["token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # demo is visible before the clear.
+    assert c.get("/stats").json()["demo"] is True
+
+    r = c.post("/demo/clear", headers=headers)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["cleared"]["jobs"] == 20
+    assert body["stats"]["demo"] is False
+    assert body["stats"]["first_run"] is True
+
+    # a write without auth is rejected (R19), same as every other write route.
+    assert c.post("/demo/clear").status_code in (401, 403)

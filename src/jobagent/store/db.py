@@ -348,6 +348,7 @@ class Store:
 
         Returns the per-table delete counts.
         """
+        self._ensure_triage()
         demo = "SELECT id FROM jobs WHERE source_job_id LIKE 'demo-%'"
         # FK order: dependents before parents (schema has no ON DELETE CASCADE).
         self.conn.execute(
