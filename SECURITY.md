@@ -3,11 +3,17 @@
 ## Reporting a vulnerability
 
 Email **temesgen5335@gmail.com** with `[SECURITY]` in the subject, or open a
-[GitHub security advisory](https://github.com/temesgen5335/personalAgent/security/advisories/new).
+[GitHub security advisory](https://github.com/temesgen5335/forager/security/advisories/new).
 Please do not open a public issue for anything exploitable.
 
 Expect an acknowledgement within a week. This is a personal project maintained in spare
 time — there is no SLA, and saying so is more useful than implying one.
+
+## Supported versions
+
+Forager is a rolling release. Security fixes land on `main` and in the next tag; only the
+latest release is supported — there are no maintenance branches. If you self-host, track
+the latest release.
 
 ## What this software holds
 

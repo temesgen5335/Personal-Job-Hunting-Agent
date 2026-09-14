@@ -1,0 +1,11 @@
+# Code owners for Forager.
+#
+# GitHub auto-requests review from the owner on any PR touching a matched path.
+# The LAST matching pattern wins, so keep the catch-all first and add narrower
+# rules below it as the project grows collaborators.
+#
+# To make this binding rather than advisory, enable "Require review from Code
+# Owners" in the branch ruleset for `main`.
+
+# Everything is owned by the maintainer by default.
+*       @temesgen5335
