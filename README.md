@@ -3,7 +3,7 @@
 **Find the jobs you can actually land.**
 
 [![CI](https://github.com/temesgen5335/forager/actions/workflows/tests.yml/badge.svg)](https://github.com/temesgen5335/forager/actions/workflows/tests.yml)
-&nbsp;·&nbsp; 1,156 offline tests &nbsp;·&nbsp; self-hosted &nbsp;·&nbsp; runs with zero credentials
+&nbsp;·&nbsp; 821 offline tests &nbsp;·&nbsp; self-hosted &nbsp;·&nbsp; runs with zero credentials
 
 > **Baer** is a bear that never sleeps: it *senses* every board, *hunts* the roles you can
 > actually take, *scavenges* the ones others miss, and *stashes* them in your **den** until
@@ -70,7 +70,7 @@ letters.
 - **Private + self-hosted.** Your den, your machine; credentials encrypted at rest; the
   assistant can read your data but has **no tool that can send, submit, or approve** — a
   structural property, not a promise.
-- **Serious engineering under the hood.** 1,156 offline tests (zero network), CI on every
+- **Serious engineering under the hood.** 821 offline tests (zero network), CI on every
   push, a multi-provider LLM harness with automatic failover, and a run-id **trail** that
   audits every action.
 
@@ -108,6 +108,14 @@ run a tool loop it degrades gracefully: retrieval runs in Python and the model o
 the answer (measured 100% tool-selection / 100% answer-grounding on the free tier).
 
 ---
+
+### Let a coding agent operate it (MCP)
+
+Open the repo in Claude Code (or any MCP client): `.mcp.json` registers the
+`personalagent` server, which exposes the governed toolbox — pull jobs, list and sort
+matches, fit-check, triage, draft, track applications — with every action confirmed by
+you and recorded on the run ledger. It can never send or approve anything (R2).
+`make mcp_check` lists the surface offline. See `AGENTS.md` § 3a.
 
 <details>
 <summary><b>Advanced — manual setup, LLM providers, Docker, deploy, and internals</b></summary>

@@ -26,12 +26,19 @@ from dataclasses import dataclass
 
 from agentkit.llm.types import ToolSpec
 from agentkit.permissions import Confirm, Permission, ToolPolicy
+from agentkit.session import Surface
 
 # Structural exclusions. Names, not policies — see the module docstring and R26.
 EXCLUDED: frozenset[str] = frozenset({
     "approve_and_send", "approve_application", "apply_to_job", "submit_application",
     "send_email", "send_message", "ats_preview", "ats_apply", "run_ats",
     "fill_form", "set_approved",
+    # Added with the operator surface. Deleters destroy data; credential-writers move
+    # secrets; approve_/confirm_pending would let the MODEL confirm on the operator's
+    # behalf — the one thing a client without an elicitation dialog must never be handed
+    # (R29). All absences, never registered.
+    "purge_jobs", "delete_jobs", "prune_jobs", "save_cv", "write_cv",
+    "set_secret", "set_credential", "write_env", "approve_pending", "confirm_pending",
 })
 
 # Rows *shown* by any listing tool. Small on purpose — see the module docstring.
@@ -64,9 +71,13 @@ class Registration:
     spec: ToolSpec
     run: object
     policy: ToolPolicy
+    # Surfaces this tool is offered on; None = every surface. Operator actions declare
+    # {AGENT, CLI} so the chat assistant's per-turn schema cost does not grow with tools
+    # it was never meant to hold (memory.md: 1,047 of ~1,258 tokens per turn are schemas).
+    surfaces: frozenset[Surface] | None = None
 
 
-def build_tools(*, store, settings, links, index=None) -> list[Registration]:
+def build_tools(*, store, settings, links, index=None, deps=None) -> list[Registration]:
     """Bind the tool surface to one request's services.
 
     `links` builds deep links into the dashboard; it is injected so this module has no
@@ -321,7 +332,7 @@ def build_tools(*, store, settings, links, index=None) -> list[Registration]:
 
     ident = {"_required": True, "type": "string"}
 
-    return [
+    chat_tools = [
         Registration(
             ToolSpec("pipeline_health",
                      "Current pipeline state: counts, last ingest time, staleness, recent errors.",
@@ -429,3 +440,7 @@ def build_tools(*, store, settings, links, index=None) -> list[Registration]:
             request_human_action,
             ToolPolicy("request_human_action", Permission.READ, Confirm.NEVER)),
     ]
+    if deps is not None:
+        from jobagent.assistant.operator_tools import build_operator_tools
+        chat_tools += build_operator_tools(store=store, settings=settings, deps=deps, links=links)
+    return chat_tools

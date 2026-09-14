@@ -94,6 +94,32 @@ Assistant sessions ride the existing run ledger (`kind_detail="agent_session"`),
 they are auditable with no new storage — and are filtered out of `list_runs()` by
 default, because a session has no ingest counts and would render as a blank pass.
 
+**The MCP server (`src/jobagent/mcp/`) is the fourth renderer** — CLI, dashboard,
+Telegram, and now a coding agent over stdio (Claude Code, Codex, any MCP client), all
+sharing the one governed toolbox and none of them a second access path. One `Operator`
+owns a Store, a `GuardedToolBox` and an `Auditor` on a single dedicated thread
+(`ThreadPoolExecutor(max_workers=1)`), so the SDK dispatching sync tools onto worker
+threads can never race the gatekeeper or the audit sink (R15) — `pull_jobs` is the
+deliberate exception, running a pass on its own thread with its own Store, coordinated
+by the same advisory lock the API and scripts use, so a long ingest never blocks the
+client's tool-call timeout. Confirmations are SDK **resolvers**: each ACT/ADMIN tool
+carries a hidden `Elicit(card, Approve)` parameter that renders the same
+`render_card()` a human sees on the web or in Telegram and is bound to `sha256(args)`
+by the Gatekeeper underneath, so a retried call with changed arguments is refused
+rather than silently re-approved (R29). `Surface.AGENT` is deliberately **not** in
+`admin_surfaces`: an MCP client "might decide how to handle the elicitation" rather
+than asking a person, so ADMIN (config-changing) tools stay hidden unless the server
+is launched with `--admin` — an operator decision made in the client config, not a
+runtime toggle the model can flip. `personalagent://` resources are served *through*
+`execute()` too, so a resource read is audited exactly like a tool call, never a
+side channel around the gatekeeper. The transport is **stdio only for now**: the
+protocol-level state question (stateless 2026-07-28 vs. session-based 2025-11-25) is
+the client's to make, not ours, but the *application*-level state — session grants,
+pending nonces, the one run id — lives on the server process either way, and a
+client-carried session handle would travel through the model, which is exactly what
+R29 forbids trusting. Streamable HTTP and `--pre-approve` are deferred (see the design
+spec §2 and §5.5–5.6 for the full reasoning).
+
 ## The two-Telegrams rule (most important design point)
 "Telegram" plays two unrelated roles and needs two different mechanisms:
 

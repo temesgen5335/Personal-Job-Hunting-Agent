@@ -43,7 +43,7 @@ jobs:
       # binaries; the ATS tests use an injected FakePage). This is what makes the
       # PDF-render tests run instead of skipping.
       - name: Install
-        run: pip install -e ".[dev,api,llm,telegram,apply]"
+        run: pip install -e ".[dev,api,llm,telegram,apply,mcp]"
 
       - name: Lint (undefined names are runtime NameErrors)
         run: ruff check --select F821 src/ scripts/

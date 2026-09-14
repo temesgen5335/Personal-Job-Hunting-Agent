@@ -97,12 +97,14 @@ Two interfaces, one backend:
 | Ingest gate | Done — age/locations/drop-keywords + source selection, editable in Settings, applied before storage with per-reason drop counts |
 | Dashboard v3 | Done — sidebar shell, health-first Overview, triage queue + focus mode, fit-check states, nudge banner, locked Settings (from the Claude Design project) |
 | agentkit (Phase 2) | **Complete.** Permission tiers (READ/ACT/ADMIN + structural exclusion), argument-bound single-use confirmations, FTS5 knowledge index with per-chunk provenance and trust, fail-closed audit on the run_id spine, and `GuardedToolBox` — same shape as `ToolBox`, so it drops into the Runner and there is no ungoverned path |
-| assistant (Phase 3) | **Complete.** `src/jobagent/assistant/`: 15 in-process tools, R2 exclusions as absences (no send/approve/ats tool exists), `CONFIG_WRITABLE` allow-list with frozen as the computed complement, impact previews dry-run over real stored rows, config snapshots + rollback, and FTS5 search over postings fenced as UNTRUSTED |
+| assistant (Phase 3) | **Complete.** `src/jobagent/assistant/`: 15 chat tools, R2 exclusions as absences (no send/approve/ats tool exists), `CONFIG_WRITABLE` allow-list with frozen as the computed complement, impact previews dry-run over real stored rows, config snapshots + rollback, and FTS5 search over postings fenced as UNTRUSTED |
 | assistant interfaces (Phase 4) | **Complete + extended.** Four surfaces on one mechanism: `scripts/ask.py` (CLI), the `/assistant` dashboard page, a floating chat **bubble on every page** (`components/AssistantBubble.astro`), and Telegram `/ask`. The bubble and the page share one client (`lib/assistant.ts`) and one `localStorage` session, so a conversation continues seamlessly between them until cleared with New chat. Confirmations differ only in renderer — the CLI binds to `sha256(args)`, HTTP and Telegram send only a nonce and keep the arguments server-side. Config writes are refused on chat by construction (`Surface.CHAT` is outside `admin_surfaces`) |
 | assistant hardening (Phase 5) | **Complete.** 10-case eval set scoring tool *selection*, answer *grounding* and *in-bounds* separately; `scripts/eval_assistant.py` with floors; `scripts/llm_doctor.py` explaining the chain, every model card's provenance, and per-task routing offline. Degraded-path conformance run measured **100% / 100% / 100%** |
+| MCP operator server | **Done (v3.8.0).** `src/jobagent/mcp/`: the governed toolbox over stdio for Claude Code / Codex; 14 operator tools (pull_jobs, rematch, list_matches, company_dossier, fit_check, draft_application, set/correct_application_status, annotate_job, setup_status, current_profile, lifecycle, propose/apply_profile_change) hidden from chat via `Registration.surfaces`; confirmations via SDK resolvers with the Gatekeeper nonce underneath; ADMIN hidden unless `--admin`; every call on the run ledger under one session run id. `make mcp_check` |
+| Lifecycle + pass seams | Done (v3.8.0) — `lifecycle.transition()` (two routes + the tool) and `pipeline.run_pass()` (API task, scheduled script, agent); API-triggered passes now write a `run` row tagged `trigger: api` |
 | Profile & preferences | **Editable through the UI.** Identity, background, CV, search preferences, source toggles and the ATS watchlist all persist to a gitignored `data/profile.json` + `data/cv_master.md` overlay (three-layer merge: committed placeholders → legacy `preferences.local.toml` → writable overlay). `/profile` GET+PUT (both auth-gated — PII). Nothing personal is hardcoded; the tree carries placeholders only (R22) |
 | Settings UI | Tabbed: Profile · CV & background · Search & matching · Sources & watchlist · Ingestion · LLM · Telegram · Email. Each tab saves independently against the backend that owns it (`/profile` or `/config`) |
-| Test suite | 759 tests, 53 test files, zero network, injectable fakes throughout |
+| Test suite | 821 tests, 60 test files, zero network, injectable fakes throughout |
 
 ## Assistant cost characteristics (measured Aug 2026)
 
@@ -200,5 +202,5 @@ not-seen-in-60-days would remove 3,417.
 
 - **11,700+** jobs scored in a live run (8,253 fetched in a single pass across 6 adapters)
 - **40** companies in the ATS watchlist (Greenhouse/Lever/Ashby)
-- **759** tests across 53 files — all run offline, no network, no credentials
+- **821** tests across 60 files — all run offline, no network, no credentials
 - **6** LLM providers with automatic failover (3 free, 3 paid)

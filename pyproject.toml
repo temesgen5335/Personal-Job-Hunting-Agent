@@ -21,7 +21,8 @@ telegram = ["telethon>=1.36", "python-telegram-bot>=21.0"]
 apply = ["playwright>=1.44", "fpdf2>=2.7", "pypdf>=4.0"]  # ATS form-fill; fpdf2 renders the tailored CV to PDF, pypdf reads it back to verify the text layer
 llm = ["openai>=1.30", "anthropic>=0.40"]  # openai SDK covers Groq/OpenRouter/OpenAI/Gemini
 api = ["fastapi>=0.110", "uvicorn>=0.29", "cryptography>=42.0"]  # v2 orchestrator + encrypted config store
-dev = ["pytest>=8.0", "ruff>=0.5", "pytest-asyncio>=0.23", "fastapi>=0.110", "cryptography>=42.0"]
+mcp = ["mcp>=2.2,<3"]   # the MCP operator server (src/jobagent/mcp); stdio, dual-era SDK
+dev = ["pytest>=8.0", "ruff>=0.5", "pytest-asyncio>=0.23", "fastapi>=0.110", "cryptography>=42.0", "mcp>=2.2,<3"]
 
 [build-system]
 requires = ["hatchling"]

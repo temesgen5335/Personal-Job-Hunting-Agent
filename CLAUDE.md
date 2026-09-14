@@ -46,6 +46,33 @@ Writes need `DASHBOARD_PASSWORD` set — the API gates every non-GET route (R19)
 
 ---
 
+## 3a. Operating personalAgent as an agent (MCP)
+
+This repo ships an MCP server that lets a coding agent *operate* the system through the
+same governed toolbox the chat assistant uses — every call is permission-checked and
+lands on the run ledger. It is the fourth renderer of one mechanism (CLI, dashboard,
+Telegram, MCP), not a second access path.
+
+1. `make install` — creates `.venv` with the `mcp` extra.
+2. `make setup` (interactive) or the scriptable onboarding from the public-readiness
+   work when it lands — credentials go into `.env` by the user's hand; the MCP never
+   handles them.
+3. Open the repo in Claude Code and approve the project server from `.mcp.json`
+   (Codex: add `[mcp_servers.personalagent] command = ".venv/bin/python"`,
+   `args = ["-m", "jobagent.mcp"]` to `.codex/config.toml`).
+4. Call `setup_status` first, then follow the `operate` prompt
+   (`/mcp__personalagent__operate`): pull → list → research → triage → draft → hand over
+   → track. `make mcp_check` verifies the surface offline.
+
+Boundaries the server enforces, not the prompt: no tool can send, submit, approve, fill
+an ATS form, write a credential, write the CV, or delete postings (R2, R25, R26).
+Confirmations are form-mode elicitations answered by a person and bound to the exact
+arguments (R29); ADMIN (config-changing) tools are hidden unless the server is started
+with `--admin` (`make mcp ADMIN=1`). Code: `src/jobagent/mcp/`; design:
+`docs/superpowers/specs/2026-09-13-mcp-server-design.md`.
+
+---
+
 ## 4. Architecture (one sentence each)
 
 - **FastAPI** (`src/jobagent/api/app.py`) — sole backend; `create_app()` factory for testability.
@@ -70,8 +97,8 @@ Writes need `DASHBOARD_PASSWORD` set — the API gates every non-GET route (R19)
 - **`agentkit/llm/`** — capability-aware multi-LLM. `resolve_card()` answers *what can this model do* (measured entry → family pattern → parameter size → UNKNOWN); `plans_for()` returns a ranked plan queue that **doubles as the failover queue**, so failover can never land on an incapable model; `Runner` walks it, classifying failures before acting on them. Providers live in one `DEFAULT_PROVIDERS` table (Groq/Cerebras/Gemini/GitHub/OpenRouter/SambaNova/Nvidia/Mistral/Llama/Qwen/Pollinations-keyless/custom/OpenAI/Anthropic); `openrouter_free_fanout` fans out over OpenRouter's live `:free` models via **stdlib-only** `openrouter.free_models()` (no new dependency).
 - **Degradation** (`agentkit/llm/strategies.py`) — nine executors behind one signature. `prefetch_single_shot` is the load-bearing one: Python runs the plan, the model only writes the answer, so a model that cannot use a tool *result* still answers correctly.
 - **Governed tools** (`agentkit/guard.py`) — `GuardedToolBox` has the same shape as `ToolBox`, so it drops into the `Runner` and **there is no ungoverned path**. Order inside `execute()` is fixed: audit intent → allow-list → policy → audit decision → run → audit result.
-- **`src/jobagent/assistant/`** — the domain half: 15 in-process tools, `CONFIG_WRITABLE` (frozen is the *computed complement*), impact previews dry-run over real stored rows, FTS5 search over postings marked `Trust.UNTRUSTED`.
-- **Interfaces** — `scripts/ask.py` (CLI), `/assistant` dashboard page, Telegram `/ask`. One confirmation mechanism, three renderers.
+- **`src/jobagent/assistant/`** — the domain half: 15 chat tools + 14 operator tools (`assistant/operator_tools.py`, hidden from chat), `CONFIG_WRITABLE` (frozen is the *computed complement*), impact previews dry-run over real stored rows, FTS5 search over postings marked `Trust.UNTRUSTED`.
+- **Interfaces** — `scripts/ask.py` (CLI), `/assistant` dashboard page, Telegram `/ask`, and the MCP operator server (`src/jobagent/mcp/`). One confirmation mechanism, four renderers.
 - **Assistant eval** (`assistant/evalset.py`) — scores tool *selection*, answer *grounding* and *in-bounds* separately; `scripts/eval_assistant.py --floors` gates them.
 - **Diagnosis** (`scripts/llm_doctor.py`) — offline: the chain, every model card's provenance, and per-task routing with reasons. Reach for this first when the agent misbehaves.
 

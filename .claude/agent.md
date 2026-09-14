@@ -72,6 +72,7 @@ so any developer or AI agent can navigate the codebase and contribute immediatel
 | Policy input carries no text | `SessionContext` holds actor, surface and prior grants — no transcript, no retrieved chunks, no model output (R28). An injection can make the model *request* a config rewrite; it cannot make the gatekeeper approve one, because the gatekeeper cannot read it. |
 | Confirmations bound to arguments | The nonce is server-side and tied to `sha256(args)`. On HTTP and Telegram the client sends *only* the nonce and the arguments never leave the server, which makes confirm-then-swap structurally impossible rather than merely detected. |
 | Assistant sessions share the run spine | A session closes with a `run` event carrying `kind_detail="agent_session"`, so it lands in the existing ledger with no new table — and `list_runs()` filters it out by default, because a session has no ingest counts and would render as a blank pipeline pass. |
+| The MCP is a renderer, not a path | Every MCP tool and resource goes through `GuardedToolBox.execute()` on one owning thread; confirmations are elicitations answered by a person and bound to `sha256(args)` underneath; ADMIN is hidden on the agent surface by default because the server cannot prove a person answered (the same call Telegram got). |
 
 ---
 
@@ -129,6 +130,8 @@ src/jobagent/
 │                            #   get_matches() (list) and purge_jobs() (delete)
 ├── llm_client.py            # MultiLLM: ordered failover chain, OpenAI-compat + Anthropic backends
 ├── secrets_store.py         # Fernet-encrypted config store, masked_view()
+├── lifecycle.py             # transition(): the one function that moves an application (R23)
+├── pipeline.py              # run_pass(): the one ingest → match → summary seam (API, scripts, agent)
 ├── ingestion/
 │   ├── base.py              # BaseAdapter ABC (source, fetch, enabled)
 │   ├── util.py              # strip_html, make_client, split_slugs, get_with_retry (R21)
@@ -141,7 +144,8 @@ src/jobagent/
 │   └── engine.py            # run_matching() — heuristic always, LLM optional
 ├── fit.py                   # FitReport, heuristic_fit(), llm_fit(), assess_fit() — explainable
 ├── apply/
-│   ├── flow.py              # prepare_application() + approve_and_send() (HITL gate)
+│   ├── flow.py              # approve_and_send() (HITL gate)
+│   ├── prepare.py           # prepare_application() — drafts only; shares no module with the sender
 │   ├── generators.py        # tailor_cv(), write_cover_letter(), draft_email(); review_draft()/revise_draft()
 │   ├── verify.py            # ats_report(): pure ATS-parseability check on the CV (always on, read-only)
 │   ├── pdf_verify.py        # optional PDF text-layer extractor (vendored, MIT) for ats_report_for_pdf()
@@ -164,10 +168,19 @@ src/jobagent/
 │   └── assistant_routes.py  # /assistant/ask + two-phase /assistant/confirm/{nonce}
 ├── assistant/               # THE DOMAIN HALF OF THE AGENT HARNESS
 │   ├── manifest.py          # build_assistant() — wires tools+policy+audit+knowledge
-│   ├── tools.py             # 15 in-process tools; EXCLUDED = absences, not gates (R26)
+│   ├── tools.py             # 15 chat tools; EXCLUDED = absences, not gates (R26)
+│   ├── operator_tools.py    # 14 operator tools for the agent/CLI surfaces (pull, draft, status…)
 │   ├── config_policy.py     # CONFIG_WRITABLE allow-list; FROZEN = computed complement
+│   ├── profile_policy.py    # PROFILE_WRITABLE allow-list; identity + CV frozen by complement
+│   ├── sink.py · card.py    # one audit sink, one confirmation card, four renderers
 │   ├── knowledge.py         # postings → FTS5 chunks, all Trust.UNTRUSTED
 │   └── evalset.py           # labeled cases: selection / grounding / in-bounds
+├── mcp/                     # THE MCP OPERATOR SERVER — fourth renderer, stdio
+│   ├── operator.py          # one owning thread for Store + GuardedToolBox + Auditor (R15)
+│   ├── bridge.py            # Registration → MCP tool; policy → annotations; elicited confirmations
+│   ├── resources.py         # personalagent:// resources served THROUGH execute() (audited)
+│   ├── prompts.py           # server instructions + onboard/operate prompts
+│   └── __main__.py          # python -m jobagent.mcp [--admin] [--check]
 └── bot/assistant_bridge.py  # Telegram /ask — logic here, handler stays thin
 
 src/agentkit/                # DOMAIN-AGNOSTIC HARNESS — never imports jobagent (R30)
@@ -254,6 +267,8 @@ config/preferences.toml      # User profile, watchlist, source toggles
    as a total.
 6. If the tool must never exist, add its name to `EXCLUDED` instead of writing it (R26).
 7. Add a case to `assistant/evalset.py` if a real question should reach it.
+8. Declare `surfaces=` on the Registration. Chat tools leave it None; operator actions
+   declare {AGENT, CLI} so Baer's per-turn schema cost does not grow.
 
 **Before adding an ADMIN tool, ask whether the action moves data or grants access.** If
 it does, it belongs in the frozen complement, not `CONFIG_WRITABLE`.

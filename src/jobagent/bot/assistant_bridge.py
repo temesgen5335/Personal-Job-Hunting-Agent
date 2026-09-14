@@ -140,7 +140,8 @@ def ask_blocking(*, db_path: str, settings, question: str,
     from agentkit.llm.tasks import NoCapableModel
     from agentkit.session import Surface
     from jobagent.assistant import build_assistant
-    from jobagent.core.schemas import Event
+    from jobagent.assistant.card import render_card
+    from jobagent.assistant.sink import StoreSink
     from jobagent.store import Store
 
     question = (question or "").strip()
@@ -150,21 +151,17 @@ def ask_blocking(*, db_path: str, settings, question: str,
     store = Store(db_path)
     store.init_schema()
     try:
-        class _Sink:
-            def emit(self, kind, payload):
-                store.log_event(Event(kind=kind, payload=payload))
-
         captured: list[dict] = []
 
         def capture(tool, args, policy):
             """Record the approval and refuse this turn — the answer should arrive now
             rather than hang on a person walking past their phone."""
-            card = _card(tool, args, policy, settings, store)
+            card = render_card(tool, args, policy, settings, store)
             nonce = pending_box.add(tool, args, card)
             captured.append({"nonce": nonce, "tool": tool, "card": card})
             return False
 
-        assistant = build_assistant(store=store, settings=settings, sink=_Sink(),
+        assistant = build_assistant(store=store, settings=settings, sink=StoreSink(store),
                                     surface=Surface.CHAT, ask=capture)
         backends = build_chain(settings)
         if not backends:
@@ -186,37 +183,19 @@ def ask_blocking(*, db_path: str, settings, question: str,
         store.close()
 
 
-def _card(tool: str, args: dict, policy, settings, store) -> str:
-    from jobagent.assistant.config_policy import ConfigRefused, preview
-
-    if tool == "apply_config_change":
-        try:
-            return preview(str(args.get("field", "")), str(args.get("value", "")),
-                           settings, store).render()
-        except ConfigRefused as exc:
-            return f"REFUSED: {exc}"
-    described = getattr(policy, "describes", "") or ""
-    return "\n".join(([described] if described else [])
-                     + [f"{k}: {v}" for k, v in args.items()])
-
-
 def run_confirmed(*, db_path: str, settings, item: dict) -> str:
     """Execute one approved action. Returns the text to show."""
     from agentkit.llm.types import ToolCall
     from agentkit.session import Surface
     from jobagent.assistant import build_assistant
-    from jobagent.core.schemas import Event
+    from jobagent.assistant.sink import StoreSink
     from jobagent.store import Store
 
     store = Store(db_path)
     store.init_schema()
     try:
-        class _Sink:
-            def emit(self, kind, payload):
-                store.log_event(Event(kind=kind, payload=payload))
-
         assistant = build_assistant(
-            store=store, settings=settings, sink=_Sink(), surface=Surface.CHAT,
+            store=store, settings=settings, sink=StoreSink(store), surface=Surface.CHAT,
             # The operator pressed the button. The gatekeeper still mints and redeems
             # its own argument-bound nonce underneath, and CHAT is still outside
             # admin_surfaces, so a config change is refused here even with a press.

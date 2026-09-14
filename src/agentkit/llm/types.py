@@ -49,6 +49,18 @@ class ToolResult:
     name: str
     content: str
     is_error: bool = False
+    # Optional structured payload for hosts that can carry one (an MCP client's
+    # structuredContent). The model path never reads it; `content` stays the contract.
+    data: Any = None
+
+
+@dataclass(frozen=True)
+class ToolOutput:
+    """What a tool may return instead of a bare string: the text a model reads, and an
+    optional JSON-able payload for consumers that can sort and filter."""
+
+    text: str
+    data: Any = None
 
 
 @dataclass(frozen=True)

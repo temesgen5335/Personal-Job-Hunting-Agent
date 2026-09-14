@@ -579,3 +579,107 @@ def test_a_config_write_without_a_master_key_explains_itself_and_snapshots_nothi
     assert not out.content.startswith("RuntimeError")
     snaps = tmp_path / "data" / "config_snapshots"
     assert not snaps.exists() or list(snaps.glob("*.enc")) == []
+
+
+# --- per-surface visibility ---------------------------------------------------------
+
+def test_a_registration_can_be_limited_to_surfaces(store, settings, monkeypatch):
+    """Operator actions (pull, draft, status moves) must not tax every chat turn with
+    their schemas — memory.md measured tool schemas as the dominant per-turn cost — so
+    a registration names the surfaces it is offered on. None means everywhere."""
+    from agentkit.llm.types import ToolSpec
+    from agentkit.permissions import Confirm, Permission, ToolPolicy
+    from jobagent.assistant import manifest
+    from jobagent.assistant.tools import Registration
+
+    empty = {"type": "object", "properties": {}}
+    everywhere = Registration(ToolSpec("everywhere", "d", empty), lambda a: "ok",
+                              ToolPolicy("everywhere", Permission.READ, Confirm.NEVER))
+    agent_only = Registration(ToolSpec("agent_only", "d", empty), lambda a: "ok",
+                              ToolPolicy("agent_only", Permission.READ, Confirm.NEVER),
+                              surfaces=frozenset({Surface.AGENT, Surface.CLI}))
+    monkeypatch.setattr(manifest, "build_tools", lambda **kw: [everywhere, agent_only])
+
+    chat = {s.name for s in assistant(store, settings, surface=Surface.CHAT).toolbox.specs()}
+    agent = {s.name for s in assistant(store, settings, surface=Surface.AGENT).toolbox.specs()}
+    assert chat == {"everywhere"}
+    assert agent == {"everywhere", "agent_only"}
+
+
+# --- one card, one sink, four renderers ---------------------------------------------
+
+def test_the_confirmation_card_is_one_function_for_every_surface(store, settings):
+    """CLI, dashboard, Telegram and MCP must show the operator the same card, so there
+    is one renderer. It is built from validated arguments and computed previews only —
+    never from anything the model wrote (R29)."""
+    from agentkit.permissions import Confirm, Permission, ToolPolicy
+    from jobagent.assistant.card import render_card
+
+    pol = ToolPolicy("triage", Permission.ACT, Confirm.SESSION,
+                     describes="Change which postings appear in your queue")
+    card = render_card("triage", {"job_id": "abc", "state": "dismissed"}, pol, settings, store)
+    assert card.splitlines() == ["Change which postings appear in your queue",
+                                 "job_id: abc", "state: dismissed"]
+
+    frozen = render_card("apply_config_change", {"field": "smtp_host", "value": "x"},
+                         None, settings, store)
+    assert frozen.startswith("REFUSED:") and "frozen" in frozen
+
+
+def test_the_store_sink_writes_events_on_the_shared_table(store):
+    from jobagent.assistant.sink import StoreSink
+
+    StoreSink(store).emit("tool_intent", {"run_id": "r1", "tool": "x", "args": {}})
+    assert store.events_for_run("r1")[0]["kind"] == "tool_intent"
+
+
+# --- operator tools extend the absences, not the escape hatches --------------------
+
+def test_the_new_absences_cannot_be_registered():
+    """Deleters and credential-writers are absences too (R26), enforced at wiring."""
+    from jobagent.assistant.tools import EXCLUDED
+    for name in ("purge_jobs", "delete_jobs", "save_cv", "write_env", "set_secret",
+                 "approve_pending", "confirm_pending"):
+        assert name in EXCLUDED
+
+
+def test_no_sender_is_reachable_from_the_operator_tools_either():
+    """The reachability walk that guards the chat tools must also start at the operator
+    tools and the MCP package — draft_application imports the draft path, which must not
+    drag in a mailer.
+
+    Limitation: this walk models direct and lazy `from jobagent...`/`import jobagent...`
+    statements that appear in each module's own source; it does not follow a package's
+    `__init__.py` side-effect imports (e.g. `jobagent.apply.__init__` importing `flow.py`,
+    which imports `email_send`/smtplib at runtime). So a clean run here proves "no sender
+    is imported by the operator/mcp modules themselves," not "no sender is import-loaded
+    anywhere in the process." The real R2 guarantee is structural, not import-graph-based:
+    no send/approve tool is registered, and `draft_application` only calls
+    `apply.prepare.prepare_application`, which does not import the mailer."""
+    import ast
+    import pathlib
+
+    root = pathlib.Path(__file__).resolve().parent.parent / "src"
+    seen, frontier, offenders = set(), [
+        "jobagent.assistant.operator_tools", "jobagent.mcp.bridge", "jobagent.mcp.operator",
+    ], []
+    while frontier:
+        mod = frontier.pop()
+        if mod in seen:
+            continue
+        seen.add(mod)
+        path = root / (mod.replace(".", "/") + ".py")
+        if not path.exists():
+            continue
+        text = path.read_text()
+        if "smtplib" in text or "SMTP(" in text:
+            offenders.append(mod)
+        for node in ast.walk(ast.parse(text)):
+            if isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+                if node.module.startswith("jobagent"):
+                    frontier.append(node.module)
+            elif isinstance(node, ast.Import):
+                frontier += [a.name for a in node.names if a.name.startswith("jobagent")]
+
+    assert offenders == [], f"a mail sender is reachable from the operator surface: {offenders}"
+    assert len(seen) > 5, f"import walk covered too little to be meaningful: {seen}"
