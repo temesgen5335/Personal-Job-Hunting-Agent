@@ -139,8 +139,8 @@ per-skill `skill_weights`, `remote_scope`, `[sources]`, `[watchlist]`). Edit it 
 **Settings → Profile** (writes a gitignored `data/profile.json`) or in the TOML. Your CV
 text goes in **Settings → CV & background** (`data/cv_master.md`); the PDF at `cv_path` is
 what gets attached to email applications. Layering, lowest priority first:
-`config/preferences.example.toml` → `config/preferences.toml` → `config/preferences.local.toml`
-→ `data/profile.json` (the only layer the UI writes).
+`config/preferences.example.toml` → your gitignored `preferences.toml` → the legacy
+`preferences.local.toml` → `data/profile.json` (the only layer the UI writes).
 
 ### LLM options (all OpenAI-compatible except Anthropic)
 
