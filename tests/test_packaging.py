@@ -156,7 +156,8 @@ def test_no_tracked_file_carries_the_maintainers_identity():
     `data/`, the CV — are *supposed* to hold a real identity; that is the whole design.
     The property is that nothing published does.
 
-    Authorship files are exempt: a licence and a security contact must name a person.
+    Authorship files are exempt: a licence, a security contact, and a code-owners
+    file must name a person — CODEOWNERS is inert without a real GitHub handle.
     """
     import subprocess
 
@@ -164,6 +165,7 @@ def test_no_tracked_file_carries_the_maintainers_identity():
         "LICENSE", "SECURITY.md", "CODE_OF_CONDUCT.md", "CONTRIBUTING.md",
         "CHANGELOG.md", "README.md", "docs/ROADMAP.md",
         ".claude/memory.md", ".claude/context.md",
+        ".github/CODEOWNERS",
     }
     # Deliberately the maintainer's own identifiers. A generic "looks like a name" check
     # would fire on every fixture in the suite and get deleted within a week.
