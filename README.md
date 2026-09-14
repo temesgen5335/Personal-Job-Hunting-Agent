@@ -3,7 +3,7 @@
 **Find the jobs you can actually land.**
 
 [![CI](https://github.com/temesgen5335/forager/actions/workflows/tests.yml/badge.svg)](https://github.com/temesgen5335/forager/actions/workflows/tests.yml)
-&nbsp;·&nbsp; 1,156 offline tests &nbsp;·&nbsp; self-hosted &nbsp;·&nbsp; runs with zero credentials
+&nbsp;·&nbsp; 800+ offline tests &nbsp;·&nbsp; self-hosted &nbsp;·&nbsp; runs with zero credentials
 
 > **Baer** is a bear that never sleeps: it *senses* every board, *hunts* the roles you can
 > actually take, *scavenges* the ones others miss, and *stashes* them in your **den** until
@@ -70,7 +70,7 @@ letters.
 - **Private + self-hosted.** Your den, your machine; credentials encrypted at rest; the
   assistant can read your data but has **no tool that can send, submit, or approve** — a
   structural property, not a promise.
-- **Serious engineering under the hood.** 1,156 offline tests (zero network), CI on every
+- **Serious engineering under the hood.** 800+ offline tests (zero network), CI on every
   push, a multi-provider LLM harness with automatic failover, and a run-id **trail** that
   audits every action.
 
