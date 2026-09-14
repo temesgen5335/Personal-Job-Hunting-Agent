@@ -339,6 +339,39 @@ class Store:
             self.conn.execute("VACUUM")
         return result
 
+    def clear_demo(self, *, run_id: str | None = None) -> dict:
+        """Remove ALL demo-seeded rows — jobs tagged `source_job_id` `demo-*` and every
+        row hanging off them (applications, CV variants, matches, triage, outcome
+        proposals). Unlike `purge_jobs`, which spares any job carrying an application/CV/
+        note, this deletes demo rows UNCONDITIONALLY, because they are synthetic and
+        tagged. It never touches a row without the `demo-` tag.
+
+        Returns the per-table delete counts.
+        """
+        demo = "SELECT id FROM jobs WHERE source_job_id LIKE 'demo-%'"
+        # FK order: dependents before parents (schema has no ON DELETE CASCADE).
+        self.conn.execute(
+            "DELETE FROM outcome_proposals WHERE application_id IN "
+            f"(SELECT id FROM applications WHERE job_id IN ({demo}))")
+        result = {
+            "applications": self.conn.execute(
+                f"DELETE FROM applications WHERE job_id IN ({demo})").rowcount,
+            "cv_variants": self.conn.execute(
+                f"DELETE FROM cv_variants WHERE job_id IN ({demo})").rowcount,
+            "matches": self.conn.execute(
+                f"DELETE FROM matches WHERE job_id IN ({demo})").rowcount,
+            "triage": self.conn.execute(
+                f"DELETE FROM triage WHERE job_id IN ({demo})").rowcount,
+            "jobs": self.conn.execute(
+                "DELETE FROM jobs WHERE source_job_id LIKE 'demo-%'").rowcount,
+        }
+        # Derived index does not notice deletions — drop it so the assistant can't cite
+        # a cleared demo posting; it rebuilds on next use (same reasoning as purge_jobs).
+        self.conn.execute("DROP TABLE IF EXISTS agent_knowledge")
+        self.conn.commit()
+        self.log_event(Event(kind="clear_demo", payload={"run_id": run_id, **result}))
+        return result
+
     def stats(self) -> dict:
         by_source = {
             r["source"]: r["n"]
