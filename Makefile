@@ -18,7 +18,7 @@ PY           := $(VENV)/bin/python
 API_PORT     ?= 8077
 DASH_PORT    ?= 1234
 
-.PHONY: install setup demo quickstart inbox run run_backend run_bot run_dashboard check test pipeline ask upskill doctor eval_assistant docker_up docker_down
+.PHONY: install setup onboard demo quickstart inbox run run_backend run_bot run_dashboard check test pipeline ask upskill doctor eval_assistant docker_up docker_down
 
 install: ## backend + dashboard deps (idempotent)
 	@if command -v uv >/dev/null 2>&1; then \
@@ -33,6 +33,9 @@ install: ## backend + dashboard deps (idempotent)
 
 setup: ## interactive first-run config (.env + your profile) — safe to re-run
 	@$(PY) scripts/setup.py
+
+onboard: ## full guided config (identity, sources, LLM, email, Telegram) — safe to re-run
+	@$(PY) scripts/onboard.py $(if $(CONFIG),--config $(CONFIG)) $(if $(PRINT_ONLY),--print-only)
 
 demo: ## seed a throwaway store so the UI has something to show (never touches yours)
 	@$(PY) scripts/seed_demo.py

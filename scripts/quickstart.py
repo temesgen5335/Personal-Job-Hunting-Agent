@@ -44,7 +44,7 @@ def main() -> None:
     print("    make run        # dashboard on http://127.0.0.1:1234")
     print()
     print("  When you want your own jobs (no keys needed):")
-    print("    make setup      # optional: set your profile")
+    print("    make onboard    # full guided config (profile, sources, LLM, email)")
     print("    make pipeline   # a real, zero-key pull")
 
 
