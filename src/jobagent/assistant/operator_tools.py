@@ -66,7 +66,6 @@ def build_operator_tools(*, store, settings, deps: OperatorDeps, links) -> list[
 
     def setup_status(args: dict) -> str:
         from agentkit.llm.chain import build_chain
-        from jobagent.secrets_store import SECRET_FIELDS
 
         prof = deps.profile()
         s = store.stats()
@@ -120,11 +119,10 @@ def build_operator_tools(*, store, settings, deps: OperatorDeps, links) -> list[
             "skill_weights": p.skill_weights,
             "watchlist": {}, "sources": {},
         }
-        prefs = None
         from jobagent.preferences import load_preferences
         prefs = load_preferences(local_path=deps.local_path, overlay_path=deps.overlay_path)
         data["watchlist"] = {k: getattr(prefs.watchlist, k) for k in ("greenhouse", "lever", "ashby")}
-        data["sources"] = {k: getattr(prefs.sources, k) for k in prefs.sources.model_fields}
+        data["sources"] = {k: getattr(prefs.sources, k) for k in type(prefs.sources).model_fields}
         lines = [
             f"roles: {', '.join(p.target_roles) or '(none set)'}",
             f"skills: {', '.join(p.core_skills) or '(none set)'}",
@@ -232,7 +230,7 @@ def build_operator_tools(*, store, settings, deps: OperatorDeps, links) -> list[
             return f"Refused: {exc}"
 
     def pull_jobs(args: dict) -> str:
-        from jobagent.pipeline import LOCK_NAME, UnknownSource, new_run_id, run_pass
+        from jobagent.pipeline import LOCK_NAME, new_run_id, run_pass
         from jobagent.store import Store
 
         sources = [s.strip() for s in str(args.get("sources") or "").split(",") if s.strip()] or None
