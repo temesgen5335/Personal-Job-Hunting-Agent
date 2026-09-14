@@ -1,6 +1,11 @@
 # CI for the offline test suite. Every test runs without network, credentials, or a
 # browser (R17), so this needs nothing but Python — no secrets are configured here,
 # and a test that starts requiring one should fail loudly in this environment.
+#
+# The suite runs on every Python version the project supports (requires-python >=3.11),
+# with the full extras installed (including `apply`) so the tailored-CV PDF-render path
+# is exercised rather than skipped. A second job builds the Astro dashboard, so a broken
+# dashboard can't reach `main` either.
 name: Tests
 
 on:
@@ -9,22 +14,62 @@ on:
   pull_request:
   workflow_dispatch: {}
 
+# Least-privilege token: nothing in this workflow writes to the repo.
+permissions:
+  contents: read
+
+# One in-flight run per ref; a new push cancels the previous, in-progress run.
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false          # one Python version failing must not mask the others
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python-version }}
           cache: pip
 
+      # `apply` pulls fpdf2/pypdf/playwright (the Python package only — no browser
+      # binaries; the ATS tests use an injected FakePage). This is what makes the
+      # PDF-render tests run instead of skipping.
       - name: Install
-        run: pip install -e ".[dev,api,llm,telegram]"
+        run: pip install -e ".[dev,api,llm,telegram,apply]"
 
       - name: Lint (undefined names are runtime NameErrors)
         run: ruff check --select F821 src/ scripts/
 
       - name: Test
         run: pytest tests/ -q
+
+  dashboard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: dashboard
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: dashboard/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      # SSR build — proves every page and component still compiles. No build-time
+      # env is read (pages fetch the API at request time), so no secrets are needed.
+      - name: Build
+        run: npm run build
