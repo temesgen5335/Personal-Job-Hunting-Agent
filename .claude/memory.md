@@ -1055,3 +1055,35 @@ table, each `Verdict` must be documented, and every path in the module map must 
 **A README for a reusable package is an interface promise, so it belongs under test
 like any other interface.** The same reasoning already covers `tests/test_docs.py`; this
 extends it from "the paths resolve" to "the code runs".
+
+## The MCP is the fourth renderer (Sep 2026)
+
+- The SDK's `ctx.elicit` is **legacy-only** — it only exists on the 2025-11-25,
+  session-based era of the protocol. Resolvers (`Annotated[ElicitationResult[T],
+  Resolve(...)]` on a tool parameter) are **era-neutral**: the same confirmation code
+  path works whether the client speaks the stateless 2026-07-28 revision or the older
+  handshake-based one, which is why the bridge is written against resolvers and not
+  against `ctx.elicit` directly.
+- Sync tool functions run on **AnyIO worker threads**, not the event loop thread — so a
+  naive implementation that let two calls touch the same `Store`/`Gatekeeper`/`Auditor`
+  concurrently would race. A single dedicated thread (`ThreadPoolExecutor(max_workers=1)`)
+  that every governed call is `submit()`ed to makes the concurrency impossible by
+  construction rather than merely undiscovered (R15). `pull_jobs` is the one exception,
+  deliberately: it runs the ingest pass on its own thread with its own `Store`,
+  coordinated by the same advisory lock the API already uses, so a long pass can't block
+  the client's tool-call timeout.
+- **`.mcp.json` relative-command finding (from Task 13's step 7, fixed here):** the
+  committed `command` was the literal `.venv/bin/python`. Claude Code resolves a
+  relative `command` against **its own launch directory**, not the repo root — so
+  opening the project from anywhere but the repo root silently pointed at the wrong (or
+  no) interpreter. Fixed to `${CLAUDE_PROJECT_DIR:-.}/.venv/bin/python`: repo-root-correct
+  whenever Claude Code has set the variable, and falls back to the old (working-directory
+  relative) behavior otherwise. The committed test only asserts
+  `command.endswith("python")`, so this stays green either way — worth knowing if that
+  test is ever tightened.
+- **Step 9 (live verification against a real Claude Code session) is deferred** — a
+  subagent cannot drive an interactive MCP client, so the elicitation dialogs, the
+  `operate` prompt walk, and the `/ask` + `/runs/{id}` cross-check were never exercised
+  against a live model in this pass. No live-run defect is recorded because none was
+  found — none was looked for yet. Do this before trusting the agent surface with a real
+  session.

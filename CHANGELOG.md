@@ -12,6 +12,8 @@ scoped in [docs/VERSIONING.md](docs/VERSIONING.md) — which is worth reading, b
 Planned work is tracked in [docs/ROADMAP.md](docs/ROADMAP.md), grouped by the release
 that will carry it.
 
+## [3.8.0] — 2026-09-14
+
 ### Changed
 - **The pipeline's LLM router is now the reusable agentkit service — no more duplicate.**
   `jobagent/llm_client.py` was a second multi-provider router (its own registry, failover,
@@ -109,6 +111,20 @@ that will carry it.
   set, the CLI also prints a prioritized now/next/later learning plan. Aggregation is pure
   and offline; the plan is the only model-backed step. Borrowed in spirit from
   [MadsLorentzen/ai-job-search](https://github.com/MadsLorentzen/ai-job-search) (MIT).
+- **MCP operator server** (`src/jobagent/mcp/`) — a coding agent (Claude Code, Codex, any
+  MCP client) can operate the system over stdio through the *same governed toolbox* the
+  chat assistant uses: pull jobs, re-run matching, list and sort matches, fit-check, research a
+  company from the store, triage and annotate, draft an application (never send), and move
+  applications along the lifecycle. Confirmations are form-mode elicitations answered by a
+  person, bound to `sha256(args)` by the Gatekeeper underneath; ADMIN tools are hidden unless
+  `--admin`; every call is on the run ledger under one session run id. Fourteen operator tools
+  live in `assistant/operator_tools.py` and are hidden from chat surfaces. `.mcp.json` is
+  committed for Claude Code; `make mcp` / `make mcp_check`. Offline tests drive the server
+  through the SDK's in-memory client.
+- `jobagent.lifecycle.transition()` and `jobagent.pipeline.run_pass()` — the one status-move and
+  the one ingest→match→summary seam; API-triggered passes now appear in `GET /runs`.
+- `PROFILE_WRITABLE` (`assistant/profile_policy.py`) — search preferences the agent may change,
+  with a preview, a snapshot, and identity + CV frozen by complement.
 
 ## [3.7.0] — 2026-08-20
 

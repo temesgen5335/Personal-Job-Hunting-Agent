@@ -297,6 +297,34 @@ already exists), show a 30-day chart on the Overview, and trim the tool set per 
 
 ---
 
+## v3.8.0 — "Operable by agents" ✅ SHIPPED 2026-09-14
+
+- **MCP operator server** (`src/jobagent/mcp/`) — the fourth renderer over the same
+  governed toolbox: a coding agent (Claude Code, Codex, any MCP client) can pull jobs,
+  re-run matching, list and sort matches, fit-check, research a company, triage and
+  annotate, draft an application, and move applications along the lifecycle, over stdio.
+- **One owning thread** — `Operator` serializes every governed call plus the Store onto
+  a single dedicated thread, so the SDK's worker-thread dispatch can never race the
+  gatekeeper or the audit sink (R15); `pull_jobs` runs the pass on its own thread/Store,
+  coordinated by the existing advisory lock.
+- **Elicited confirmations bound to arguments** — ACT/ADMIN tools carry a hidden SDK
+  resolver that renders the same confirmation card the web and Telegram render, bound
+  to `sha256(args)` by the Gatekeeper (R29).
+- **ADMIN hidden by default on the agent surface** — the server cannot prove a person
+  answered an elicitation, so config-changing tools stay hidden unless launched with
+  `--admin`.
+- **Resources through `execute()`** — `personalagent://` resources are audited exactly
+  like tool calls, never a side channel around the gatekeeper.
+- **`lifecycle.transition()` and `pipeline.run_pass()`** — the one status-move and the
+  one ingest→match→summary seam, shared by the API, scripts, and the agent surface.
+- **`PROFILE_WRITABLE`** (`assistant/profile_policy.py`) — search preferences the agent
+  may change, with a preview, a snapshot, and identity + CV frozen by complement.
+- `make mcp` / `make mcp_check`; `.mcp.json` committed for Claude Code.
+- **Deferred**: Streamable HTTP transport (needs its own auth/Origin-validation spec)
+  and `--pre-approve` (pre-populating SESSION grants at launch for an explicit tool list).
+
+---
+
 ## v4.0.0 — breaking
 
 - **Reads gated by default** (item 10). Threat-model change ⇒ MAJOR.

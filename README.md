@@ -37,11 +37,12 @@ Anthropic, or any OpenAI-compatible endpoint). See [docs/ARCHITECTURE.md](docs/A
 A **FastAPI orchestrator** sits between the interfaces and the data: the dashboard
 calls it over REST, and the bot calls the same service layer in-process.
 
-## Status: v3.7 (759 tests passing, CI on every push)
+## Status: v3.8 (896 tests passing, CI on every push)
 Ingestion · matching · Telegram bot (menu + filters) · Tier-1 email apply · Tier-2
 ATS form-fill · multi-LLM failover · FastAPI orchestrator · Astro dashboard with
 config UI, fit-checker, analytics, and pipeline health · VPS + GitHub Actions deploy
-· **an assistant that can answer questions about the whole system**.
+· **an assistant that can answer questions about the whole system** · **an MCP
+server that lets a coding agent operate it**.
 
 **Security note:** every state-changing API route requires a bearer token, so
 `DASHBOARD_PASSWORD` must be set for applying, status edits, fit checks, or config
@@ -175,6 +176,14 @@ system* is frozen and cannot be delegated.
 It degrades rather than failing: on a model too weak to run a tool loop, the retrieval
 runs in Python and the model only writes the answer. Measured on the free tier at
 100% tool-selection and 100% answer-grounding through that degraded path.
+
+### Let a coding agent operate it (MCP)
+
+Open the repo in Claude Code (or any MCP client): `.mcp.json` registers the
+`personalagent` server, which exposes the governed toolbox — pull jobs, list and sort
+matches, fit-check, triage, draft, track applications — with every action confirmed by
+you and recorded on the run ledger. It can never send or approve anything (R2).
+`make mcp_check` lists the surface offline. See `AGENTS.md` § 3a.
 
 ## LLM options (all OpenAI-compatible except Anthropic)
 | Provider | Free tier | Set | Notes |

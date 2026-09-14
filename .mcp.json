@@ -2,7 +2,7 @@
   "mcpServers": {
     "personalagent": {
       "type": "stdio",
-      "command": ".venv/bin/python",
+      "command": "${CLAUDE_PROJECT_DIR:-.}/.venv/bin/python",
       "args": ["-m", "jobagent.mcp"],
       "env": {
         "JOBAGENT_DB_PATH": "${JOBAGENT_DB_PATH:-data/jobagent.db}"
